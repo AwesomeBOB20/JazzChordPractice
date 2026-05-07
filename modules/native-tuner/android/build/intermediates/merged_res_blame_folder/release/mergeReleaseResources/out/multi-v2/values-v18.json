@@ -1,0 +1,34 @@
+{
+    "logs": [
+        {
+            "outputFile": "expo.modules.nativetuner.native-tuner-release-3:/values-v18/values-v18.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\antho\\.gradle\\caches\\8.10.2\\transforms\\5d80bd293144759c0cbb4fa9a5d370c5\\transformed\\appcompat-1.6.1\\res\\values-v18\\values-v18.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "48",
+                        "endOffsets": "99"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "expo.modules.nativetuner.native-tuner-mergeReleaseResources-1:/values-v18/values-v18.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\antho\\.gradle\\caches\\8.10.2\\transforms\\5d80bd293144759c0cbb4fa9a5d370c5\\transformed\\appcompat-1.6.1\\res\\values-v18\\values-v18.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "48",
+                        "endOffsets": "99"
+                    }
+                }
+            ]
+        }
+    ]
+}

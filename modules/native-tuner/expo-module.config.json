@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["NativeTunerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.nativetuner.NativeTunerModule"]
+  }
+}

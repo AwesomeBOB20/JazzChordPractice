@@ -1,0 +1,1 @@
+So no code just tell me how we should approach all these changes, I know one by one will be the most accurate. Our strategy should include giving me old and new code to highlight and replace, always asking me for files for the next change so you always give me accurate code, telling me at the end how to test or check if the change  

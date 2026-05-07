@@ -1,0 +1,213 @@
+import { CH, SCALES, CHORD_SCALE_MAP, NOTE_SHARP, NOTE_FLAT, spellInterval, formatDegree } from '@shared/theory/musicTheory';
+import { findTriads } from '@shared/guitar/voicings';
+import { formatChordSymbol } from '@shared/theory/core/nomenclature';
+import { UnifiedVoicing } from '@shared/types/models';
+
+const TRIAD_FULL_NAMES: Record<string, string> = {
+  maj:  'Major', min:  'Minor', aug:  'Augmented', dim:  'Diminished', sus4: 'Sus4', sus2: 'Sus2',
+};
+
+export function buildPianoVoicings(rootSemi: number, chordType: string, octave: number = 4, selectedScaleId: string | null = null, namingMode: 'sharp' | 'flat' = 'sharp') {
+  const ch = CH[chordType];
+  const emptyRes = { triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] };
+  if (!ch) return emptyRes;
+
+  // Base midi is typically C-1 = 0. Therefore Octave 4 C = 60.
+  // We add 12 to shift the internal representation to standard MIDI pitch values.
+  const rootMidi = ((octave + 1) * 12) + rootSemi; 
+  const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[rootSemi];
+  const defaultChordLabel = formatChordSymbol(ch.l ? `${rootNoteName} ${ch.l}` : rootNoteName);
+
+  const triads: UnifiedVoicing[] = [];
+  const shells: UnifiedVoicing[] = [];
+  const drop2: UnifiedVoicing[] = [];
+  const drop3: UnifiedVoicing[] = [];
+  const drop2and4: UnifiedVoicing[] = [];
+
+  // Helper to standardise all outputs
+  const createVoicing = (name: string, rawNotes: number[], customLabel?: string, overrideRoles?: string[], overrideFormulas?: string[]): UnifiedVoicing => {
+    let notes = [...rawNotes];
+    
+    // OCTAVE LOGIC FIX: Prevent symmetrical triads or high inversions from running away up the keyboard.
+    // This forces the bass note of EVERY generated voicing to stay anchored to the root's octave set.
+    while (notes[0] >= rootMidi + 12) notes = notes.map(n => n - 12);
+    while (notes[0] < rootMidi - 12)  notes = notes.map(n => n + 12);
+
+    const roles: string[] = [];
+    const formulas: string[] = [];
+    notes.forEach((midi, i) => {
+      if (overrideRoles && overrideFormulas) {
+        roles.push(overrideRoles[i]);
+        formulas.push(overrideFormulas[i]);
+      } else {
+        const pc = midi % 12;
+        const idx = ch.iv.findIndex(iv => (rootSemi + iv) % 12 === pc);
+        roles.push(idx !== -1 ? ch.r[idx] : '');
+        formulas.push(idx !== -1 && ch.f ? ch.f[idx] : '');
+      }
+    });
+    return { name, chordLabel: customLabel || defaultChordLabel, notes, roles, formulas };
+  };
+
+  const getFormulaStack = (notesArray: number[]) => {
+    return notesArray.map(midi => {
+      const pc = midi % 12;
+      const idx = ch.iv.findIndex(iv => (rootSemi + iv) % 12 === pc);
+      if (idx !== -1) {
+        const f = ch.f ? ch.f[idx] : ch.r[idx];
+        return f.replace(/root/gi, 'R').replace(/nd|rd|th/gi, '');
+      }
+      return '?';
+    }).join('-');
+  };
+
+  // 1. Superimposed Triads
+  const rhRootMidi = rootMidi;
+  const baseChord = ch.iv.slice(0, 4); 
+  const triadsList = findTriads(ch);
+  const triadInvNames = ['Root Position', '1st Inversion', '2nd Inversion'];
+
+  for (const triad of triadsList) {
+    const triadBaseMidi = rhRootMidi + triad.rootInterval;
+    let currentInv = triad.triadDef.iv.map(iv => triadBaseMidi + iv);
+
+    for (let i = 1; i < currentInv.length; i++) {
+      while (currentInv[i] <= currentInv[i - 1]) currentInv[i] += 12;
+    }
+
+    const formulaIdx = ch.r.indexOf(triad.rootRole);
+    const formulaForTriadRoot = ch.f ? ch.f[formulaIdx] : triad.rootRole;
+    const spelledRoot = spellInterval(rootSemi, formulaForTriadRoot, namingMode === 'flat');
+    const typeName = TRIAD_FULL_NAMES[triad.triadType] ?? triad.triadType;
+    const chordLabel = formatChordSymbol((triad.rootRole === 'root' && rootNoteName) ? `${rootNoteName} ${typeName}` : `${spelledRoot} ${typeName}`);
+
+    let triadRoles = [...triad.parentRoles];
+
+    for (let i = 0; i < 3; i++) {
+      triads.push(createVoicing(triadInvNames[i], [...currentInv], chordLabel));
+      if (i < 2) {
+        currentInv = [...currentInv];
+        currentInv[0] += 12;
+        currentInv.sort((a, b) => a - b);
+        const r0 = triadRoles.shift();
+        if (r0) triadRoles.push(r0);
+      }
+    }
+  }
+
+  // Generate Drop 2, Drop 3, and Drop 2 & 4
+  
+  // Pass 1: Standard Rooted Voicings (R-3-5-7)
+  if (baseChord.length >= 4) {
+    let dInv = baseChord.map(iv => rhRootMidi + iv);
+    dInv.sort((a,b) => a - b);
+    for (let i = 0; i < 4; i++) {
+      const d2 = [dInv[2] - 12, dInv[0], dInv[1], dInv[3]];
+      const d2Sorted = d2.sort((a,b) => a - b);
+      drop2.push(createVoicing(getFormulaStack(d2Sorted), d2Sorted));
+      
+      const d3 = [dInv[1] - 12, dInv[0], dInv[2], dInv[3]];
+      const d3Sorted = d3.sort((a,b) => a - b);
+      drop3.push(createVoicing(getFormulaStack(d3Sorted), d3Sorted));
+
+      const d24 = [dInv[0] - 12, dInv[2] - 12, dInv[1], dInv[3]];
+      const d24Sorted = d24.sort((a,b) => a - b);
+      drop2and4.push(createVoicing(getFormulaStack(d24Sorted), d24Sorted));
+
+      dInv = [...dInv];
+      dInv[0] += 12;
+      dInv.sort((a,b) => a - b);
+    }
+  }
+
+  // Pass 2: Rootless Substitutions for Extended Chords (3-5-7-9)
+  const dHas3 = ch.iv.find(iv => iv === 3 || iv === 4);
+  const dHas5 = ch.iv.find(iv => iv === 6 || iv === 7 || iv === 8);
+  const dHas7 = ch.iv.find(iv => iv === 10 || iv === 11 || iv === 9);
+  const dHas9 = ch.iv.find(iv => iv === 13 || iv === 14 || iv === 15);
+  const dHas6 = ch.iv.find(iv => iv === 9 && !chordType.includes('7'));
+
+  let d2base: number[] | null = null;
+  if (ch.iv.length > 4 && dHas3 !== undefined && dHas7 !== undefined && dHas9 !== undefined) {
+    d2base = [dHas3, dHas5 !== undefined ? dHas5 : 7, dHas7, dHas9 % 12].sort((a,b)=>a-b);
+  } else if (chordType.includes('69') && dHas3 !== undefined && dHas5 !== undefined && dHas6 !== undefined && dHas9 !== undefined) {
+    d2base = [dHas3, dHas5, dHas6, dHas9 % 12].sort((a,b)=>a-b);
+  }
+
+  const ROOTLESS_SUB_MAP: Record<string, { type: string, rootFormula: string }> = {
+    'maj9': { type: 'min7', rootFormula: '3' },
+    'maj11': { type: 'min7', rootFormula: '3' },
+    'maj13': { type: 'min7', rootFormula: '3' },
+    'maj69': { type: 'min7', rootFormula: '6' },
+    'min9': { type: 'maj7', rootFormula: 'b3' },
+    'min11': { type: 'maj7', rootFormula: 'b3' },
+    'min13': { type: 'maj7', rootFormula: 'b3' },
+    'min69': { type: 'hdim7', rootFormula: '6' },
+    'dom9': { type: 'hdim7', rootFormula: '3' },
+    'dom11': { type: 'hdim7', rootFormula: '3' },
+    'dom13': { type: 'hdim7', rootFormula: '3' },
+    'dom7b9': { type: 'fdim7', rootFormula: '3' },
+    'dom13b9': { type: 'fdim7', rootFormula: '3' },
+  };
+
+  let subChordLabel: string | undefined = undefined;
+  const subDef = ROOTLESS_SUB_MAP[chordType];
+  if (subDef) {
+    const subRootName = spellInterval(rootSemi, subDef.rootFormula, namingMode === 'flat');
+    subChordLabel = formatChordSymbol(`${subRootName}${subDef.type}`);
+  }
+
+  if (d2base && d2base.length >= 4) {
+    let dInv = d2base.map(iv => rhRootMidi + iv);
+    dInv.sort((a, b) => a - b);
+    for (let i = 0; i < 4; i++) {
+      const d2 = [dInv[2] - 12, dInv[0], dInv[1], dInv[3]];
+      const d2Sorted = d2.sort((a,b) => a - b);
+      drop2.push(createVoicing(getFormulaStack(d2Sorted), d2Sorted, subChordLabel));
+      
+      const d3 = [dInv[1] - 12, dInv[0], dInv[2], dInv[3]];
+      const d3Sorted = d3.sort((a,b) => a - b);
+      drop3.push(createVoicing(getFormulaStack(d3Sorted), d3Sorted, subChordLabel));
+
+      const d24 = [dInv[0] - 12, dInv[2] - 12, dInv[1], dInv[3]];
+      const d24Sorted = d24.sort((a,b) => a - b);
+      drop2and4.push(createVoicing(getFormulaStack(d24Sorted), d24Sorted, subChordLabel));
+
+      dInv = [...dInv];
+      dInv[0] += 12;
+      dInv.sort((a,b) => a - b);
+    }
+  }
+
+  // 2. Shell Voicings
+  const has7th = ch.iv.find(iv => iv === 10 || iv === 11 || iv === 9); 
+  const has3rd = ch.iv.find(iv => iv === 3 || iv === 4);
+  const has5th = ch.iv.find(iv => iv === 6 || iv === 7 || iv === 8);
+  const has9th = ch.iv.find(iv => iv === 13 || iv === 14 || iv === 15);
+  
+  if (ch.iv.length >= 4 && has7th !== undefined) {
+    const getFmt = (val: number | undefined) => {
+      if (val === undefined) return '';
+      const idx = ch.iv.indexOf(val);
+      return (idx !== -1 && ch.f && ch.f[idx]) ? formatDegree(ch.f[idx]) : '';
+    };
+    
+    const f3 = getFmt(has3rd), f5 = getFmt(has5th), f7 = getFmt(has7th), f9 = getFmt(has9th);
+
+    if (has3rd !== undefined) {
+       shells.push(createVoicing(`R-${f3}-${f7}`, [rootMidi, rootMidi + has3rd, rootMidi + has7th].sort((a,b)=>a-b)));
+       shells.push(createVoicing(`R-${f7}-${f3}`, [rootMidi, rootMidi + has7th, rootMidi + has3rd + 12].sort((a,b)=>a-b)));
+       if (has9th !== undefined) {
+         shells.push(createVoicing(`R-${f7}-${f9}`, [rootMidi, rootMidi + has7th, rootMidi + (has9th % 12) + 12].sort((a,b)=>a-b)));
+         shells.push(createVoicing(`R-${f3}-${f7}-${f9}`, [rootMidi, rootMidi + has3rd, rootMidi + has7th, rootMidi + (has9th % 12) + 12].sort((a,b)=>a-b)));
+       }
+    } else if (has5th !== undefined) {
+       shells.push(createVoicing(`R-${f5}-${f7}`, [rootMidi, rootMidi + has5th, rootMidi + has7th].sort((a,b)=>a-b)));
+       if (has9th !== undefined) {
+         shells.push(createVoicing(`R-${f5}-${f7}-${f9}`, [rootMidi, rootMidi + has5th, rootMidi + has7th, rootMidi + (has9th % 12) + 12].sort((a,b)=>a-b)));
+       }
+    }
+  }
+
+  return { triads, shells, drop2, drop3, drop2and4 };
+}

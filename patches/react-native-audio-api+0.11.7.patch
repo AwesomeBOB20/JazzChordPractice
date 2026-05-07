@@ -1,0 +1,43 @@
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt
+index 9b10289..9a121cc 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt
+@@ -31,14 +31,14 @@ class AudioAPIModule(
+ 
+   private lateinit var mHybridData: HybridData
+ 
+-  @OptIn(markerClass = [FrameworkAPI::class])
++  @OptIn(FrameworkAPI::class)
+   private external fun initHybrid(
+     workletsModule: Any?,
+     jsContext: Long,
+     callInvoker: CallInvokerHolderImpl,
+   ): HybridData
+ 
+-  @OptIn(markerClass = [FrameworkAPI::class])
++  @OptIn(FrameworkAPI::class)
+   private external fun injectJSIBindings()
+ 
+   external fun invokeHandlerWithEventNameAndEventBody(
+@@ -54,7 +54,7 @@ class AudioAPIModule(
+     }
+   }
+ 
+-  @OptIn(markerClass = [FrameworkAPI::class])
++  @OptIn(FrameworkAPI::class)
+   override fun install(): Boolean {
+     val context = reactContext.get() ?: return false
+     context.assertOnJSQueueThread()
+diff --git a/node_modules/react-native-audio-api/android/src/oldarch/NativeAudioAPIModuleSpec.java b/node_modules/react-native-audio-api/android/src/oldarch/NativeAudioAPIModuleSpec.java
+index 9699463..f0b3b97 100644
+--- a/node_modules/react-native-audio-api/android/src/oldarch/NativeAudioAPIModuleSpec.java
++++ b/node_modules/react-native-audio-api/android/src/oldarch/NativeAudioAPIModuleSpec.java
+@@ -101,4 +101,8 @@ public abstract class NativeAudioAPIModuleSpec extends ReactContextBaseJavaModul
+   @ReactMethod
+   @DoNotStrip
+   public abstract void isNotificationActive(String key, Promise promise);
++
++  @ReactMethod(isBlockingSynchronousMethod = true)
++  @DoNotStrip
++  public abstract String resolveAndroidReleaseAsset(String assetPath);
+ }

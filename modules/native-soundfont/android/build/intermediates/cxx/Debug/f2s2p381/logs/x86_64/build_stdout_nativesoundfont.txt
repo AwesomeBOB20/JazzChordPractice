@@ -1,0 +1,3 @@
+ninja: Entering directory `C:\Users\antho\JazzChordPractice\modules\native-soundfont\android\.cxx\Debug\f2s2p381\x86_64'
+[1/2] Building CXX object CMakeFiles/nativesoundfont.dir/native-soundfont.cpp.o
+[2/2] Linking CXX shared library C:\Users\antho\JazzChordPractice\modules\native-soundfont\android\build\intermediates\cxx\Debug\f2s2p381\obj\x86_64\libnativesoundfont.so
