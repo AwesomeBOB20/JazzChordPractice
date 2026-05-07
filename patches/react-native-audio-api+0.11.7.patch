@@ -42,25 +42,39 @@ index 9699463..f0b3b97 100644
 +  public abstract String resolveAndroidReleaseAsset(String assetPath);
  }
 diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp
+index 822335c..605fff8 100644
 --- a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp
 +++ b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp
 @@ -153,7 +153,7 @@ Result<std::string, std::string> AndroidAudioRecorder::start(const std::string &
+ 
    state_.store(RecorderState::Recording, std::memory_order_release);
 -  return Result<std::string, std::string>::Ok(std::format("file://{}", filePath_));
 +  return Result<std::string, std::string>::Ok("file://" + filePath_);
  }
  
+ /// @brief Stops the audio stream and finalizes any output (file writing, callback, adapter node).
 @@ -163,7 +163,7 @@ Result<std::tuple<std::string, double, double>, std::string> AndroidAudioRecorde
    std::scoped_lock stopLock(callbackMutex_, fileWriterMutex_, adapterNodeMutex_);
  
 -  std::string filePath = std::format("file://{}", filePath_);
 +  std::string filePath = "file://" + filePath_;
    double outputFileSize = 0.0;
+   double outputDuration = 0.0;
 diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp
+index bd04c38..baed985 100644
 --- a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp
 +++ b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp
+@@ -4,8 +4,9 @@
+ #include <audioapi/utils/AudioFileProperties.h>
+ #include <chrono>
+-#include <filesystem>
+-#include <format>
++#include <ctime>
++#include <filesystem>
+ #include <iostream>
+ #include <memory>
+ #include <string>
 @@ -34,7 +34,11 @@ Result<NoneType, std::string> createDirectoryIfNotExists(const std::string &dire
- 
  std::string getTimestampString() {
    auto tNow = std::chrono::system_clock::now();
 -  return std::format("{:%Y%m%d_%H%M%S}", std::chrono::floor<std::chrono::seconds>(tNow));
@@ -70,7 +84,8 @@ diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/a
 +  return std::string(buf);
  }
  
-@@ -68,14 +72,9 @@ Result<std::string, std::string> getFilePath(
+ std::string getDirectory(const std::shared_ptr<AudioFileProperties> &properties) {
+@@ -67,10 +71,10 @@ Result<std::string, std::string> getFilePath(
      const std::string &fileNameOverride) {
    std::string directory = getDirectory(properties);
 -  std::string subDirectory = std::format("{}/{}", directory, properties->subDirectory);
@@ -84,18 +99,12 @@ diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/a
      return Result<std::string, std::string>::Err(result.unwrap_err());
    }
  
--  auto filePath = fileNameOverride.length() > 0
+   auto filePath = fileNameOverride.length() > 0
 -      ? std::format("{}/{}.{}", subDirectory, fileNameOverride, extension)
 -      : std::format(
--          "{}/{}_{}.{}",
--          subDirectory,
--          properties->fileNamePrefix,
--          fileTimestamp,
--          extension);
--
-+  auto filePath = fileNameOverride.length() > 0
+-            "{}/{}_{}.{}", subDirectory, properties->fileNamePrefix, fileTimestamp, extension);
 +      ? subDirectory + "/" + fileNameOverride + "." + extension
 +      : subDirectory + "/" + properties->fileNamePrefix + "_" + fileTimestamp + "." + extension;
-+
+ 
    return Result<std::string, std::string>::Ok(filePath);
  }
