@@ -1,3 +1,4 @@
 # Force LF line endings for files that run on Linux CI/EAS builds
-*.patch text eol=lf
-*.sh    text eol=lf
+*.patch  text eol=lf
+*.sh     text eol=lf
+eas.json text eol=lf
