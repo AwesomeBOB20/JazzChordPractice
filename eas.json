@@ -15,6 +15,9 @@
       "autoIncrement": true
     }
   },
+  "hooks": {
+    "postInstall": "bash scripts/patch-audio-api.sh"
+  },
   "submit": {
     "production": {}
   }

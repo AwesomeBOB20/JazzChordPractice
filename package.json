@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "postinstall": "patch-package",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -44,7 +43,6 @@
   },
   "devDependencies": {
     "@types/react": "~18.3.0",
-    "patch-package": "^8.0.1",
     "typescript": "~5.3.3"
   },
   "private": true
