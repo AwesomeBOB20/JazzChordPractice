@@ -17,7 +17,8 @@
         "backgroundColor": "#0f0f1e"
       },
       "package": "com.awesomebob20.jazzchordpractice",
-      "versionCode": 1
+      "versionCode": 1,
+      "minSdkVersion": 26
     },
     "extra": {
       "eas": {
