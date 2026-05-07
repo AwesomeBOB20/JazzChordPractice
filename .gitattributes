@@ -1,0 +1,2 @@
+# Force LF line endings for patch files so they apply correctly in Linux CI/EAS builds
+*.patch text eol=lf
