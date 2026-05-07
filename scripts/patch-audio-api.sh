@@ -30,7 +30,7 @@ sed -i 's/#include <filesystem>/#include <ctime>\n#include <filesystem>/' "$FILE
 # Replace std::format("{}/{}", directory, properties->subDirectory)
 sed -i 's/std::format("{}\/{}", directory, properties->subDirectory)/directory + "\/" + properties->subDirectory/g' "$FILEOPTS"
 
-# Use python3 for multi-line replacements in FileOptions.cpp and AudioAPIModule.kt
+# Use python3 for multi-line replacements
 python3 - "$FILEOPTS" "$KTMODULE" <<'PYEOF'
 import sys, re
 
@@ -68,17 +68,17 @@ print("FileOptions.cpp patched successfully")
 with open(ktmodule_path, 'r') as f:
     content = f.read()
 
-# Fix 1: Remove @OptIn(markerClass = [FrameworkAPI::class]) annotations entirely.
-# FrameworkAPI is not an OptIn marker class in this Kotlin version.
-content = re.sub(r'\s*@OptIn\(markerClass\s*=\s*\[FrameworkAPI::class\]\)\n', '\n', content)
+# Fix 1: Remove all @OptIn(FrameworkAPI::class) annotations (both standalone lines
+# and the class-level one). FrameworkAPI is not an @RequiresOptIn marker in this
+# version of React Native, so the annotation is invalid.
+content = re.sub(r'@OptIn\(FrameworkAPI::class\)\n', '', content)
 
-# Fix 2: Remove the resolveAndroidReleaseAsset override method which overrides nothing.
-# Match the entire method block.
-content = re.sub(
-    r'\n\s*override fun resolveAndroidReleaseAsset\([^)]*\)[^{]*\{[^}]*\}\n',
-    '\n',
-    content,
-    flags=re.DOTALL
+# Fix 2: Change "override fun resolveAndroidReleaseAsset" to just "fun resolveAndroidReleaseAsset"
+# The Java abstract base class (NativeAudioAPIModuleSpec) doesn't declare this method
+# in the version being compiled, so "override" causes a compile error.
+content = content.replace(
+    'override fun resolveAndroidReleaseAsset(',
+    'fun resolveAndroidReleaseAsset('
 )
 
 with open(ktmodule_path, 'w') as f:
