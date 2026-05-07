@@ -41,3 +41,61 @@ index 9699463..f0b3b97 100644
 +  @DoNotStrip
 +  public abstract String resolveAndroidReleaseAsset(String assetPath);
  }
+diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp
+--- a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp
++++ b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/AndroidAudioRecorder.cpp
+@@ -153,7 +153,7 @@ Result<std::string, std::string> AndroidAudioRecorder::start(const std::string &
+   state_.store(RecorderState::Recording, std::memory_order_release);
+-  return Result<std::string, std::string>::Ok(std::format("file://{}", filePath_));
++  return Result<std::string, std::string>::Ok("file://" + filePath_);
+ }
+ 
+@@ -163,7 +163,7 @@ Result<std::tuple<std::string, double, double>, std::string> AndroidAudioRecorde
+   std::scoped_lock stopLock(callbackMutex_, fileWriterMutex_, adapterNodeMutex_);
+ 
+-  std::string filePath = std::format("file://{}", filePath_);
++  std::string filePath = "file://" + filePath_;
+   double outputFileSize = 0.0;
+diff --git a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp
+--- a/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp
++++ b/node_modules/react-native-audio-api/android/src/main/cpp/audioapi/android/core/utils/FileOptions.cpp
+@@ -34,7 +34,11 @@ Result<NoneType, std::string> createDirectoryIfNotExists(const std::string &dire
+ 
+ std::string getTimestampString() {
+   auto tNow = std::chrono::system_clock::now();
+-  return std::format("{:%Y%m%d_%H%M%S}", std::chrono::floor<std::chrono::seconds>(tNow));
++  std::time_t tNowT = std::chrono::system_clock::to_time_t(tNow);
++  char buf[32];
++  std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", std::localtime(&tNowT));
++  return std::string(buf);
+ }
+ 
+@@ -68,14 +72,9 @@ Result<std::string, std::string> getFilePath(
+     const std::string &fileNameOverride) {
+   std::string directory = getDirectory(properties);
+-  std::string subDirectory = std::format("{}/{}", directory, properties->subDirectory);
++  std::string subDirectory = directory + "/" + properties->subDirectory;
+   std::string fileTimestamp = getTimestampString();
+   std::string extension = getFileExtension(properties);
+ 
+   auto result = createDirectoryIfNotExists(subDirectory);
+ 
+   if (!result.is_ok()) {
+     return Result<std::string, std::string>::Err(result.unwrap_err());
+   }
+ 
+-  auto filePath = fileNameOverride.length() > 0
+-      ? std::format("{}/{}.{}", subDirectory, fileNameOverride, extension)
+-      : std::format(
+-          "{}/{}_{}.{}",
+-          subDirectory,
+-          properties->fileNamePrefix,
+-          fileTimestamp,
+-          extension);
+-
++  auto filePath = fileNameOverride.length() > 0
++      ? subDirectory + "/" + fileNameOverride + "." + extension
++      : subDirectory + "/" + properties->fileNamePrefix + "_" + fileTimestamp + "." + extension;
++
+   return Result<std::string, std::string>::Ok(filePath);
+ }
