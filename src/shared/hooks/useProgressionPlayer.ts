@@ -84,7 +84,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
   // Priority: displayed diagram voicing → theory fallback.
   // Handles all four voicing formats produced by the progression screen:
   //   guitar  — { frets: (number|string|{fret})[] }  (diagramVoicings)
-  //   guitar  — { notes: {fret,stringIdx,...}[]    }  (diagramShapes)
+  //   guitar  — { notes: {fret,stringIdx,...}[]    }  (diagramShapes - ScaleNote[])
   //   piano   — { notes: number[]                  }  (pianoVoicings / pianoShapes)
   const resolveMidiNotes = (chord: any, voicing: any, instrument: string, octave: number): number[] => {
     const GS = [40, 45, 50, 55, 59, 64]; // guitar open-string MIDI values
@@ -96,23 +96,25 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
         const midi = (voicing.frets as any[]).map((f: any, idx: number) => {
           if (idx >= 6 || f === null || f === undefined) return null;
           const fretVal = typeof f === 'object' ? f.fret : f;
-          if (fretVal === null || (typeof fretVal === 'string' && fretVal.toLowerCase() === 'x')) return null;
+          if (fretVal === null || fretVal === undefined) return null;
+          if (typeof fretVal === 'string' && fretVal.toLowerCase() === 'x') return null;
           const parsed = parseInt(String(fretVal), 10);
           return isNaN(parsed) || parsed < 0 ? null : GS[idx] + parsed;
         }).filter(validMidi);
         if (midi.length > 0) return midi;
       }
 
-      // ── Guitar shapes: notes format ── { notes: {fret,stringIdx,...}[] }
+      // ── Guitar shapes: notes format ── { notes: {fret,stringIdx,...}[] } (ScaleNote[])
       if (instrument === 'guitar' && voicing.notes && Array.isArray(voicing.notes)) {
         const midi = (voicing.notes as any[]).map((n: any) => {
           if (!n) return null;
           // Already-computed MIDI value
           if (typeof n === 'number' && validMidi(n)) return n;
           if (n.midi !== undefined) { const m = parseInt(String(n.midi), 10); return validMidi(m) ? m : null; }
-          // Fret + string index
+          // ScaleNote format: { stringIdx, fret, role, formula, noteName, isChordTone }
           const fretVal = typeof n === 'object' ? n.fret : n;
-          if (fretVal === null || (typeof fretVal === 'string' && fretVal.toLowerCase() === 'x')) return null;
+          if (fretVal === null || fretVal === undefined) return null;
+          if (typeof fretVal === 'string' && fretVal.toLowerCase() === 'x') return null;
           const parsed = parseInt(String(fretVal), 10);
           const strIdx = typeof n === 'object' && n.stringIdx !== undefined ? Number(n.stringIdx) : -1;
           if (isNaN(parsed) || parsed < 0 || strIdx < 0 || strIdx > 5) return null;
@@ -124,8 +126,20 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
 
       // ── Piano: notes format ── { notes: number[] }
       if (instrument === 'piano' && voicing.notes && Array.isArray(voicing.notes)) {
-        const midi = (voicing.notes as any[]).filter(validMidi) as number[];
-        if (midi.length > 0) return midi;
+        // Check if notes are numbers (pianoVoicings/pianoShapes) or objects (ScaleNote[])
+        const firstNote = (voicing.notes as any[])[0];
+        if (typeof firstNote === 'number') {
+          const midi = (voicing.notes as any[]).filter(validMidi) as number[];
+          if (midi.length > 0) return midi;
+        } else if (typeof firstNote === 'object' && firstNote !== null) {
+          // Handle ScaleNote[] format for piano shapes (though unlikely)
+          const midi = (voicing.notes as any[]).map((n: any) => {
+            if (!n) return null;
+            if (n.midi !== undefined) { const m = parseInt(String(n.midi), 10); return validMidi(m) ? m : null; }
+            return null;
+          }).filter(validMidi);
+          if (midi.length > 0) return midi;
+        }
       }
     }
 
@@ -152,7 +166,11 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
       const nextProgIdx  = seqPos + 1 < orderedIndices.length ? orderedIndices[seqPos + 1] : chordIdx;
       const nextRoot     = progression[nextProgIdx]?.rootSemi ?? chord.rootSemi;
       const beats        = chord.beats || 4;
-      const midiNotes    = resolveMidiNotes(chord, diagramVoicingsRef.current[chordIdx], instrument, octave);
+      // Safely access voicing data with bounds checking
+      const voicing = diagramVoicingsRef.current && chordIdx < diagramVoicingsRef.current.length 
+        ? diagramVoicingsRef.current[chordIdx] 
+        : undefined;
+      const midiNotes    = resolveMidiNotes(chord, voicing, instrument, octave);
 
       return {
         chordIdx,

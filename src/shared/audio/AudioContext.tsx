@@ -39,7 +39,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
   const playChord = useCallback((overrideNotes?: number[], options: PlaybackOptions = {}) => {
     const { guitar = false, forceArp, scale = false, hold = false, isMeasure = false, resetClock = false, beats = 4, rhythm = 'straight', intervals, nextRoot, rootSemi: optionRootSemi, bassLine, countOff = false } = options;
-    const { octave, bpm, arp, arpSwing, bassEnabled, metronomeEnabled, voiceLeading, referenceFrequency } = useSettingsStore.getState();
+    const { octave, bpm, arp, arpSwing, bassEnabled, metronomeEnabled, voiceLeading, referenceFrequency, mixClickVol } = useSettingsStore.getState();
     const { rootSemi: storeRootSemi, chordType } = useChordStore.getState();
     const volume = 80;
     const rootSemi = optionRootSemi ?? storeRootSemi;
@@ -50,7 +50,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const finalVoiceLeading = overrideNotes ? false : voiceLeading;
     
     if (isMeasure) {
-      playerRef.current?.playMeasure(notes, { bpm, volume, guitar, arp: forceArp ?? arp, resetClock, bassEnabled, metronomeEnabled, arpSwing, beats, rhythm, voiceLeading: finalVoiceLeading, intervals, nextRoot, rootSemi, refFreq: referenceFrequency, bassLine, countOff });
+      playerRef.current?.playMeasure(notes, { bpm, volume, guitar, arp: forceArp ?? arp, resetClock, bassEnabled, metronomeEnabled, arpSwing, beats, rhythm, voiceLeading: finalVoiceLeading, intervals, nextRoot, rootSemi, refFreq: referenceFrequency, bassLine, countOff, clickVolume: mixClickVol });
     } else {
       playerRef.current?.playNotes(notes, { arp: forceArp ?? arp, bpm, volume, guitar, scale, hold, arpSwing, refFreq: referenceFrequency });
     }

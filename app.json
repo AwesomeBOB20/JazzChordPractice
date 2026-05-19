@@ -1,7 +1,8 @@
 {
   "expo": {
     "name": "Jazz Chord Practice",
-    "slug": "JazzChordPractice",
+    "slug": "jazzchordpractice",
+    "owner": "anthonysteller314s-organization",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,11 +19,12 @@
       },
       "package": "com.awesomebob20.jazzchordpractice",
       "versionCode": 1,
-      "minSdkVersion": 26
+      "minSdkVersion": 26,
+      "abiFilters": ["arm64-v8a", "armeabi-v7a"]
     },
     "extra": {
       "eas": {
-        "projectId": "f8c8b7fd-f332-4c59-b35b-489cd4d16c4e"
+        "projectId": "77289a83-730c-47a4-91e8-506996539689"
       }
     },
     "plugins": [

@@ -1,14 +1,16 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Dimensions,
-  Platform, Animated, TouchableWithoutFeedback
+  Platform, Animated, TouchableWithoutFeedback, ScrollView
 } from 'react-native';
-import Svg, { Path, Circle, Line, G, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, G, Text as SvgText, Polyline, Defs, ClipPath, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { THEMES } from '@shared/ui/themes';
 import { useAudio } from '@shared/audio/AudioContext';
+import { startListening, stopListening, addPitchListener } from '../../../../modules/native-tuner';
+import { Audio } from 'expo-av';
 
 const PopUpModal = ({ visible, onClose, children }: { visible: boolean, onClose: () => void, children: React.ReactNode }) => {
   const [show, setShow] = useState(visible);
@@ -36,9 +38,6 @@ const PopUpModal = ({ visible, onClose, children }: { visible: boolean, onClose:
   );
 };
 
-import { startListening, stopListening, addPitchListener } from '../../../../modules/native-tuner';
-import { Audio } from 'expo-av';
-
 const TUNINGS: Record<string, { label: string; strings: { name: string; midi: number; hz: number }[] }> = {
   standard: { label: 'Standard', strings: [ { name: 'E2', midi: 40, hz: 82.41 }, { name: 'A2', midi: 45, hz: 110.0 }, { name: 'D3', midi: 50, hz: 146.83 }, { name: 'G3', midi: 55, hz: 196.0 }, { name: 'B3', midi: 59, hz: 246.94 }, { name: 'E4', midi: 64, hz: 329.63 } ] },
   dropD: { label: 'Drop D', strings: [ { name: 'D2', midi: 38, hz: 73.42 }, { name: 'A2', midi: 45, hz: 110.0 }, { name: 'D3', midi: 50, hz: 146.83 }, { name: 'G3', midi: 55, hz: 196.0 }, { name: 'B3', midi: 59, hz: 246.94 }, { name: 'E4', midi: 64, hz: 329.63 } ] },
@@ -50,30 +49,20 @@ const TUNINGS: Record<string, { label: string; strings: { name: string; midi: nu
 const TUNING_KEYS = Object.keys(TUNINGS);
 const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// PRO UPGRADE 1: Buttery Smooth Analog Tracking (Lowered from 0.3)
-const SMOOTHING_FACTOR = 0.35; 
+// Time-based smoothing constants (frame-rate independent: k = 1 - exp(-dt / TAU))
+const TAU_SMOOTH_MS = 70;   // pitch smoothing time-constant (~SMOOTHING_FACTOR 0.35 @ 10Hz)
+const TAU_CENTER_MS = 150;  // chart center slide time-constant
+const WINDOW_MS = 4000;     // visible history window for the polyline
+const HISTORY_CAP = 240;    // max points kept in history ring
 
+// UI Constants
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const GAUGE_RADIUS = SCREEN_WIDTH * 0.38; // Slightly larger for pro feel
-const GAUGE_STROKE = 14;
-const GAUGE_SVG_W = SCREEN_WIDTH - 32;
-const GAUGE_CENTER_X = GAUGE_SVG_W / 2;
-const GAUGE_CENTER_Y = GAUGE_RADIUS + 30;
-const ARC_START_ANGLE = -130;
-const ARC_END_ANGLE = 130;
-const ARC_RANGE = ARC_END_ANGLE - ARC_START_ANGLE;
-
-function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
-  const rad = ((angleDeg - 90) * Math.PI) / 180;
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-}
-
-function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number) {
-  const start = polarToCartesian(cx, cy, r, endAngle);
-  const end = polarToCartesian(cx, cy, r, startAngle);
-  const largeArc = endAngle - startAngle <= 180 ? '0' : '1';
-  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`;
-}
+const GRAPH_WIDTH = SCREEN_WIDTH;
+const NOTE_SCALE_WIDTH = 44;
+const GRAPH_AREA_WIDTH = GRAPH_WIDTH - NOTE_SCALE_WIDTH;
+const GRAPH_CENTER_X = NOTE_SCALE_WIDTH + GRAPH_AREA_WIDTH / 2;
+const VISIBLE_SEMITONE_RANGE = 6; // How many semitones to show vertically
+const HEADROOM_SEMITONES = 0.9; // Bias the chart so the live pitch line never touches the top
 
 function calculatePitch(frequency: number, refFreq: number) {
   const A4_INDEX = 69;
@@ -105,47 +94,52 @@ export default function TunerScreen() {
 
   const [isRecording, setIsRecording] = useState(false);
   const [playingStringIdx, setPlayingStringIdx] = useState<number | null>(null);
-  const [pitchInfo, setPitchInfo] = useState<{ name: string; octave: number; fullName: string; cents: number; midi: number; } | null>(null);
-  const [activeStringIdx, setActiveStringIdx] = useState<number | null>(null);
+  const [graphHeight, setGraphHeight] = useState<number>(Math.round(Dimensions.get('window').height * 0.55));
 
+  // Producer side (written from the native pitch listener; no setState here)
+  const latestNoteFloatRef = useRef<number | null>(null); // raw most-recent sample
+  const lastSampleAtRef = useRef<number>(0);
+  const historyRef = useRef<{ t: number; noteFloat: number }[]>([]);
+
+  // Consumer side (driven by the rAF loop)
   const smoothedNoteFloatRef = useRef<number | null>(null);
-  
-  // PRO UPGRADE 2: The Lock-In Gate
+  const centerNoteFloatRef = useRef<number | null>(null);
+
+  // Single render-tick state: bumped once per frame by the rAF loop.
+  const [renderTick, setRenderTick] = useState(0);
+
   const hasLockedInRef = useRef(false);
   const lastHapticTimeRef = useRef(0);
 
   const micAvailable = true;
 
+  // --- Pitch event producer: write refs only, never setState. ---
   useEffect(() => {
     const subscription = addPitchListener((event) => {
       const now = Date.now();
       const pitchHz = event.frequency;
-      
+
       if (pitchHz && pitchHz > 60 && pitchHz < 1500) {
         const noteFloat = 12 * Math.log2(pitchHz / referenceFrequency) + 69;
+        latestNoteFloatRef.current = noteFloat;
+        lastSampleAtRef.current = now;
 
-        if (smoothedNoteFloatRef.current === null || Math.abs(noteFloat - smoothedNoteFloatRef.current) > 2) {
-          smoothedNoteFloatRef.current = noteFloat;
-        } else {
-          smoothedNoteFloatRef.current = SMOOTHING_FACTOR * noteFloat + (1 - SMOOTHING_FACTOR) * smoothedNoteFloatRef.current;
-        }
+        // Push raw sample into history ring; rAF loop is responsible for rendering.
+        const hist = historyRef.current;
+        hist.push({ t: now, noteFloat });
+        if (hist.length > HISTORY_CAP) hist.splice(0, hist.length - HISTORY_CAP);
 
-        const smoothedHz = referenceFrequency * Math.pow(2, (smoothedNoteFloatRef.current - 69) / 12);
-        const smoothedInfo = calculatePitch(smoothedHz, referenceFrequency);
-
-        requestAnimationFrame(() => {
-          setPitchInfo(smoothedInfo);
-          setActiveStringIdx(findClosestString(smoothedInfo.midi, smoothedInfo.cents, tuningStrings));
-        });
-
-        // Hardware Pedal Haptics: Fire heavy impact when dead center!
-        if (Math.abs(smoothedInfo.cents) <= 2.5) {
+        // Haptics are event-driven (lock-in feel), not visual; keep here.
+        // Use raw noteFloat cents for haptic decision.
+        const noteIndex = Math.round(noteFloat);
+        const cents = (noteFloat - noteIndex) * 100;
+        if (Math.abs(cents) <= 2.5) {
           if (!hasLockedInRef.current && now - lastHapticTimeRef.current > 500) {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
             hasLockedInRef.current = true;
             lastHapticTimeRef.current = now;
           }
-        } else if (Math.abs(smoothedInfo.cents) > 8) {
+        } else if (Math.abs(cents) > 8) {
           hasLockedInRef.current = false;
         }
       }
@@ -155,16 +149,66 @@ export default function TunerScreen() {
       subscription.remove();
       stopListening();
     };
-  }, [tuningKey, referenceFrequency]);
+  }, [referenceFrequency]);
+
+  // --- 60fps render loop: lerps smoothing/center, drops stale history, bumps state once per frame. ---
+  useEffect(() => {
+    if (!isRecording) return;
+    let raf = 0;
+    let lastFrameAt = 0;
+
+    const tick = (tsMs: number) => {
+      const now = Date.now();
+      const dt = lastFrameAt === 0 ? 16 : Math.min(64, tsMs - lastFrameAt);
+      lastFrameAt = tsMs;
+
+      const target = latestNoteFloatRef.current;
+      if (target !== null) {
+        // Smoothing (frame-rate independent)
+        const kSmooth = 1 - Math.exp(-dt / TAU_SMOOTH_MS);
+        if (
+          smoothedNoteFloatRef.current === null ||
+          Math.abs(target - smoothedNoteFloatRef.current) > 2
+        ) {
+          smoothedNoteFloatRef.current = target; // snap on big jumps / first sample
+        } else {
+          smoothedNoteFloatRef.current += (target - smoothedNoteFloatRef.current) * kSmooth;
+        }
+
+        // Center slide (frame-rate independent)
+        const kCenter = 1 - Math.exp(-dt / TAU_CENTER_MS);
+        const sm = smoothedNoteFloatRef.current as number;
+        if (centerNoteFloatRef.current === null) {
+          centerNoteFloatRef.current = sm;
+        } else {
+          centerNoteFloatRef.current += (sm - centerNoteFloatRef.current) * kCenter;
+        }
+      }
+
+      // Drop history points older than the visible window (+ small margin).
+      const hist = historyRef.current;
+      const cutoff = now - WINDOW_MS - 200;
+      let drop = 0;
+      while (drop < hist.length && hist[drop].t < cutoff) drop++;
+      if (drop > 0) hist.splice(0, drop);
+
+      setRenderTick((n) => (n + 1) | 0);
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isRecording]);
 
   const toggleListening = useCallback(async () => {
     if (isRecording) {
       stopListening();
       setIsRecording(false);
-      setPitchInfo(null);
-      setActiveStringIdx(null);
       hasLockedInRef.current = false;
       smoothedNoteFloatRef.current = null;
+      centerNoteFloatRef.current = null;
+      latestNoteFloatRef.current = null;
+      historyRef.current = [];
     } else {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
@@ -181,25 +225,46 @@ export default function TunerScreen() {
   const toggleString = useCallback((stringIdx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (playingStringIdx === stringIdx) {
-      onStopTone(); setPlayingStringIdx(null); setActiveStringIdx(null);
+      onStopTone(); setPlayingStringIdx(null);
     } else {
       onStopTone();
       const s = tuningStrings[stringIdx];
       const boostedVol = Math.min(100, 80 * STRING_VOLUME_BOOST[stringIdx]);
       setTimeout(() => { onPlayTone(s.midi, boostedVol); }, 30);
-      setPlayingStringIdx(stringIdx); setActiveStringIdx(stringIdx);
+      setPlayingStringIdx(stringIdx);
     }
   }, [tuningStrings, onPlayTone, onStopTone, playingStringIdx]);
 
-  const cents = pitchInfo?.cents ?? 0;
-  const clampedCents = Math.max(-50, Math.min(50, cents));
-  const needleAngle = ARC_START_ANGLE + ((clampedCents + 50) / 100) * ARC_RANGE;
+  // Read live values out of refs (re-read every render-tick driven by the rAF loop).
+  // `renderTick` is referenced so React doesn't bail on the dependency.
+  void renderTick;
+  const liveSmoothed = smoothedNoteFloatRef.current;
+  const liveSmoothedHz = liveSmoothed !== null
+    ? referenceFrequency * Math.pow(2, (liveSmoothed - 69) / 12)
+    : null;
+  const livePitchInfo = liveSmoothedHz !== null ? calculatePitch(liveSmoothedHz, referenceFrequency) : null;
+  const cents = livePitchInfo?.cents ?? 0;
   const inTune = Math.abs(cents) <= 3;
   const tuneColor = inTune ? '#639922' : Math.abs(cents) <= 15 ? '#D4A853' : '#D4537E';
 
-  const tickAngles = [-50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50].map(
-    (c) => ({ cents: c, angle: ARC_START_ANGLE + ((c + 50) / 100) * ARC_RANGE })
-  );
+  // Y-axis grid generation. Use a continuous (lerped) center plus a downward
+  // bias so the live pitch line never reaches the top of the chart.
+  const liveCenter = centerNoteFloatRef.current;
+  const displayCenter = (isRecording && liveCenter !== null ? liveCenter : 50) + HEADROOM_SEMITONES;
+  const highlightMidi = livePitchInfo ? livePitchInfo.midi : Math.round(displayCenter - HEADROOM_SEMITONES);
+  const gridLines = [];
+  const halfRange = Math.ceil(VISIBLE_SEMITONE_RANGE / 2) + 1;
+  const centerInt = Math.round(displayCenter);
+
+  for (let i = centerInt - halfRange; i <= centerInt + halfRange; i++) {
+    // Map MIDI note distance to Y coordinate (continuous center -> smooth slide)
+    const yOffset = ((i - displayCenter) / VISIBLE_SEMITONE_RANGE) * graphHeight;
+    const y = graphHeight / 2 - yOffset;
+
+    const noteName = NOTES[((i % 12) + 12) % 12];
+    const octave = Math.floor(i / 12) - 1;
+    gridLines.push({ midi: i, y, label: `${noteName}${octave}` });
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -231,68 +296,99 @@ export default function TunerScreen() {
 
       <View style={styles.container}>
         {mode === 'listen' && (
-          <View style={styles.gaugeWrap}>
-            
-            {/* NEW LAYOUT: Note and Cents moved UP HERE, above the meter! */}
-            <View style={{ alignItems: 'center', marginBottom: 20 }}>
-               <Text style={[styles.noteText, { color: isRecording && pitchInfo ? tuneColor : t.txt3, textShadowColor: isRecording && inTune ? '#63992240' : 'transparent', textShadowRadius: 10 }]}>
-                {isRecording && pitchInfo ? pitchInfo.fullName : '--'}
-               </Text>
-               <Text style={[styles.centsText, { color: isRecording && pitchInfo ? tuneColor : t.txt3, marginTop: 4 }]}>
-                {isRecording && pitchInfo ? `${cents > 0 ? '+' : ''}${Math.round(cents)} ¢` : micAvailable ? 'Tap to start' : 'Requires dev build'}
-               </Text>
-            </View>
+          <View
+            style={styles.listenLayout}
+            onLayout={(e) => {
+              const h = e.nativeEvent.layout.height;
+              if (h && Math.abs(h - graphHeight) > 1) setGraphHeight(h);
+            }}
+          >
+            <Svg width="100%" height="100%" viewBox={`0 0 ${GRAPH_WIDTH} ${graphHeight}`} preserveAspectRatio="none">
+              <Defs>
+                <ClipPath id="chartClip">
+                  <Rect x={NOTE_SCALE_WIDTH} y={0} width={GRAPH_AREA_WIDTH} height={graphHeight} />
+                </ClipPath>
+              </Defs>
 
-            {/* PRO UPGRADE 3: The Integrated Snark Layout */}
-            <View style={styles.svgContainer}>
-              <Svg width={GAUGE_SVG_W} height={GAUGE_CENTER_Y + 10} viewBox={`0 0 ${GAUGE_SVG_W} ${GAUGE_CENTER_Y + 10}`}>
-                <Path d={describeArc(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS, ARC_START_ANGLE, ARC_END_ANGLE)} fill="none" stroke={t.bg3} strokeWidth={GAUGE_STROKE} strokeLinecap="round" />
-                <Path d={describeArc(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS, ARC_START_ANGLE + (45 / 100) * ARC_RANGE, ARC_START_ANGLE + (55 / 100) * ARC_RANGE)} fill="none" stroke="#63992220" strokeWidth={GAUGE_STROKE + 6} strokeLinecap="round" />
+              {/* Draw Note Scale Grid */}
+              {gridLines.map((line) => (
+                <G key={line.midi}>
+                  <Line
+                    x1={NOTE_SCALE_WIDTH} y1={line.y}
+                    x2={GRAPH_WIDTH} y2={line.y}
+                    stroke={line.midi === highlightMidi && isRecording ? tuneColor : t.border}
+                    strokeWidth={line.midi === highlightMidi ? 2 : 1}
+                    strokeDasharray={line.midi === highlightMidi ? "none" : "5, 5"}
+                    opacity={line.midi === highlightMidi ? 0.7 : 0.3}
+                  />
+                  <SvgText
+                    x={NOTE_SCALE_WIDTH / 2} y={line.y + 4}
+                    fill={line.midi === highlightMidi && isRecording ? tuneColor : t.txt3}
+                    fontSize={13}
+                    fontWeight="700"
+                    textAnchor="middle"
+                  >
+                    {line.label}
+                  </SvgText>
+                </G>
+              ))}
 
-                {tickAngles.map(({ cents: c, angle }) => {
-                  const isMajor = c === 0 || Math.abs(c) === 50;
-                  const inner = polarToCartesian(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS - (isMajor ? 18 : 12), angle);
-                  const outer = polarToCartesian(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS + (isMajor ? 6 : 4), angle);
-                  return <Line key={c} x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y} stroke={c === 0 ? '#639922' : t.border} strokeWidth={isMajor ? 3 : 1.5} strokeLinecap="round" />;
-                })}
+              {/* Vertical divider between note-name gutter and chart area */}
+              <Line
+                x1={NOTE_SCALE_WIDTH} y1={0}
+                x2={NOTE_SCALE_WIDTH} y2={graphHeight}
+                stroke={t.border}
+                strokeWidth={1}
+                opacity={0.6}
+              />
 
-                <SvgText x={40} y={GAUGE_CENTER_Y - 10} fill={t.txt3} fontSize={18} fontWeight="800" textAnchor="middle">♭</SvgText>
-                <SvgText x={GAUGE_SVG_W - 40} y={GAUGE_CENTER_Y - 10} fill={t.txt3} fontSize={18} fontWeight="800" textAnchor="middle">♯</SvgText>
+              {/* Graph Polyline (clipped to chart area so it never crosses the gutter).
+                  X is computed from elapsed time so the trace scrolls smoothly between
+                  pitch samples at 60fps instead of stair-stepping per-event. */}
+              {isRecording && historyRef.current.length > 1 && (() => {
+                const nowMs = Date.now();
+                const halfW = GRAPH_AREA_WIDTH / 2;
+                const hist = historyRef.current;
+                let pts = '';
+                for (let i = 0; i < hist.length; i++) {
+                  const p = hist[i];
+                  const age = nowMs - p.t;
+                  if (age > WINDOW_MS) continue;
+                  const x = GRAPH_CENTER_X - (age / WINDOW_MS) * halfW;
+                  const yOffset = ((p.noteFloat - displayCenter) / VISIBLE_SEMITONE_RANGE) * graphHeight;
+                  const y = graphHeight / 2 - yOffset;
+                  pts += (pts ? ' ' : '') + x + ',' + y;
+                }
+                if (!pts) return null;
+                return (
+                  <Polyline
+                    clipPath="url(#chartClip)"
+                    points={pts}
+                    fill="none"
+                    stroke={tuneColor}
+                    strokeWidth={4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                );
+              })()}
 
-                {pitchInfo && isRecording && (
-                  <G>
-                    {/* Glowing shadow needle for pro feel */}
-                    <Line x1={GAUGE_CENTER_X} y1={GAUGE_CENTER_Y} x2={polarToCartesian(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS - 16, needleAngle).x} y2={polarToCartesian(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS - 16, needleAngle).y} stroke={tuneColor} strokeWidth={10} strokeLinecap="round" opacity={0.2} />
-                    <Line x1={GAUGE_CENTER_X} y1={GAUGE_CENTER_Y} x2={polarToCartesian(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS - 16, needleAngle).x} y2={polarToCartesian(GAUGE_CENTER_X, GAUGE_CENTER_Y, GAUGE_RADIUS - 16, needleAngle).y} stroke={tuneColor} strokeWidth={3} strokeLinecap="round" />
-                    <Circle cx={GAUGE_CENTER_X} cy={GAUGE_CENTER_Y} r={8} fill={t.bg} stroke={tuneColor} strokeWidth={4} />
-                  </G>
-                )}
-              </Svg>
-            </View>
-
-            {micAvailable && (
-              <TouchableOpacity style={[styles.listenBtn, { backgroundColor: isRecording ? t.bg2 : t.accent, borderColor: isRecording ? tuneColor : t.accent }]} onPress={toggleListening}>
-                <Ionicons name={isRecording ? 'stop' : 'mic'} size={20} color={isRecording ? tuneColor : '#fff'} />
-                <Text style={[styles.listenBtnTxt, { color: isRecording ? tuneColor : '#fff' }]}>{isRecording ? 'Stop Listening' : 'Start Listening'}</Text>
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity style={[styles.tuningInlineBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => setShowTunings(!showTunings)} activeOpacity={0.7}>
-              <Ionicons name="musical-note" size={16} color={t.accent} />
-              <Text style={[styles.tuningInlineLabel, { color: t.txt1 }]}>{tuning.label}</Text>
-              <Ionicons name={showTunings ? 'chevron-up' : 'chevron-down'} size={16} color={t.txt3} />
-            </TouchableOpacity>
+              {/* Vertical Center Indicator line */}
+              {isRecording && (
+                 <Line
+                    x1={GRAPH_CENTER_X} y1={0}
+                    x2={GRAPH_CENTER_X} y2={graphHeight}
+                    stroke={tuneColor}
+                    strokeWidth={1}
+                    opacity={0.3}
+                 />
+              )}
+            </Svg>
           </View>
         )}
 
         {mode === 'play' && (
           <View style={styles.playWrap}>
-            <TouchableOpacity style={[styles.tuningInlineBtn, { backgroundColor: t.bg2, borderColor: t.border, alignSelf: 'center', marginBottom: 16 }]} onPress={() => setShowTunings(!showTunings)} activeOpacity={0.7}>
-              <Ionicons name="musical-note" size={16} color={t.accent} />
-              <Text style={[styles.tuningInlineLabel, { color: t.txt1 }]}>{tuning.label}</Text>
-              <Ionicons name={showTunings ? 'chevron-up' : 'chevron-down'} size={16} color={t.txt3} />
-            </TouchableOpacity>
-
             <View style={styles.stringsColumn}>
               {tuningStrings.map((s, i) => {
                 const isPlaying = playingStringIdx === i;
@@ -316,19 +412,50 @@ export default function TunerScreen() {
           </View>
         )}
 
-        {/* ❌ The stupid ass string bar has been completely deleted from here! */}
-
       </View>
 
-      <View style={[styles.bottomBar, { backgroundColor: t.bg, borderTopColor: t.border }]}>
-        <TouchableOpacity style={[ styles.bottomBtn, mode === 'listen' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('listen'); setActiveStringIdx(null); setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
-          <Ionicons name="mic" size={20} color={mode === 'listen' ? '#fff' : t.txt2} />
-          <Text style={[styles.bottomBtnTxt, { color: mode === 'listen' ? '#fff' : t.txt2 }]}>Listen</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[ styles.bottomBtn, mode === 'play' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('play'); if (isRecording) { stopListening(); setIsRecording(false); } setPitchInfo(null); setActiveStringIdx(null); setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
-          <Ionicons name="volume-high" size={20} color={mode === 'play' ? '#fff' : t.txt2} />
-          <Text style={[styles.bottomBtnTxt, { color: mode === 'play' ? '#fff' : t.txt2 }]}>Play</Text>
-        </TouchableOpacity>
+      <View style={[styles.dock, { backgroundColor: t.bg, borderTopColor: t.border }]}>
+        <View style={{ marginBottom: 12 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+            {mode === 'listen' && micAvailable && (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  toggleListening();
+                }}
+                style={[styles.enginePill, isRecording ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border }]}
+              >
+                <Ionicons name={isRecording ? 'stop' : 'play'} size={16} color={isRecording ? '#fff' : t.txt2} />
+                <Text style={[styles.enginePillTxt, { color: isRecording ? '#fff' : t.txt2 }]}>{isRecording ? 'Stop' : 'Start'}</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowTunings(!showTunings);
+              }}
+              style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border }]}
+            >
+              <Ionicons name="musical-note" size={16} color={t.txt2} />
+              <Text style={[styles.enginePillTxt, { color: t.txt2 }]}>{tuning.label}</Text>
+              <Ionicons name={showTunings ? 'chevron-up' : 'chevron-down'} size={16} color={t.txt2} />
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={[ styles.actionBtn, mode === 'listen' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('listen'); setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
+            <Ionicons name="mic" size={20} color={mode === 'listen' ? '#fff' : t.txt2} />
+            <Text style={[styles.actionBtnTxt, { color: mode === 'listen' ? '#fff' : t.txt2 }]}>Listen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[ styles.actionBtn, mode === 'play' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('play'); if (isRecording) { stopListening(); setIsRecording(false); } setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
+            <Ionicons name="volume-high" size={20} color={mode === 'play' ? '#fff' : t.txt2} />
+            <Text style={[styles.actionBtnTxt, { color: mode === 'play' ? '#fff' : t.txt2 }]}>Play</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -336,11 +463,11 @@ export default function TunerScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  bottomBar: { flexDirection: 'row', borderTopWidth: 1, paddingVertical: 12, paddingHorizontal: 16, gap: 12, paddingBottom: Platform.OS === 'ios' ? 24 : 12 },
-  bottomBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 56, borderRadius: 20, borderWidth: 1, gap: 8 },
-  bottomBtnTxt: { fontWeight: '700', fontSize: 15 },
-  tuningInlineBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, marginTop: 16 },
-  tuningInlineLabel: { fontSize: 14, fontWeight: '700' },
+  dock: { borderTopWidth: 1, paddingVertical: 12, paddingBottom: Platform.OS === 'ios' ? 24 : 12 },
+  actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
+  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 56, borderRadius: 20, borderWidth: 1, gap: 8 },
+  actionBtnTxt: { fontWeight: '700', fontSize: 15 },
+  
   modalBox: { width: '100%', padding: 20, borderRadius: 16, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
   modalTitle: { fontSize: 24, fontWeight: '800', letterSpacing: 0.5, marginBottom: 16 },
   modalBtnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 },
@@ -349,14 +476,11 @@ const styles = StyleSheet.create({
   tuningOverlayLabel: { fontSize: 15, fontWeight: '700' },
   tuningOverlayNotes: { fontSize: 12, fontWeight: '500', marginTop: 2 },
   
-  gaugeWrap: { alignItems: 'center', marginTop: 32, flex: 1, justifyContent: 'center' },
-  svgContainer: { position: 'relative', width: GAUGE_SVG_W, height: GAUGE_CENTER_Y + 10 },
-  centerNoteDisplay: { position: 'absolute', width: '100%', alignItems: 'center', justifyContent: 'center' },
-  noteText: { fontSize: 72, fontWeight: '900', letterSpacing: -2, lineHeight: 80 },
-  centsText: { fontSize: 14, fontWeight: '700', letterSpacing: 1 },
+  listenLayout: { flex: 1, width: '100%', overflow: 'hidden' },
   
-  listenBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 28, paddingVertical: 16, borderRadius: 30, marginTop: 40, borderWidth: 2 },
-  listenBtnTxt: { fontWeight: '800', fontSize: 16 },
+  enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
+  enginePillTxt: { fontSize: 14, fontWeight: '700' },
+
   playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 32, justifyContent: 'center' },
   playHint: { textAlign: 'center', fontSize: 12, fontWeight: '600', marginTop: 20, opacity: 0.4 },
   stringsColumn: { gap: 0 },
@@ -368,7 +492,4 @@ const styles = StyleSheet.create({
   stringNoteBubble: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
   stringNoteTxt: { fontSize: 16, fontWeight: '800' },
   stringHz: { fontSize: 13, fontWeight: '700', width: 58, textAlign: 'right' },
-  stringBar: { flexDirection: 'row', justifyContent: 'space-around', marginHorizontal: 20, marginBottom: 24, paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
-  stringIndicator: { width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center' },
-  stringIndicatorTxt: { fontSize: 14, fontWeight: '800' },
 });

@@ -155,6 +155,7 @@ export default function QuizScreen() {
 
   const guitarData = React.useMemo(() => {
     if (activeQuizInstrument !== 'guitar' || !guitarVoicing) return null;
+    if (!guitarVoicing.frets) return null;
 
     const specificMidi: number[] = [];
     const frets = Array(6).fill(null).map(() => ({ fret: null, role: '' }));
@@ -175,55 +176,59 @@ export default function QuizScreen() {
 
   // ── Generate a new question ─────────────────────────────────
   const nextQuestion = useCallback(() => {
-    stopSeqFlash();
-    onStop();
-    
-    let pool: string[] = activeTypes.length > 0 ? activeTypes : ALL_CHORD_KEYS;
-    if (instrument === 'guitar') {
-      const validGuitarTypes = new Set([
-        ...Object.keys(DROP_VOICINGS.drop2 || {}), 
-        ...Object.keys(DROP_VOICINGS.drop3 || {}),
-        ...Object.keys(DROP_VOICINGS.shells || {}),
-        ...Object.keys(CH).filter(k => CH[k].iv.length === 3)
-      ]);
-      pool = pool.filter((t: string) => validGuitarTypes.has(t));
-      if (pool.length < 4) pool = ['maj', 'min', 'maj7', 'min7']; 
-    } else if (pool.length < 4) {
-      pool = ALL_CHORD_KEYS;
-    }
-
-    const root = Math.floor(Math.random() * 12);
-    const type = pickRandom(pool);
-    
-    const opts = buildOptions(root, type, pool, quizMode, namingMode);
-    const cIdx = opts.findIndex(o => o.root === root && o.type === type);
-
-    let randomVoicing: Voicing | null = null;
-    if (instrument === 'guitar' && CH[type]) {
-      let availableVoicings: Voicing[] = [];
-      const def = CH[type];
-      if (def.iv.length === 3) {
-        availableVoicings = buildTriadVoicings(def, root, '', namingMode).flatMap((g: any) => g.voicings);
-      } else {
-        availableVoicings = [
-          ...buildDropVoicings(type, def, root, '', '', namingMode).flatMap((g: any) => g.voicings),
-          ...buildShellVoicings(type, def, root, '', '', namingMode).flatMap((g: any) => g.voicings)
-        ];
+    try {
+      stopSeqFlash();
+      onStop();
+      
+      let pool: string[] = activeTypes.length > 0 ? activeTypes : ALL_CHORD_KEYS;
+      if (instrument === 'guitar') {
+        const validGuitarTypes = new Set([
+          ...Object.keys(DROP_VOICINGS.drop2 || {}), 
+          ...Object.keys(DROP_VOICINGS.drop3 || {}),
+          ...Object.keys(DROP_VOICINGS.shells || {}),
+          ...Object.keys(CH).filter(k => CH[k].iv.length === 3)
+        ]);
+        pool = pool.filter((t: string) => validGuitarTypes.has(t));
+        if (pool.length < 4) pool = ['maj', 'min', 'maj7', 'min7']; 
+      } else if (pool.length < 4) {
+        pool = ALL_CHORD_KEYS;
       }
-      if (availableVoicings.length > 0) {
-        randomVoicing = pickRandom(availableVoicings);
-      }
-    }
-    setGuitarVoicing(randomVoicing);
 
-    setQuestionRoot(root);
-    setQuestionType(type);
-    setOptions(opts);
-    setCorrectIdx(cIdx);
-    setAnswered(null);
-    setChosenIdx(null);
-    setRevealed(false);
-    setActiveQuizInstrument(instrument);
+      const root = Math.floor(Math.random() * 12);
+      const type = pickRandom(pool);
+      
+      const opts = buildOptions(root, type, pool, quizMode, namingMode);
+      const cIdx = opts.findIndex(o => o.root === root && o.type === type);
+
+      let randomVoicing: Voicing | null = null;
+      if (instrument === 'guitar' && CH[type]) {
+        let availableVoicings: Voicing[] = [];
+        const def = CH[type];
+        if (def.iv.length === 3) {
+          availableVoicings = buildTriadVoicings(def, root, '', namingMode).flatMap((g: any) => g.voicings);
+        } else {
+          availableVoicings = [
+            ...buildDropVoicings(type, def, root, '', '', namingMode).flatMap((g: any) => g.voicings),
+            ...buildShellVoicings(type, def, root, '', '', namingMode).flatMap((g: any) => g.voicings)
+          ];
+        }
+        if (availableVoicings.length > 0) {
+          randomVoicing = pickRandom(availableVoicings);
+        }
+      }
+      setGuitarVoicing(randomVoicing);
+
+      setQuestionRoot(root);
+      setQuestionType(type);
+      setOptions(opts);
+      setCorrectIdx(cIdx);
+      setAnswered(null);
+      setChosenIdx(null);
+      setRevealed(false);
+      setActiveQuizInstrument(instrument);
+    } catch (e) {
+      console.log('nextQuestion error', e);
+    }
   }, [activeTypes, quizMode, namingMode, onStop, instrument]);
 
   useEffect(() => {
