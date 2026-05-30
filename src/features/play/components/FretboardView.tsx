@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
-import Svg, { Line, Circle, Text as SvgText, Rect } from 'react-native-svg';
+import Svg, { Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
 import { Theme } from '@shared/ui/themes';
 import { Voicing, VoicingGroup, ScaleVoicing } from '@shared/guitar';
 import { CH, spellInterval, formatDegree, SCALES, NOTE_FLAT, NOTE_SHARP, ROLE_SHORT, getGlobalLabel } from '@shared/theory/musicTheory';
@@ -53,7 +53,7 @@ interface Props {
 }
 
 const STRUCTURAL_RANK: Record<string, number> = {
-  'root': 0, 'R': 0,
+  'root': 0, 'R': 0, '1': 0,
   'b2': 1, '2': 2, '#2': 3, '2nd': 2,
   'b3': 4, '3': 5, '3rd': 5,
   '4': 6, '#4': 7, '4th': 6,
@@ -77,7 +77,7 @@ const STR_SPACING = 46;
 const FRET_SPACING = 36;
 const MARGIN_LEFT = 72;
 const MARGIN_TOP = 40;
-const MARGIN_BOTTOM = 16;
+const MARGIN_BOTTOM = 32;
 const DOT_R = 14;
 
 const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textColor, borderColor, openColor, label, isActive, flashAnim, onNotePress, isOpen, bg, isGhost, isRootProp, viewportShift }: any) {
@@ -157,7 +157,7 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
         style={StyleSheet.absoluteFillObject} 
         onPress={onNotePress} 
         activeOpacity={0.8} 
-        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+        hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
       >
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: visual.isOpen ? (visual.openColor || visual.color) : (visual.textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{visual.label}</Text>
@@ -169,21 +169,56 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
 
 const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret, theme }: { minFret: number, maxFret: number, theme: any }) {
   const TOTAL_FRETS = 24;
-  const MAP_W = 280; // Significantly wider to match the reference image
-  const MAP_H = 22;  // Taller to fit string lines clearly
+  const MAP_W = 320;
+  const MAP_H = 32;
   const fretW = MAP_W / TOTAL_FRETS;
-  
+
   const startF = minFret <= 1 ? 0 : minFret - 1;
   const numF = Math.max(5, maxFret - startF + 1);
-  
+
   const boxLeft = startF * fretW;
   const boxWidth = Math.min(MAP_W - boxLeft, numF * fretW);
-  
+
   const MARKERS = [3, 5, 7, 9, 15, 17, 19, 21];
-  
+
+  const isLeftEdge = boxLeft <= 1;
+  const isRightEdge = boxLeft + boxWidth >= MAP_W - 1;
+  const R = 8;
+  const bw = Math.max(1, boxWidth);
+  const rtl = isLeftEdge ? R : 0;
+  const rtr = isRightEdge ? R : 0;
+  const rbr = isRightEdge ? R : 0;
+  const rbl = isLeftEdge ? R : 0;
+
+  const buildRoundedRect = (x: number, y: number, w: number, h: number, rtl: number, rtr: number, rbr: number, rbl: number) => {
+    const maxR = Math.min(w / 2, h / 2);
+    const tl = Math.min(rtl, maxR);
+    const tr = Math.min(rtr, maxR);
+    const br = Math.min(rbr, maxR);
+    const bl = Math.min(rbl, maxR);
+    let d = `M ${x + tl} ${y}`;
+    d += tr > 0 ? ` L ${x + w - tr} ${y} A ${tr} ${tr} 0 0 1 ${x + w} ${y + tr}` : ` L ${x + w} ${y}`;
+    d += br > 0 ? ` L ${x + w} ${y + h - br} A ${br} ${br} 0 0 1 ${x + w - br} ${y + h}` : ` L ${x + w} ${y + h}`;
+    d += bl > 0 ? ` L ${x + bl} ${y + h} A ${bl} ${bl} 0 0 1 ${x} ${y + h - bl}` : ` L ${x} ${y + h}`;
+    d += tl > 0 ? ` L ${x} ${y + tl} A ${tl} ${tl} 0 0 1 ${x + tl} ${y}` : ` L ${x} ${y}`;
+    d += ' Z';
+    return d;
+  };
+
+  const fillPath = buildRoundedRect(boxLeft, 0, bw, MAP_H, rtl, rtr, rbr, rbl);
+  const innerPath = buildRoundedRect(
+    boxLeft + 2, 2,
+    Math.max(1, bw - 4), MAP_H - 4,
+    Math.max(0, rtl - 2), Math.max(0, rtr - 2), Math.max(0, rbr - 2), Math.max(0, rbl - 2)
+  );
+  const borderFrameD = fillPath + ' ' + innerPath;
+
   return (
-    <View style={{ width: MAP_W, height: MAP_H, backgroundColor: theme.bg3, borderWidth: 1, borderColor: theme.border, borderRadius: 8, overflow: 'hidden', marginTop: 12, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 3, elevation: 2 }}>
+    <View style={{ alignSelf: 'center', width: MAP_W, height: MAP_H, backgroundColor: theme.bg3, borderRadius: 8, marginTop: 12, marginBottom: 12 }}>
       <Svg width={MAP_W} height={MAP_H}>
+        {/* Container border drawn inside SVG so overflow:hidden doesn't clip content */}
+        <Rect x={0.5} y={0.5} width={MAP_W - 1} height={MAP_H - 1} rx={8} ry={8} fill="none" stroke={theme.border} strokeWidth={1} />
+
         {/* Internal String Lines to read natively as a guitar neck */}
         <Line x1={0} y1={MAP_H * 0.2} x2={MAP_W} y2={MAP_H * 0.2} stroke={theme.border} strokeWidth={0.5} opacity={0.6} />
         <Line x1={0} y1={MAP_H * 0.4} x2={MAP_W} y2={MAP_H * 0.4} stroke={theme.border} strokeWidth={0.5} opacity={0.6} />
@@ -191,8 +226,8 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
         <Line x1={0} y1={MAP_H * 0.8} x2={MAP_W} y2={MAP_H * 0.8} stroke={theme.border} strokeWidth={0.5} opacity={0.6} />
 
         {/* Fret Dividers */}
-        {Array.from({ length: TOTAL_FRETS }).map((_, i) => (
-          <Line key={`mf-${i}`} x1={i * fretW} y1={0} x2={i * fretW} y2={MAP_H} stroke={theme.border} strokeWidth={1} opacity={0.8} />
+        {Array.from({ length: TOTAL_FRETS - 1 }).map((_, i) => (
+          <Line key={`mf-${i}`} x1={(i + 1) * fretW} y1={0} x2={(i + 1) * fretW} y2={MAP_H} stroke={theme.border} strokeWidth={1} opacity={0.8} />
         ))}
 
         {/* Prominent Inlay Markers */}
@@ -206,8 +241,11 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
           </React.Fragment>
         ))}
 
-        {/* Crisper Highlight Box */}
-        <Rect x={boxLeft} y={0} width={boxWidth} height={MAP_H} fill={theme.accent} fillOpacity={0.3} stroke={theme.accent} strokeWidth={2} rx={2} />
+        {/* Highlight fill — edge to edge, no gaps at corners */}
+        <Path d={fillPath} fill={theme.accent} fillOpacity={0.3} />
+
+        {/* Highlight border frame — solid 2px accent with evenodd fill rule */}
+        <Path d={borderFrameD} fill={theme.accent} fillRule="evenodd" />
       </Svg>
     </View>
   );
@@ -271,7 +309,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
       <FretboardMiniMap minFret={minFret} maxFret={maxFret} theme={theme} />
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
-          {isOpen && ( <Rect x={MARGIN_LEFT} y={MARGIN_TOP} width={STR_SPACING * (numDisplayStrings - 1)} height={5} fill={theme.txt1} rx={2} /> )}
+          {isOpen && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * (numDisplayStrings - 1) + 1.75} height={5} fill={theme.txt1} /> )}
         {!isOpen && ( <SvgText x={MARGIN_LEFT - 20} y={MARGIN_TOP + FRET_SPACING * 0.6} fontSize={14} fill={theme.txt2} textAnchor="end" fontWeight="700">{fretLabel}</SvgText> )}
         {Array.from({ length: NUM_FRETS + 1 }).map((_, fi) => ( <Line key={`fret-${fi}`} x1={MARGIN_LEFT} y1={MARGIN_TOP + fi * FRET_SPACING} x2={MARGIN_LEFT + STR_SPACING * (numDisplayStrings - 1)} y2={MARGIN_TOP + fi * FRET_SPACING} stroke={theme.border} strokeWidth={1} /> ))}
         {[0,1,2,3,4,5].map((strIdx, displayPos) => {
@@ -346,7 +384,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
             const label = getGlobalLabel(labelMode, namingMode, rootSemi, formula, role, midi, noteName);
             const cx = MARGIN_LEFT + stringIdx * STR_SPACING;
             const adjustedFret = fret === 0 ? 0 : fret - startFret;
-            const cy = fret === 0 ? MARGIN_TOP - 14 : MARGIN_TOP + (adjustedFret - 0.5) * FRET_SPACING;
+            const cy = fret === 0 ? MARGIN_TOP - 20 : MARGIN_TOP + (adjustedFret - 0.5) * FRET_SPACING;
             const stableKey = `ghost-${stringIdx}-${fret}`;
             const dotKey = `${stringIdx}-${fret}`; // ADDED
 
@@ -407,7 +445,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
               const label = getGlobalLabel(labelMode, namingMode, rootSemi, formula, role, midi, noteName);
               const cx = MARGIN_LEFT + stringIdx * STR_SPACING;
           const adjustedFret = fret === 0 ? 0 : fret - startFret;
-          const cy = fret === 0 ? MARGIN_TOP - 14 : MARGIN_TOP + (adjustedFret - 0.5) * FRET_SPACING;
+          const cy = fret === 0 ? MARGIN_TOP - 20 : MARGIN_TOP + (adjustedFret - 0.5) * FRET_SPACING;
           
           const dotKey = `${stringIdx}-${fret}`;
           const stableKey = `scale-${stringIdx}-${fret}`;
@@ -508,13 +546,13 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           const color = colorMode === 'roles' ? (fretObj.role ? (ROLE_COLORS_GLOBAL[normRoleTop] ?? theme.accent) : theme.accent) : theme.accent;
           return (
             <React.Fragment key={`top-${strIdx}`}>
-              {fretObj.fret === null ? ( <SvgText x={cx} y={MARGIN_TOP - 10} fontSize={13} fill={theme.txt3} textAnchor="middle" fontWeight="700">×</SvgText> ) : 
+              {fretObj.fret === null ? ( <SvgText x={cx} y={MARGIN_TOP - 13} fontSize={16} fill={theme.txt3} textAnchor="middle" fontWeight="700">×</SvgText> ) : 
                fretObj.fret === 0 ? null : 
-               ( <SvgText x={cx} y={MARGIN_TOP - 10} fontSize={10} fill={theme.txt2} textAnchor="middle" fontWeight="600">{STRING_LABELS[strIdx]}</SvgText> )}
+               ( <SvgText x={cx} y={MARGIN_TOP - 15} fontSize={13} fill={theme.txt2} textAnchor="middle" fontWeight="600">{STRING_LABELS[strIdx]}</SvgText> )}
             </React.Fragment>
           );
         })}
-        {isOpen && ( <Rect x={MARGIN_LEFT} y={MARGIN_TOP} width={STR_SPACING * 5} height={5} fill={theme.txt1} rx={2} /> )}
+        {isOpen && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * 5 + 1.75} height={5} fill={theme.txt1} /> )}
         {!isOpen && ( <SvgText x={MARGIN_LEFT - 20} y={MARGIN_TOP + FRET_SPACING * 0.6} fontSize={14} fill={theme.txt2} textAnchor="end" fontWeight="700">{fretLabel}</SvgText> )}
         {Array.from({ length: NUM_FRETS + 1 }).map((_, fi) => ( <Line key={`fret-${fi}`} x1={MARGIN_LEFT} y1={MARGIN_TOP + fi * FRET_SPACING} x2={MARGIN_LEFT + STR_SPACING * 5} y2={MARGIN_TOP + fi * FRET_SPACING} stroke={theme.border} strokeWidth={1} /> ))}
         {displayStrings.map((strIdx, displayPos) => {
@@ -585,7 +623,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
             }
 
             const cx = MARGIN_LEFT + stringIdx * STR_SPACING;
-            const cy = fret === 0 ? MARGIN_TOP - 14 : MARGIN_TOP + (fret - startFret - 0.5) * FRET_SPACING;
+            const cy = fret === 0 ? MARGIN_TOP - 20 : MARGIN_TOP + (fret - startFret - 0.5) * FRET_SPACING;
             const midi = GS_MIDI[stringIdx] + fret;
             const labelStr = getGlobalLabel(labelMode, namingMode, rootSemi, formula, role, midi, note.noteName);
             const stableKey = `ghost-${stringIdx}-${fret}`;
@@ -646,10 +684,13 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           const activeFret = isActive ? fretObj.fret : 1;
           const isZero = activeFret === 0;
           const midi = GS_MIDI[strIdx] + activeFret;
-          const formula = formulaByPC[midi % 12] || (fretObj.role ? (ROLE_SHORT[fretObj.role] ?? fretObj.role) : '') || '';
+          const isDropOrShell = voicing.type === 'drop2' || voicing.type === 'drop3' || voicing.type === 'drop2and4' || voicing.type === 'shell';
+          const formula = isDropOrShell
+            ? (fretObj.role ? (ROLE_SHORT[fretObj.role] ?? fretObj.role) : (formulaByPC[midi % 12] || ''))
+            : (formulaByPC[midi % 12] || (fretObj.role ? (ROLE_SHORT[fretObj.role] ?? fretObj.role) : '') || '');
           
           const cx = MARGIN_LEFT + displayPos * STR_SPACING;
-          const cy = isZero ? MARGIN_TOP - 14 : MARGIN_TOP + (activeFret - startFret - 0.5) * FRET_SPACING;
+          const cy = isZero ? MARGIN_TOP - 20 : MARGIN_TOP + (activeFret - startFret - 0.5) * FRET_SPACING;
           const normRole = fretObj.role === '1' ? 'R' : fretObj.role;
           const normFormula = formula === '1' ? 'R' : formula;
           
@@ -1029,9 +1070,11 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
 
   const specificName = formatVoicingName(currentVoicing?.name);
   const baseName = formatVoicingName(currentVoicing?.chordLabel || chordName);
-  
-  // Use specific name (e.g., "Root Position") if available, otherwise fallback to chord name
-  const bottomMainText = specificName || baseName;
+
+  const isTriad = currentVoicing?.type === 'triad';
+  const bottomMainText = isTriad
+    ? `${baseName}${slashSuffix}`
+    : (specificName || baseName);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
@@ -1052,7 +1095,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
             const idx = uniqueArpBoxNames.indexOf(activeArpBoxName);
             handleBoxChange(uniqueArpBoxNames[(idx - 1 + Math.max(1, uniqueArpBoxNames.length)) % Math.max(1, uniqueArpBoxNames.length)]);
           } else {
-            setGroupIdx((safeGroupIdx - 1 + Math.max(1, safeGroups.length)) % Math.max(1, safeGroups.length));
+            setGroupIdx((safeGroupIdx + 1) % Math.max(1, safeGroups.length));
             setVoicingIdx(0);
           }
           onNavigate?.(); 
@@ -1082,7 +1125,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
             const idx = uniqueArpBoxNames.indexOf(activeArpBoxName);
             handleBoxChange(uniqueArpBoxNames[(idx + 1) % Math.max(1, uniqueArpBoxNames.length)]);
           } else {
-            setGroupIdx((safeGroupIdx + 1) % Math.max(1, safeGroups.length));
+            setGroupIdx((safeGroupIdx - 1 + Math.max(1, safeGroups.length)) % Math.max(1, safeGroups.length));
             setVoicingIdx(0);
           }
           onNavigate?.(); 
@@ -1143,7 +1186,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           {shapesMode ? formatVoicingName(currentShapeVoicing?.scaleName) : 
            arpMode ? formatVoicingName(arpSubsets[arpSubsetIdx]?.label) : 
            scaleMode ? formatVoicingName(currentScaleVoicing?.scaleName) : 
-           `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${slashSuffix}`}
+           `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${isTriad ? '' : slashSuffix}`}
         </Text>
         <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>
           {shapesMode ? `${Math.max(0, uniqueShapeScaleIds.indexOf(activeShapeScaleId)) + 1}/${Math.max(1, uniqueShapeScaleIds.length)}` : 
@@ -1175,7 +1218,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       )}
 
       {currentVoicing || currentScaleVoicing || currentArpVoicing || currentShapeVoicing ? (
-        <View style={{ paddingBottom: 16 }}>
+        <View style={{ paddingTop: 16, paddingBottom: 0 }}>
           {shapesMode ? ( <ScaleDiagram scaleVoicing={currentShapeVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> ) :
            scaleMode ? ( <ScaleDiagram scaleVoicing={currentScaleVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} colorModeOverride={colorModeOverride} /> ) : 
            arpMode ? ( <ScaleDiagram scaleVoicing={currentArpVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> ) : 
@@ -1194,7 +1237,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
 export default FretboardView;
 
 const styles = StyleSheet.create({
-  container: { borderRadius: 20, marginHorizontal: 16, borderWidth: 1, minHeight: 320, overflow: 'hidden', paddingTop: 0 },
+  container: { overflow: 'hidden', paddingTop: 0 },
   navContainer: { 
   flexDirection: 'row', 
   alignItems: 'center', 

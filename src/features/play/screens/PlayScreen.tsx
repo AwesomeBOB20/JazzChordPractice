@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Animated, Platform
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useIsFocused } from '@react-navigation/native';
@@ -10,17 +11,17 @@ import { useChordStore } from '@features/play/store/chordStore';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
 import { ChordCard, CommandSheet, PianoView, type PianoViewRef, FretboardView, type FretboardViewRef } from '@shared/ui';
-import { buildTriadVoicings, buildShellVoicings, buildDropVoicings, buildScaleVoicings, buildArpVoicings, getArpSubsets, getIntervalSubsets, VoicingGroup, ScaleVoicing, buildOpenVoicings, buildBarreVoicings, buildHardcodedShapeVoicings, ShapeDisplayMode } from '@shared/guitar';
+import { buildTriadVoicings, buildShellVoicings, buildDropVoicings, buildScaleVoicings, buildArpVoicings, getArpSubsets, getIntervalSubsets, VoicingGroup, ScaleVoicing, buildOpenVoicings, buildBarreVoicings, buildHardcodedShapeVoicings, ShapeDisplayMode, OPEN_SHAPES, BARRE_SHAPES, findTriads, DROP_VOICINGS } from '@shared/guitar';
 import { SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { buildPianoVoicings } from '@shared/piano';
 import { useAudio } from '@shared/audio/AudioContext';
+import { ARP_SLOTS, buildArpPattern } from '@shared/audio/arpPattern';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 
-const ARP_SLOTS = 8;
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11];
 
 const ROLE_WEIGHT: Record<string, number> = {
-  'root': 1, 'R': 1, 'b2': 2, '2nd': 2, '2': 2, '#2': 2, 'b3': 3, '3rd': 3, '3': 3,
+  'root': 1, 'R': 1, '1': 1, 'b2': 2, '2nd': 2, '2': 2, '#2': 2, 'b3': 3, '3rd': 3, '3': 3,
   '4th': 4, '4': 4, '#4': 4, 'b5': 5, '5th': 5, '5': 5, '#5': 5, 'b6': 6, '6th': 6, '6': 6,
   'bb7': 7, 'b7': 7, '7th': 7, '7': 7, 'b9': 9, '9th': 9, '9': 9, '#9': 9,
   '11th': 11, '11': 11, '#11': 11, 'b13': 13, '13th': 13, '13': 13, '#13': 13
@@ -121,9 +122,10 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
 
 
 export default function PlayScreen() {
+  const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop } = useAudio();
   const { bpm, arp, setArp, playMode, setPlayMode, octave, theme, labelMode, instrument, setInstrument, sortMode, scaleOverlay } = useSettingsStore();
-  const { rootSemi, chordType, namingMode, shiftRoot, inputMode, selectedScaleId, setSelectedScaleId } = useChordStore();
+  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, inputMode, selectedScaleId, setSelectedScaleId } = useChordStore();
   const t = THEMES[theme];
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -166,8 +168,7 @@ export default function PlayScreen() {
     const AUDIO_LATENCY = 60; // Sync visual to audio bridge latency
     const SLOTS = loop ? ARP_SLOTS : midiNotes.length;
     const measureMs = msPerStep * SLOTS;
-    const pattern: number[] = [];
-    for (let i = 0; i < SLOTS; i++) pattern.push(midiNotes[i % midiNotes.length]);
+    const pattern: number[] = loop ? buildArpPattern(midiNotes) : midiNotes.slice(0, SLOTS);
     setIsPlaying(true);
     const fireMeasure = () => {
       pattern.forEach((midi, i) => {
@@ -267,6 +268,94 @@ export default function PlayScreen() {
     }
   };
 
+  const hasVoicingsForTabAndChord = (tab: VoicingTabKey, instr: string, r: number, ct: string): boolean => {
+    const ch = CH[ct];
+    if (!ch) return false;
+    const isPiano = instr === 'piano';
+
+    const countGuitar = (groups: VoicingGroup[]) => {
+      if (!groups) return 0;
+      let count = 0; const seen = new Set<string>();
+      groups.forEach(g => { g.voicings.forEach(v => { if (!seen.has(v.fingerprint)) { seen.add(v.fingerprint); count++; } }); });
+      return count;
+    };
+
+    if (isPiano) {
+      const pV = buildPianoVoicings(r, ct, octave, selectedScaleId, namingMode);
+      switch (tab) {
+        case 'block': return true;
+        case 'triads': return pV.triads.length > 0;
+        case 'shells': return pV.shells.length > 0;
+        case 'drop2': return !!(pV.drop2 && pV.drop2.length > 0);
+        case 'drop3': return !!(pV.drop3 && pV.drop3.length > 0);
+        case 'drop2and4': return !!(pV.drop2and4 && pV.drop2and4.length > 0);
+        case 'scales': return (CHORD_SCALE_MAP[ct] ?? []).length > 0;
+        case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
+        case 'intervals': return getIntervalSubsets(ch.iv, ch.r, ch.f || []).length > 0;
+        case 'shapes': return buildHardcodedShapeVoicings(ct, r, namingMode).length > 0;
+        default: return false;
+      }
+    } else {
+      const rootName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[r];
+      const chordName = `${rootName} ${ch.l}`;
+      switch (tab) {
+        case 'open': return countGuitar(buildOpenVoicings(ct, r, rootName, chordName)) > 0;
+        case 'barre': return countGuitar(buildBarreVoicings(ct, r, rootName, chordName)) > 0;
+        case 'triads': return countGuitar(buildTriadVoicings(ch, r, rootName, namingMode)) > 0;
+        case 'shells': {
+          const isTriad = ch.iv.length === 3;
+          return !isTriad && countGuitar(buildShellVoicings(ct, ch, r, rootName, chordName, namingMode)) > 0;
+        }
+        case 'drop2':
+        case 'drop3':
+        case 'drop2and4': {
+          const isTriad = ch.iv.length === 3;
+          if (isTriad) return false;
+          const allDrops = buildDropVoicings(ct, ch, r, rootName, chordName, namingMode);
+          const dropGroups = allDrops.filter(g => g.voicings[0]?.type === tab);
+          return countGuitar(dropGroups) > 0;
+        }
+        case 'scales': return (CHORD_SCALE_MAP[ct] ?? []).length > 0;
+        case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
+        case 'intervals': return getIntervalSubsets(ch.iv, ch.r, ch.f || []).length > 0;
+        case 'shapes': return buildHardcodedShapeVoicings(ct, r, namingMode).length > 0;
+        default: return false;
+      }
+    }
+  };
+
+  const getEligibleTypesForTab = (tab: VoicingTabKey, instr: string, types: string[]): string[] => {
+    const isPiano = instr === 'piano';
+    const filtered = types.filter(t => {
+      const ch = CH[t];
+      if (!ch) return false;
+      switch (tab) {
+        case 'block': return isPiano;
+        case 'open': return !isPiano && t in OPEN_SHAPES;
+        case 'barre': return !isPiano && t in BARRE_SHAPES;
+        case 'triads': return true;
+        case 'shells': {
+          if (isPiano) {
+            return ch.iv.length >= 4 && ch.iv.some(iv => iv === 9 || iv === 10 || iv === 11);
+          }
+          return ch.iv.length > 3;
+        }
+        case 'drop2':
+        case 'drop3':
+        case 'drop2and4': {
+          if (isPiano) return ch.iv.length >= 4;
+          return ch.iv.length > 3;
+        }
+        case 'scales': return (CHORD_SCALE_MAP[t] ?? []).length > 0;
+        case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
+        case 'intervals': return getIntervalSubsets(ch.iv, ch.r, ch.f || []).length > 0;
+        case 'shapes': return buildHardcodedShapeVoicings(t, 0, 'sharp').length > 0;
+        default: return true;
+      }
+    });
+    return filtered.length > 0 ? filtered : types;
+  };
+
   const handleRandomNext = () => {
     const { activeTypes, setChord, randomChord } = useChordStore.getState();
     
@@ -276,12 +365,29 @@ export default function PlayScreen() {
       return; 
     }
 
-    // Instantly pick a random root and type instead of calculating all possibilities
-    const r = Math.floor(Math.random() * 12);
-    const ct = activeTypes[Math.floor(Math.random() * activeTypes.length)];
+    const eligiblePairs: { r: number; ct: string }[] = [];
+    for (let r = 0; r < 12; r++) {
+      for (const ct of activeTypes) {
+        if (hasVoicingsForTabAndChord(voicingTab, instrument, r, ct)) {
+          eligiblePairs.push({ r, ct });
+        }
+      }
+    }
 
-    userInteractedRef.current = true;
-    setChord(r, ct);
+    const filteredPairs = eligiblePairs.filter(pair => !(pair.r === rootSemi && pair.ct === chordType));
+    const finalPairs = filteredPairs.length > 0 ? filteredPairs : eligiblePairs;
+
+    if (finalPairs.length > 0) {
+      const selected = finalPairs[Math.floor(Math.random() * finalPairs.length)];
+      userInteractedRef.current = true;
+      setChord(selected.r, selected.ct);
+    } else {
+      const eligibleTypes = getEligibleTypesForTab(voicingTab, instrument, activeTypes);
+      const r = Math.floor(Math.random() * 12);
+      const ct = eligibleTypes[Math.floor(Math.random() * eligibleTypes.length)];
+      userInteractedRef.current = true;
+      setChord(r, ct);
+    }
   };
 
   const currentChordDef = CH[chordType];
@@ -319,10 +425,10 @@ export default function PlayScreen() {
     rawGroups = [...rawGroups].sort((a, b) => {
       const bassA = a.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
       const bassB = b.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
-      return bassA - bassB;
+      return bassB - bassA;
     });
 
-    const ROLE_ORDER: Record<string, number> = { 'root': 0, 'R': 0, 'b2': 1, '2nd': 1, '2': 1, 'b3': 2, '3rd': 2, '3': 2, '4th': 3, '4': 3, '#4': 3, 'b5': 4, '5th': 4, '5': 4, '#5': 4, 'b6': 5, '6th': 5, '6': 5, 'bb7': 6, 'b7': 6, '7th': 6, '7': 6, 'b9': 7, '9th': 7, '9': 7, '#9': 7, '11th': 8, '11': 8, '#11': 8, 'b13': 9, '13th': 9, '13': 9, '#13': 9 };
+    const ROLE_ORDER: Record<string, number> = { 'root': 0, 'R': 0, '1': 0, 'b2': 1, '2nd': 1, '2': 1, 'b3': 2, '3rd': 2, '3': 2, '4th': 3, '4': 3, '#4': 3, 'b5': 4, '5th': 4, '5': 4, '#5': 4, 'b6': 5, '6th': 5, '6': 5, 'bb7': 6, 'b7': 6, '7th': 6, '7': 6, 'b9': 7, '9th': 7, '9': 7, '#9': 7, '11th': 8, '11': 8, '#11': 8, 'b13': 9, '13th': 9, '13': 9, '#13': 9 };
     const noteNames = namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP;
 
     return rawGroups.map(group => {
@@ -581,7 +687,7 @@ export default function PlayScreen() {
           return avgA - avgB;
         });
       } else {
-        const ROLE_ORDER: Record<string, number> = { 'root': 0, 'R': 0, 'b2': 1, '2nd': 1, '2': 1, 'b3': 2, '3rd': 2, '3': 2, '4th': 3, '4': 3, '#4': 3, 'b5': 4, '5th': 4, '5': 4, '#5': 4, 'b6': 5, '6th': 5, '6': 5, 'bb7': 6, 'b7': 6, '7th': 6, '7': 6, 'b9': 7, '9th': 7, '9': 7, '#9': 7, '11th': 8, '11': 8, '#11': 8, 'b13': 9, '13th': 9, '13': 9, '#13': 9 };
+        const ROLE_ORDER: Record<string, number> = { 'root': 0, 'R': 0, '1': 0, 'b2': 1, '2nd': 1, '2': 1, 'b3': 2, '3rd': 2, '3': 2, '4th': 3, '4': 3, '#4': 3, 'b5': 4, '5th': 4, '5': 4, '#5': 4, 'b6': 5, '6th': 5, '6': 5, 'bb7': 6, 'b7': 6, '7th': 6, '7': 6, 'b9': 7, '9th': 7, '9': 7, '#9': 7, '11th': 8, '11': 8, '#11': 8, 'b13': 9, '13th': 9, '13': 9, '#13': 9 };
         selectedGroup.sort((a: any, b: any) => {
           if (a.chordLabel !== b.chordLabel) return (a.chordLabel || '').localeCompare(b.chordLabel || '');
           const minMidiA = Math.min(...a.notes); const minMidiB = Math.min(...b.notes);
@@ -619,17 +725,91 @@ export default function PlayScreen() {
       groups.forEach(g => { g.voicings.forEach(v => { if (!seen.has(v.fingerprint)) { seen.add(v.fingerprint); count++; } }); });
       return count;
     };
+    const countByFormulaSet = (groups: VoicingGroup[]) => {
+      if (!groups) return 0;
+      const seen = new Set<string>();
+      groups.forEach(g => g.voicings.forEach(v => {
+        const bracketMatch = v.name?.match(/\[([^\]]+)\]$/);
+        const raw = bracketMatch ? bracketMatch[1] : (v.name || '');
+        const key = raw.split('-').sort().join('-');
+        if (key) seen.add(key);
+      }));
+      return seen.size;
+    };
+    const countPianoByFormulaSet = (arr: any[]) => {
+      if (!arr) return 0;
+      const seen = new Set<string>();
+      arr.forEach((v: any) => {
+        const key = (v.name || '').split('-').sort().join('-');
+        if (key) seen.add(key);
+      });
+      return seen.size || arr.length;
+    };
     const isPiano = instrument === 'piano';
     const pV = buildPianoVoicings(rootSemi, chordType, octave, selectedScaleId, namingMode);
     return {
       block: isPiano ? 1 : 0, open: isPiano ? 0 : countGuitar(allGuitarGroups.open), barre: isPiano ? 0 : countGuitar(allGuitarGroups.barre),
-      triads: isPiano ? pV.triads.length : countGuitar(allGuitarGroups.triads), shells: isPiano ? pV.shells.length : countGuitar(allGuitarGroups.shells),
-      drop2:  isPiano && pV.drop2 ? pV.drop2.length : countGuitar(allGuitarGroups.drop2), drop3:  isPiano && pV.drop3 ? pV.drop3.length : countGuitar(allGuitarGroups.drop3),
-      drop2and4: isPiano && pV.drop2and4 ? pV.drop2and4.length : countGuitar(allGuitarGroups.drop2and4),
+      triads: isPiano ? pV.triads.length : findTriads(currentChordDef).length, shells: isPiano ? countPianoByFormulaSet(pV.shells) : countByFormulaSet(allGuitarGroups.shells),
+      drop2:  isPiano && pV.drop2 ? countPianoByFormulaSet(pV.drop2) : countByFormulaSet(allGuitarGroups.drop2),
+      drop3:  isPiano && pV.drop3 ? countPianoByFormulaSet(pV.drop3) : countByFormulaSet(allGuitarGroups.drop3),
+      drop2and4: isPiano && pV.drop2and4 ? countPianoByFormulaSet(pV.drop2and4) : countByFormulaSet(allGuitarGroups.drop2and4),
       spread: 0, rootless: 0, // Hardcoded to 0 to permanently disable
       intervals: getIntervalSubsets(currentChordDef.iv, currentChordDef.r, currentChordDef.f || []).length, scales: (CHORD_SCALE_MAP[chordType] ?? []).length,
       arps: getArpSubsets(currentChordDef.iv, currentChordDef.r, currentChordDef.f || []).length,
-      shapes: instrument === 'piano' ? new Set(buildHardcodedShapeVoicings(chordType, rootSemi, namingMode).map((v: ScaleVoicing) => v.scaleName.replace(/\s*\([A-G]\s*Pos\)/i, '').trim())).size : buildHardcodedShapeVoicings(chordType, rootSemi, namingMode).length,
+      shapes: instrument === 'piano' ? new Set(buildHardcodedShapeVoicings(chordType, rootSemi, namingMode).map((v: ScaleVoicing) => v.scaleName.replace(/\s*\([A-G]\s*Pos\)/i, '').trim())).size : (() => {
+        const CHORD_STACKS: Record<string, { shapeKey: string, offset: number }[]> = {
+          'maj': [{ shapeKey: 'maj_shape', offset: 0 }],
+          'min': [{ shapeKey: 'min_shape', offset: 0 }],
+          'aug': [{ shapeKey: 'aug_shape', offset: 0 }],
+          'dim': [{ shapeKey: 'dim_4_shape', offset: 0 }],
+          'sus4': [{ shapeKey: 'sus4_shape', offset: 0 }],
+          'sus2': [{ shapeKey: 'sus2_shape', offset: 0 }],
+          'maj_b5': [{ shapeKey: 'maj_b5_shape', offset: 0 }],
+          'sus2_b5': [{ shapeKey: 'sus2_b5_shape', offset: 0 }],
+          'maj7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
+          'maj9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
+          'maj11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 11 }],
+          'maj13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }, { shapeKey: 'sus2_shape', offset: 7 }],
+          'add9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'sus2_shape', offset: 0 }],
+          'maj6': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
+          'maj69': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
+          'maj7s5': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 4 }],
+          'maj7s11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }],
+          'minAdd9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'sus2_shape', offset: 0 }],
+          'min7': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
+          'min9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
+          'min11': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+          'min13': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }, { shapeKey: 'min_shape', offset: 2 }],
+          'min6': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 9 }],
+          'min69': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 9 }],
+          'minMaj7': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 3 }],
+          'minMaj9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 3 }],
+          'dom7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 4 }],
+          'dom9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 4 }],
+          'dom11': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+          'dom13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }, { shapeKey: 'sus2_shape', offset: 2 }],
+          'dom7sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
+          'dom9sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
+          'dom13sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
+          'dom7b9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 4 }],
+          'dom7s9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
+          'dom7alt': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 3 }],
+          'dom7b13': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+          'dom13b9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 4 }],
+          'dom13s9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
+          'dom7b5': [{ shapeKey: 'b5_shape', offset: 0 }],
+          'dom7s5': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+          'dom7s11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }],
+          'dom7b5b9': [{ shapeKey: 'b5_b9_shape', offset: 0 }],
+          'dom7b5s9': [{ shapeKey: 'b5_s9_shape', offset: 0 }],
+          'dom7s5b9': [{ shapeKey: 's5_b9_shape', offset: 0 }],
+          'dom7s5s9': [{ shapeKey: 's5_s9_shape', offset: 0 }],
+          'dimMaj7': [{ shapeKey: 'dim_4_shape', offset: 0 }],
+          'hdim7': [{ shapeKey: 'min_b5_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 3 }],
+          'fdim7': [{ shapeKey: 'dim_4_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 3 }]
+        };
+        return (CHORD_STACKS[chordType] || [{ shapeKey: 'maj_shape', offset: 0 }]).length;
+      })(),
     };
   }, [allGuitarGroups, chordType, instrument, currentChordDef, octave, rootSemi, namingMode, selectedScaleId]);
 
@@ -710,6 +890,57 @@ export default function PlayScreen() {
     if (instrument === 'piano') setTimeout(() => playCurrentChordRef.current(), 0); else pendingPlayRef.current = true;
   };
 
+  const hasMultipleVoicings = React.useMemo(() => {
+    if (instrument === 'piano') {
+      const total = voicingTab === 'arps' ? arpSubsets.length : voicingTab === 'intervals' ? intervalSubsets.length : pianoVoicings.length;
+      return total > 1;
+    } else {
+      if (voicingTab === 'scales') {
+        const allowedScales = CHORD_SCALE_MAP[chordType] || [];
+        const activeScaleId = (selectedScaleId && allowedScales.includes(selectedScaleId)) ? selectedScaleId : allowedScales[0];
+        const scalesForCurrentId = scaleVoicings.filter(sv => sv.scaleId === activeScaleId);
+        return scalesForCurrentId.length > 1;
+      }
+      if (voicingTab === 'shapes') {
+        const allowedScales = CHORD_SCALE_MAP[chordType] || [];
+        const activeScaleId = (selectedScaleId && allowedScales.includes(selectedScaleId)) ? selectedScaleId : allowedScales[0];
+        const shapesForCurrentScale = shapeVoicings.filter(sv => sv.scaleId === activeScaleId);
+        return shapesForCurrentScale.length > 1;
+      }
+      if (voicingTab === 'arps') {
+        return arpVoicings.length > 1;
+      }
+      if (voicingTab === 'intervals') {
+        return intervalVoicings.length > 1;
+      }
+      const currentGroup = guitarGroups[0];
+      return (currentGroup?.voicings?.length ?? 0) > 1;
+    }
+  }, [instrument, voicingTab, arpSubsets.length, intervalSubsets.length, pianoVoicings.length, scaleVoicings, shapeVoicings, arpVoicings, intervalVoicings, guitarGroups, selectedScaleId, chordType]);
+
+  const cycleVoicing = (direction: 'prev' | 'next') => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (instrument === 'piano') {
+      if (voicingTab === 'arps' && arpSubsets.length) {
+        const nextIdx = direction === 'next' ? (safeArpSubsetIdx + 1) % arpSubsets.length : (safeArpSubsetIdx - 1 + arpSubsets.length) % arpSubsets.length;
+        setArpSubsetIdx(nextIdx);
+      } else if (voicingTab === 'intervals' && intervalSubsets.length) {
+        const nextIdx = direction === 'next' ? (safeIntervalSubsetIdx + 1) % intervalSubsets.length : (safeIntervalSubsetIdx - 1 + intervalSubsets.length) % intervalSubsets.length;
+        setIntervalSubsetIdx(nextIdx);
+      } else if (pianoVoicings.length) {
+        const nextIdx = direction === 'next' ? (pianoVoicingIdx + 1) % pianoVoicings.length : (pianoVoicingIdx - 1 + pianoVoicings.length) % pianoVoicings.length;
+        setPianoVoicingIdx(nextIdx);
+      }
+      handleManualNavigate();
+    } else {
+      if (direction === 'next') {
+        fretboardRef.current?.nextVoicing();
+      } else {
+        fretboardRef.current?.prevVoicing();
+      }
+    }
+  };
+
   if (!currentChordDef) {
     return ( <View style={[styles.safe, { backgroundColor: t.bg, justifyContent: 'center', alignItems: 'center' }]}> <Text style={{ color: t.txt1 }}>Loading Chord Data...</Text> </View> );
   }
@@ -739,95 +970,101 @@ export default function PlayScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg }]}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} maintainVisibleContentPosition={{ minIndexForVisible: 0 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
 
         <ChordCard
           rootSemi={rootSemi} chordType={chordType} namingMode={namingMode} subLabelRoot={subRoot} subLabelType={subType} overrideType={formattedMainType}
           onPress={handlePlay}
           onSwipeLeft={() => { 
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-            if (instrument === 'piano' && pianoVoicings.length) { setPianoVoicingIdx((pianoVoicingIdx - 1 + pianoVoicings.length) % pianoVoicings.length); handleManualNavigate(); } 
-            else if (instrument === 'guitar') fretboardRef.current?.prevVoicing(); 
-            else { userInteractedRef.current = true; shiftRoot('down'); }
+            userInteractedRef.current = true; 
+            shiftRoot('down'); 
           }}
           onSwipeRight={() => { 
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-            if (instrument === 'piano' && pianoVoicings.length) { setPianoVoicingIdx((pianoVoicingIdx + 1) % pianoVoicings.length); handleManualNavigate(); } 
-            else if (instrument === 'guitar') fretboardRef.current?.nextVoicing(); 
-            else { userInteractedRef.current = true; shiftRoot('up'); }
+            userInteractedRef.current = true; 
+            shiftRoot('up'); 
           }}
-          onLeftChevronPress={() => { 
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-            if (instrument === 'piano' && pianoVoicings.length) { setPianoVoicingIdx((pianoVoicingIdx - 1 + pianoVoicings.length) % pianoVoicings.length); handleManualNavigate(); } 
-            else if (instrument === 'guitar') fretboardRef.current?.prevVoicing(); 
-            else { userInteractedRef.current = true; shiftRoot('down'); }
+          onLeftChevronPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            userInteractedRef.current = true;
+            shiftRoot('down');
           }}
-          onRightChevronPress={() => { 
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-            if (instrument === 'piano' && pianoVoicings.length) { setPianoVoicingIdx((pianoVoicingIdx + 1) % pianoVoicings.length); handleManualNavigate(); } 
-            else if (instrument === 'guitar') fretboardRef.current?.nextVoicing(); 
-            else { userInteractedRef.current = true; shiftRoot('up'); }
+          onRightChevronPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            userInteractedRef.current = true;
+            shiftRoot('up');
+          }}
+          onTopChevronPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            userInteractedRef.current = true;
+            cycleType('next');
+          }}
+          onBottomChevronPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            userInteractedRef.current = true;
+            cycleType('prev');
           }}
           onNotePress={(midi) => onNotePress?.(midi, 80, instrument === 'guitar')}
           octave={octave} theme={t} activeIvs={displayIvs} activeRoles={displayRoles} activeFormula={displayFormula}
         />
 
-        {instrument === 'piano' ? (
-          <PianoView
-            ref={pianoRef} showAllLabels={true} header={combinedHeader} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
-            groupLabel="CHORD" voicingLabel={voicingTab === 'arps' || voicingTab === 'intervals' ? 'SUBSET' : 'VOICING'}
-            voicingName={(voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.label : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.label : (pianoVoicings[pianoVoicingIdx]?.chordLabel || displayChordName)) + pianoSlashSuffix}
-            voicingSubName={voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.subLabel : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.subLabel : pianoVoicings[pianoVoicingIdx]?.name}
-            voicingIdx={voicingTab === 'arps' ? safeArpSubsetIdx : voicingTab === 'intervals' ? safeIntervalSubsetIdx : pianoVoicingIdx}
-            totalVoicings={voicingTab === 'arps' ? arpSubsets.length : voicingTab === 'intervals' ? intervalSubsets.length : pianoVoicings.length}
-            onPrevVoicing={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); if (voicingTab === 'arps' && arpSubsets.length) setArpSubsetIdx((safeArpSubsetIdx - 1 + arpSubsets.length) % arpSubsets.length); else if (voicingTab === 'intervals' && intervalSubsets.length) setIntervalSubsetIdx((safeIntervalSubsetIdx - 1 + intervalSubsets.length) % intervalSubsets.length); else if (pianoVoicings.length) setPianoVoicingIdx((pianoVoicingIdx - 1 + pianoVoicings.length) % pianoVoicings.length); handleManualNavigate(); }}
-            onNextVoicing={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); if (voicingTab === 'arps' && arpSubsets.length) setArpSubsetIdx((safeArpSubsetIdx + 1) % arpSubsets.length); else if (voicingTab === 'intervals' && intervalSubsets.length) setIntervalSubsetIdx((safeIntervalSubsetIdx + 1) % intervalSubsets.length); else if (pianoVoicings.length) setPianoVoicingIdx((pianoVoicingIdx + 1) % pianoVoicings.length); handleManualNavigate(); }}
-            groups={pianoGroups}
-            onGroupPrev={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const prevIdx = (safeIdx - 1 + pianoGroups.length) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[prevIdx].startIdx); handleManualNavigate(); }}
-            onGroupNext={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const nextIdx = (safeIdx + 1) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[nextIdx].startIdx); handleManualNavigate(); }}
-            theme={t}
-            noteNames={(pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r).map((role: string, i: number) => {
-              const pv = pianoVoicings[pianoVoicingIdx];
-              if (pv && pv.formulas && pv.formulas[i]) return spellInterval(rootSemi, pv.formulas[i], namingMode === 'flat');
-              const pcIdx = currentChordDef.r.indexOf(role);
-              const formula = pcIdx !== -1 && currentChordDef.f ? currentChordDef.f[pcIdx] : role;
-              return spellInterval(rootSemi, formula, namingMode === 'flat');
-            })}
-            roles={pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r} formulas={pianoVoicings[pianoVoicingIdx]?.formulas || currentChordDef.f} formulaByPC={formulaByPC}
-            onNotePress={(midi: number) => onNotePress?.(midi, 80, false)}
-            octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={[]} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
-          />
-        ) : (
-          <FretboardView
-            ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={voicingTab === 'triads' ? Math.max(0, guitarGroups.length - 1) : 0}
-            onNotePress={(midi) => onNotePress?.(midi, 80, true)} onNavigate={handleManualNavigate}
-            onPlayVoicing={(midiNotes: number[], voicingName: string, activeRoles?: string[], activeIvs?: number[], spelledNames?: string[], activeFormula?: string[]) => {
-              if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') {
-                currentScaleMidi.current = midiNotes;
-                let label = voicingName;
-                if (voicingTab === 'arps') label = `${rootNoteName} ${arpSubsets[safeArpSubsetIdx]?.label}`;
-                if (voicingTab === 'intervals') label = `${rootNoteName} ${intervalSubsets[safeIntervalSubsetIdx]?.label}`;
-                setVariationLabel(label);
-                if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
-              } else {
-                currentGuitarMidi.current = midiNotes;
-                const isDifferentChord = voicingName !== displayChordName;
-                setVariationLabel(isDifferentChord ? voicingName : undefined);
-                if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
-              }
-              if (pendingPlayRef.current) { pendingPlayRef.current = false; setTimeout(() => { playCurrentChordRef.current(); }, 50); }
-            }}
-            rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
-            scaleVoicings={scaleVoicings} scaleMode={voicingTab === 'scales'} arpMode={voicingTab === 'arps' || voicingTab === 'intervals'} arpVoicings={voicingTab === 'arps' ? arpVoicings : voicingTab === 'intervals' ? intervalVoicings : []} arpSubsets={voicingTab === 'intervals' ? intervalSubsets : arpSubsets} arpSubsetIdx={voicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
-            overlayNotes={guitarOverlayNotes} // Explicitly pass the full-neck array down
-            onArpSubsetChange={(idx) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); }}
-            shapesMode={voicingTab === 'shapes'} shapeVoicings={shapeVoicings} formulaByPC={formulaByPC}
-            namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={[]} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
-            selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
-          />
-        )}
-
-        {/* SETTINGS MENU HAS BEEN OFFICIALLY OBLITERATED FROM HERE */}
+        <View style={{ justifyContent: 'center' }}>
+          {instrument === 'piano' ? (
+            <PianoView
+              ref={pianoRef} showAllLabels={true} header={combinedHeader} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
+              groupLabel="CHORD" voicingLabel={voicingTab === 'arps' || voicingTab === 'intervals' ? 'SUBSET' : 'VOICING'}
+              voicingName={(voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.label : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.label : (pianoVoicings[pianoVoicingIdx]?.chordLabel || displayChordName)) + pianoSlashSuffix}
+              voicingSubName={voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.subLabel : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.subLabel : pianoVoicings[pianoVoicingIdx]?.name}
+              voicingIdx={voicingTab === 'arps' ? safeArpSubsetIdx : voicingTab === 'intervals' ? safeIntervalSubsetIdx : pianoVoicingIdx}
+              totalVoicings={voicingTab === 'arps' ? arpSubsets.length : voicingTab === 'intervals' ? intervalSubsets.length : pianoVoicings.length}
+              onPrevVoicing={() => cycleVoicing('prev')}
+              onNextVoicing={() => cycleVoicing('next')}
+              groups={pianoGroups}
+              onGroupPrev={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const prevIdx = (safeIdx - 1 + pianoGroups.length) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[prevIdx].startIdx); handleManualNavigate(); }}
+              onGroupNext={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const nextIdx = (safeIdx + 1) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[nextIdx].startIdx); handleManualNavigate(); }}
+              theme={t}
+              noteNames={(pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r).map((role: string, i: number) => {
+                const pv = pianoVoicings[pianoVoicingIdx];
+                if (pv && pv.formulas && pv.formulas[i]) return spellInterval(rootSemi, pv.formulas[i], namingMode === 'flat');
+                const pcIdx = currentChordDef.r.indexOf(role);
+                const formula = pcIdx !== -1 && currentChordDef.f ? currentChordDef.f[pcIdx] : role;
+                return spellInterval(rootSemi, formula, namingMode === 'flat');
+              })}
+              roles={pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r} formulas={pianoVoicings[pianoVoicingIdx]?.formulas || currentChordDef.f} formulaByPC={formulaByPC}
+              onNotePress={(midi: number) => onNotePress?.(midi, 80, false)}
+              octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={[]} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
+            />
+          ) : (
+            <FretboardView
+              ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={voicingTab === 'triads' ? Math.max(0, guitarGroups.length - 1) : 0}
+              onNotePress={(midi) => onNotePress?.(midi, 80, true)} onNavigate={handleManualNavigate}
+              onPlayVoicing={(midiNotes: number[], voicingName: string, activeRoles?: string[], activeIvs?: number[], spelledNames?: string[], activeFormula?: string[]) => {
+                if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') {
+                  currentScaleMidi.current = midiNotes;
+                  let label = voicingName;
+                  if (voicingTab === 'arps') label = `${rootNoteName} ${arpSubsets[safeArpSubsetIdx]?.label}`;
+                  if (voicingTab === 'intervals') label = `${rootNoteName} ${intervalSubsets[safeIntervalSubsetIdx]?.label}`;
+                  setVariationLabel(label);
+                  if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
+                } else {
+                  currentGuitarMidi.current = midiNotes;
+                  const isDifferentChord = voicingName !== displayChordName;
+                  setVariationLabel(isDifferentChord ? voicingName : undefined);
+                  if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
+                }
+                if (pendingPlayRef.current) { pendingPlayRef.current = false; setTimeout(() => { playCurrentChordRef.current(); }, 50); }
+              }}
+              rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
+              scaleVoicings={scaleVoicings} scaleMode={voicingTab === 'scales'} arpMode={voicingTab === 'arps' || voicingTab === 'intervals'} arpVoicings={voicingTab === 'arps' ? arpVoicings : voicingTab === 'intervals' ? intervalVoicings : []} arpSubsets={voicingTab === 'intervals' ? intervalSubsets : arpSubsets} arpSubsetIdx={voicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
+              overlayNotes={guitarOverlayNotes} // Explicitly pass the full-neck array down
+              onArpSubsetChange={(idx) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); }}
+              shapesMode={voicingTab === 'shapes'} shapeVoicings={shapeVoicings} formulaByPC={formulaByPC}
+              namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={[]} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
+              selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
+            />
+          )}
+        </View>
 
       </ScrollView>
 
@@ -886,7 +1123,7 @@ export default function PlayScreen() {
           // so it respects the current voicing tab, shapes, inversions, and octave
           setTimeout(() => { playCurrentChordRef.current(); }, 50); 
         }} 
-        onExecute={() => { if (inputMode === 'random') handleRandomNext(); }} />
+        onExecute={() => {}} />
 
     </View>
   );
@@ -906,7 +1143,7 @@ const styles = StyleSheet.create({
   miniPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   miniPillTxt: { fontSize: 11, fontWeight: '800' },
 
-  stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: Platform.OS === 'ios' ? 24 : 12 },
+  stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
   enginePillTxt: { fontSize: 14, fontWeight: '700' },
   

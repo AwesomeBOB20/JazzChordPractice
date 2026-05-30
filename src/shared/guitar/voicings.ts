@@ -39,7 +39,7 @@ export interface VoicingGroup {
   voicings: Voicing[];
 }
 
-const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; variation: string; frets: (number | null)[]; roles: (string | null)[]; fingers?: (number | null)[] }[]> = {
+export const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; variation: string; frets: (number | null)[]; roles: (string | null)[]; fingers?: (number | null)[] }[]> = {
   'maj': [
     { name: 'E Shape', rootSemi: 4, variation: 'Standard', frets: [0, 2, 2, 1, 0, 0], roles: ['root', '5th', 'root', '3rd', '5th', 'root'] },
     { name: 'A Shape', rootSemi: 9, variation: 'Standard', frets: [null, 0, 2, 2, 2, 0], roles: [null, 'root', '5th', 'root', '3rd', '5th'] },
@@ -71,10 +71,18 @@ const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; variation: 
   'min9': [
     { name: 'E Shape Min9', rootSemi: 4, variation: 'Standard', frets: [0, 2, 0, 0, 0, 2], roles: ['root', '5th', 'b7', 'b3', '5th', '9th'] },
     { name: 'A Shape Min9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -2, 0, 0, 0], roles: [null, 'root', 'b3', 'b7', '9th', '5th'], fingers: [null, 2, 1, 3, 3, 3] },
+  ],
+  'maj_b5': [
+    { name: 'D Shape (♭5)', rootSemi: 2, variation: 'Strings 4-3-2', frets: [null, null, 0, 1, 1, null], roles: [null, null, 'root', 'b5', '3rd', null] },
+    { name: 'G Shape (♭5)', rootSemi: 7, variation: 'Strings 4-3-2', frets: [null, null, 0, 0, 1, null], roles: [null, null, 'root', 'root', 'b5', null] },
+  ],
+  'sus2_b5': [
+    { name: 'D Shape sus2(♭5)', rootSemi: 2, variation: 'Strings 4-3-2', frets: [null, null, 0, 1, 0, null], roles: [null, null, 'root', 'b5', '2nd', null] },
+    { name: 'G Shape sus2(♭5)', rootSemi: 7, variation: 'Strings 4-3-2', frets: [null, null, 0, 0, 0, null], roles: [null, null, 'root', 'root', '2nd', null] },
   ]
 };
 
-const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; variation?: string; frets: (number | null)[]; roles: (string | null)[] }[]> = {
+export const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; variation?: string; frets: (number | null)[]; roles: (string | null)[] }[]> = {
   'maj': [
     { rootSemi: 0, name: 'C Shape', variation: 'Standard', frets: [null, 3, 2, 0, 1, 0], roles: [null, 'root', '3rd', '5th', 'root', '3rd'] },
     { rootSemi: 0, name: 'C Shape', variation: 'Low 5th Bass', frets: [3, 3, 2, 0, 1, 0], roles: ['5th', 'root', '3rd', '5th', 'root', '3rd'] },
@@ -383,7 +391,11 @@ export function findTriads(
   const pcs = new Set(chordDef.iv.map(iv => iv % 12));
   const result: any[] = [];
 
+  const isSourceTriad = chordDef.iv.length === 3;
+
   for (let ci = 0; ci < chordDef.iv.length; ci++) {
+    if (isSourceTriad && chordDef.r[ci] !== 'root') continue;
+
     for (const [triadKey, triadDef] of Object.entries(TRIAD_TYPES)) {
       const triadRoot = chordDef.iv[ci] % 12;
       const triadPCs = triadDef.iv.map(iv => (triadRoot + iv) % 12);
@@ -395,9 +407,11 @@ export function findTriads(
         return chordDef.r[idx];
       });
 
-      const isDup = result.some(
-        x => x.triadType === triadKey && x.rootInterval === chordDef.iv[ci]
-      );
+      const pcSetKey = [...triadPCs].sort((a, b) => a - b).join(',');
+      const isDup = result.some(x => {
+        const xPCs = x.triadDef.iv.map((iv: number) => (x.rootInterval % 12 + iv) % 12).sort((a: number, b: number) => a - b).join(',');
+        return xPCs === pcSetKey;
+      });
 
       if (!isDup) {
         result.push({
@@ -423,7 +437,7 @@ export function findTriads(
 }
 
 
-const TRIAD_FULL_NAMES: Record<string, string> = {
+export const TRIAD_FULL_NAMES: Record<string, string> = {
   maj:     'Major',
   min:     'Minor',
   aug:     'Augmented',
@@ -449,7 +463,8 @@ const BASS_ROLE_RANK: Record<string, number> = {
 };
 
 function sortVoicingGroups(groups: VoicingGroup[]): VoicingGroup[] {
-  groups.sort((a, b) => b.label.localeCompare(a.label)); // Guarantees 6-5-4-3 before 5-4-3-2
+  const bassRank = (label: string) => label.includes('D Bass') ? 0 : label.includes('A Bass') ? 1 : label.includes('E Bass') ? 2 : label.charCodeAt(0);
+  groups.sort((a, b) => bassRank(a.label) - bassRank(b.label));
   groups.forEach(g => {
     g.voicings.sort((a, b) => {
       // KEEP DROP & SHELL VOICINGS IN STRICT FRETBOARD ORDER
@@ -581,15 +596,14 @@ const SHELL_DEFS: Record<string, string[][]> = {
   // Altered 7ths
   'dom7b9':   [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
   'dom7s9':   [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom7alt':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
+  'dom7alt':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','b9th'], ['root','7th','b9th'], ['3rd','7th','b9th'], ['7th','3rd','#9th']],
   'dom7b13':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  'dom7s13':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
   // 11th chords
-  'maj7s11':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th'], ['7th','3rd','11th']],
-  'dom7s11':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th'], ['7th','3rd','11th']],
+  'maj7s11':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','#11th'], ['3rd','7th','#11th'], ['7th','3rd','#11th']],
+  'dom7s11':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','#11th'], ['3rd','7th','#11th'], ['7th','3rd','#11th']],
   'maj11':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th']],
   'min11':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th']],
-  'dom11':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th']],
+  'dom11':    [['root','5th','7th'], ['root','7th','11th'], ['root','9th','11th'], ['5th','7th','11th'], ['7th','9th','11th']],
   // 13th chords - Added rootless (3-7-13)
   'maj13':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
   'min13':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
@@ -662,7 +676,7 @@ const CHORD_ID_PRIORITY = [
   'maj13', 'min13', 'dom13b9', 'dom13s9', 'dom13',
   'maj6', 'min6', 'maj69', 'min69',
   'dom7b5b9', 'dom7b5s9', 'dom7s5b9', 'dom7s5s9', 'dom7alt',
-  'dom7b9', 'dom7s9', 'dom7b13', 'dom7s13',
+  'dom7b9', 'dom7s9', 'dom7b13',
   'maj11', 'min11', 'dom11',
   'maj', 'min', 'aug', 'dim', 'sus4', 'sus2',
 ];
@@ -692,6 +706,8 @@ export function identifyChord(
       { label: 'Minor 6', iv: [0, 3, 9] },  // R b3 6
       { label: 'm7b5',    iv: [0, 6, 10] }, // R b5 b7
       { label: '7sus4',   iv: [0, 5, 10] }, // R 4 b7
+      { label: 'Major ♭5', iv: [0, 4, 6] },  // R 3 b5
+      { label: 'Sus2 ♭5',  iv: [0, 2, 6] },  // R 2 b5
     ];
     for (const pattern of SHELL_PATTERNS) {
       const transposed = new Set(pattern.iv.map(iv => (iv + expectedRootPC) % 12));
@@ -705,6 +721,7 @@ export function identifyChord(
   }
 
   // Pass 1: Exact matches for fully voiced chords
+  const matches: { type: string; complexity: number; root: number; name: string; label: string }[] = [];
   for (const type of CHORD_ID_PRIORITY) {
     const def = CH[type];
     if (!def) continue;
@@ -718,10 +735,18 @@ export function identifyChord(
         const name = spelledRootMap && spelledRootMap[root] ? spelledRootMap[root] : names[root];
         const label = def.l;
         if (typeof name === 'string' && typeof label === 'string') {
-          return `${name} ${label}`;
+          matches.push({ type, complexity: def.iv.length, root, name, label });
         }
       }
     }
+  }
+  
+  // Sort by complexity (fewer notes = simpler = priority)
+  matches.sort((a, b) => a.complexity - b.complexity);
+  
+  if (matches.length > 0) {
+    const best = matches[0];
+    return `${best.name} ${best.label}`;
   }
 
   // Pass 2: Common 3-note shell subsets (rootless or 5th-less voicings)
@@ -829,9 +854,9 @@ export function buildShellVoicings(
           if (fret < 0 || fret > 22) { isValid = false; break; }
           const role = typeof formulaOverride === 'string' ? formulaOverride : chordDef.r[intIdx];
           const rawFormula = typeof formulaOverride === 'string' ? formulaOverride : (chordDef.f?.[intIdx] ?? role);
-          const formula = rawFormula.replace(/root/gi, 'R').replace(/nd|rd|th/gi, '');
+          const formula = rawFormula.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
           rolesUsed.push(role);
-          formulasUsed.push(formula === 'root' ? 'R' : formula);
+          formulasUsed.push(formula === 'root' ? '1' : formula);
           fretArr[strIdx] = { fret, role, finger: 0 };
         }
 
@@ -965,9 +990,10 @@ export function buildScaleVoicings(
       // non-root notes well below 0 even after the anchor is correctly placed.
       // If any note would land at a negative fret (and be filtered out), shift the entire
       // box up one octave so all notes remain on the physical neck.
-      const minRelFret = Math.min(...notesData.map(n => n[1] + shift));
-      if (minRelFret < 0) {
+      let minRelFret = Math.min(...notesData.map(n => n[1] + shift));
+      while (minRelFret < 0) {
           shift += 12;
+          minRelFret = Math.min(...notesData.map(n => n[1] + shift));
       }
 
       const mappedNotes = notesData.map(([strIdx, relFret, formula]) => {
@@ -1125,7 +1151,7 @@ export function getArpSubsets(
       }
 
       subsets.push({
-            label: identified || 'Arpeggio',
+            label: identified || formula.join('-'),
             subLabel,
             ivs,
             roles,
@@ -1242,11 +1268,13 @@ export function buildArpVoicings(
 const DROP2_STRING_GROUPS = [
   { label: 'Strings 4-3-2-1', stringNums: '4 3 2 1', indices: [2, 3, 4, 5] },
   { label: 'Strings 5-4-3-2', stringNums: '5 4 3 2', indices: [1, 2, 3, 4] },
+  { label: 'Strings 6-5-4-3', stringNums: '6 5 4 3', indices: [0, 1, 2, 3] },
 ];
 
 const DROP3_STRING_GROUPS = [
   { label: 'Strings 5-3-2-1', stringNums: '5 3 2 1', indices: [1, 3, 4, 5] },
   { label: 'Strings 6-4-3-2', stringNums: '6 4 3 2', indices: [0, 2, 3, 4] },
+  { label: 'Strings 6-5-3-1', stringNums: '6 5 3 1', indices: [0, 1, 3, 5] },
 ];
 
 // Generates all 4-note combinations for chords with >4 notes (like 9ths or 13ths)
@@ -1333,34 +1361,65 @@ export function buildDropVoicings(
   namingMode: 'sharp' | 'flat' = 'sharp'
 ): VoicingGroup[] {
   const ROOTLESS_SUB_MAP: Record<string, { type: string, ivOffset: number, roleMap: string[], rootFormula: string }> = {
-    'maj9': { type: 'min7', ivOffset: 4, roleMap: ['3rd', '5th', '7th', '9th'], rootFormula: '3' },
-    'min9': { type: 'maj7', ivOffset: 3, roleMap: ['b3', '5th', 'b7', '9th'], rootFormula: 'b3' },
-    'dom9': { type: 'hdim7', ivOffset: 4, roleMap: ['3rd', '5th', 'b7', '9th'], rootFormula: '3' },
-    'minMaj9': { type: 'maj7s5', ivOffset: 3, roleMap: ['b3', '5th', '7th', '9th'], rootFormula: 'b3' },
-    'maj11': { type: 'maj7', ivOffset: 7, roleMap: ['5th', '7th', '9th', '11th'], rootFormula: '5' },
-    'dom11': { type: 'min7', ivOffset: 7, roleMap: ['5th', 'b7', '9th', '11th'], rootFormula: '5' },
-    'maj69': { type: 'min7', ivOffset: 9, roleMap: ['6th', 'root', '3rd', '5th'], rootFormula: '6' },
-    'min69': { type: 'hdim7', ivOffset: 9, roleMap: ['6th', 'root', 'b3', '5th'], rootFormula: '6' },
-    'dom7b9': { type: 'fdim7', ivOffset: 4, roleMap: ['3rd', '5th', 'b7', 'b9'], rootFormula: '3' },
-    'dom13b9': { type: 'fdim7', ivOffset: 4, roleMap: ['3rd', '5th', 'b7', 'b9'], rootFormula: '3' },
-    'dom7alt': { type: 'min7', ivOffset: 3, roleMap: ['#9', 'b5', 'b7', 'b9'], rootFormula: '#9' },
-    'dom7b13': { type: 'dom7b5', ivOffset: 4, roleMap: ['3rd', 'b13', 'b7', '9th'], rootFormula: '3' },
-    'dom7b5b9': { type: 'dom7', ivOffset: 6, roleMap: ['b5', 'b7', 'b9', '3rd'], rootFormula: 'b5' },
-    // Removed dom7b5s9, dom7s5b9, dom7s5s9 because the substitutions incorrectly generate b9s and b5s!
-    'dom9sus4': { type: 'maj7', ivOffset: 10, roleMap: ['b7', '9th', '4th', '5th'], rootFormula: 'b7' },
-    'dom13sus4': { type: 'maj7', ivOffset: 10, roleMap: ['b7', '9th', '4th', '13th'], rootFormula: 'b7' },
+    // 9th chords — rootless = core 7th from 3rd or b3
+    'maj9':     { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '9th'],     rootFormula: '3'  },
+    'min9':     { type: 'maj7',     ivOffset: 3,  roleMap: ['b3', '5th', 'b7', '9th'],       rootFormula: 'b3' },
+    'dom9':     { type: 'hdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '9th'],      rootFormula: '3'  },
+    'minMaj9':  { type: 'maj7s5',   ivOffset: 3,  roleMap: ['b3', '5th', '7th', '9th'],      rootFormula: 'b3' },
+    // 11th chords — rootless = core 7th from 5th
+    'maj11':    { type: 'maj7',     ivOffset: 7,  roleMap: ['5th', '7th', '9th', '11th'],    rootFormula: '5'  },
+    'min11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
+    'dom11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
+    'dom7s11':  { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', 'b7', '9th', '#11'],      rootFormula: '3'  },
+    'maj7s11':  { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '#11'],     rootFormula: '3'  },
+    // 13th chords — rootless = core 7th from 3rd or b3
+    'maj13':    { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '9th'],     rootFormula: '3'  },
+    'min13':    { type: 'maj7',     ivOffset: 3,  roleMap: ['b3', '5th', 'b7', '9th'],       rootFormula: 'b3' },
+    'dom13':    { type: 'hdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '9th'],      rootFormula: '3'  },
+    'dom13b9':  { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
+    'dom13s9':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
+    // 6/9 chords
+    'maj69':    { type: 'dom7sus4', ivOffset: 9,  roleMap: ['6th', '9th', '3rd', '5th'],     rootFormula: '6'  },
+    'min69':    { type: 'min7',     ivOffset: 9,  roleMap: ['6th', '9th', 'b3', '5th'],      rootFormula: '6'  },
+    // Add9 chords — rootless = sus4 chord from 5th
+    'add9':     { type: 'dom7sus4', ivOffset: 7,  roleMap: ['5th', '3rd', '9th', 'root'],    rootFormula: '5'  },
+    'minAdd9':  { type: 'dom7sus4', ivOffset: 7,  roleMap: ['5th', 'b3', '9th', 'root'],     rootFormula: '5'  },
+    // Altered / sus dominant chords
+    'dom7s9':   { type: 'dom7',     ivOffset: 3,  roleMap: ['#9', '5th', 'b7', '3rd'],       rootFormula: '#9' },
+    'dom7b9':   { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
+    'dom7alt':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
+    'dom7b13':  { type: 'dom7b5',   ivOffset: 4,  roleMap: ['3rd', 'b13', 'b7', '9th'],      rootFormula: '3'  },
+    'dom7b5b9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', 'b9', '3rd'],        rootFormula: 'b5' },
+    'dom7b5s9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', '#9', '3rd'],        rootFormula: 'b5' },
+    'dom7s5b9': { type: 'dom7',     ivOffset: 4,  roleMap: ['3rd', '#5', 'b7', 'b9'],        rootFormula: '3'  },
+    'dom7s5s9': { type: 'dom7',     ivOffset: 4,  roleMap: ['3rd', '#5', 'b7', '#9'],        rootFormula: '3'  },
+    'dom9sus4':  { type: 'maj6',    ivOffset: 10, roleMap: ['b7', '9th', '4th', '5th'],      rootFormula: 'b7' },
+    'dom13sus4': { type: 'maj7',    ivOffset: 10, roleMap: ['b7', '9th', '4th', '13th'],     rootFormula: 'b7' },
+    // Misc
+    'dimMaj7':  { type: 'maj7s5',   ivOffset: 3,  roleMap: ['b3', 'b5', '7th', 'root'],      rootFormula: 'b3' },
   };
 
   const fallbackMap: Record<string, string> = {
     'maj7s5': 'maj7s5',
-    'minMaj9': 'minMaj7',
-    'dom11': 'dom7sus4',
-    // Removed dom7b9, dom7s9, dom13b9, dom7alt, maj7s11, min11, and dom7s5s9 so the engine uses explicit shapes!
+    // 9th chords → core 7th rooted voicings
+    'maj9': 'maj7', 'min9': 'min7', 'dom9': 'dom7', 'minMaj9': 'minMaj7',
+    // 11th chords
+    'maj11': 'maj7', 'min11': 'min7', 'dom11': 'dom7sus4',
+    'dom7s11': 'dom7', 'maj7s11': 'maj7',
+    // 13th chords
+    'maj13': 'maj7', 'min13': 'min7', 'dom13': 'dom7',
+    'dom13b9': 'dom7', 'dom13s9': 'dom7alt',
+    // 6/9 and add9
+    'maj69': 'maj6', 'min69': 'min6',
+    'add9': 'maj7', 'minAdd9': 'min7',
+    // Altered dominants
     'dom7b13': 'dom7s5',
-    'dom13s9': 'dom7alt',
-    'dom7b5b9': 'dom7b5', 'dom7b5s9': 'dom7alt',
-    'dom7s5b9': 'dom7s5',
-    'dom9sus4': 'dom7sus4', 'dom13sus4': 'dom7sus4'
+    'dom7b5b9': 'dom7b5', 'dom7b5s9': 'dom7b5',
+    'dom7s5b9': 'dom7s5', 'dom7s5s9': 'dom7s5',
+    // Sus chords
+    'dom9sus4': 'dom7sus4', 'dom13sus4': 'dom7sus4',
+    // Misc
+    'dimMaj7': 'minMaj7',
   };
 
   const passes = [
@@ -1407,14 +1466,14 @@ export function buildDropVoicings(
               
             let formula = role;
             if (pass.isRootless && pass.roleMap) {
-               formula = role.replace(/root/gi, 'R').replace(/nd|rd|th/gi, '');
+               formula = role.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
             } else {
                const rawFormula = typeof formulaOverride === 'string' ? formulaOverride : (effectiveDef.f?.[intIdx] ?? role);
-               formula = rawFormula.replace(/root/gi, 'R').replace(/nd|rd|th/gi, '');
+               formula = rawFormula.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
             }
 
             rolesUsed.push(role);
-            formulasUsed.push(formula === 'root' ? 'R' : formula);
+            formulasUsed.push(formula === 'root' ? '1' : formula);
             fretArr[strIdx] = { fret, role, finger: 0 };
           }
 
@@ -1480,24 +1539,29 @@ export function buildHardcodedShapeVoicings(
     'dim': [{ shapeKey: 'dim_4_shape', offset: 0 }],
     'sus4': [{ shapeKey: 'sus4_shape', offset: 0 }],
     'sus2': [{ shapeKey: 'sus2_shape', offset: 0 }],
+    'maj_b5': [{ shapeKey: 'maj_b5_shape', offset: 0 }],
+    'sus2_b5': [{ shapeKey: 'sus2_b5_shape', offset: 0 }],
     
     'maj7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
     'maj9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
-    // Maj11 implies Lydian, so stacking a Major shape on the 2nd gives us 9, #11, 13
-    'maj11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }],
-    // Maj13 gets a Minor shape stacked on the 6th (e.g. Am over C gives 13, R, 3)
-    'maj13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
+    // Maj11: Stack maj at 0 + min at 11 (C major + B minor) for 7, 9, 11
+    'maj11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 11 }],
+    // Maj13: Stack maj at 0 + min at 4 + sus2 at 7 for R, 3, 5, 7, 9, 13
+    'maj13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }, { shapeKey: 'sus2_shape', offset: 7 }],
+    'add9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'sus2_shape', offset: 0 }],
+    
     'maj6': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
     'maj69': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
     'maj7s5': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 4 }],
     'maj7s11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }],
 
+    'minAdd9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'sus2_shape', offset: 0 }],
     'min7': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
     'min9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
-    // Min11 gets a Minor shape stacked on the 5th (e.g. Gm over C gives 5, b7, 9, 11)
-    'min11': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
-    // Min13 gets a Major shape stacked on the b7 (e.g. Bb over C gives b7, 9, 11, 13)
-    'min13': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+    // Min11: Stack min at 0 + maj at 10 (C minor + Bb major) for b7, 9, 11
+    'min11': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+    // Min13: Stack min at 0 + maj at 10 + min at 2 for R, b3, 5, b7, 9, 11, 13
+    'min13': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }, { shapeKey: 'min_shape', offset: 2 }],
     'min6': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 9 }],
     'min69': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 9 }],
     'minMaj7': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 3 }],
@@ -1505,9 +1569,10 @@ export function buildHardcodedShapeVoicings(
 
     'dom7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 4 }],
     'dom9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 4 }],
-    // Superimposing a Minor shape from the 2nd (e.g. Dm over C) maps the 9th, 11th, and 13th perfectly.
-    'dom11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 2 }],
-    'dom13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 2 }],
+    // Dom11: Stack sus4 at 0 + maj at 10 (Csus4 + Bb major) for b7, 9, 11
+    'dom11': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
+    // Dom13: Stack maj at 0 + min at 7 + sus2 at 2 for R, 3, 5, b7, 9, 13
+    'dom13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }, { shapeKey: 'sus2_shape', offset: 2 }],
     'dom7sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
     'dom9sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
     'dom13sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
@@ -1520,9 +1585,16 @@ export function buildHardcodedShapeVoicings(
     'dom7b13': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
     'dom13b9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 4 }],
     'dom13s9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
-    'dom7b5': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 10 }],
+    'dom7b5': [{ shapeKey: 'b5_shape', offset: 0 }],
     'dom7s5': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
     
+    'dom7s11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }],
+    'dom7b5b9': [{ shapeKey: 'b5_b9_shape', offset: 0 }],
+    'dom7b5s9': [{ shapeKey: 'b5_s9_shape', offset: 0 }],
+    'dom7s5b9': [{ shapeKey: 's5_b9_shape', offset: 0 }],
+    'dom7s5s9': [{ shapeKey: 's5_s9_shape', offset: 0 }],
+    
+    'dimMaj7': [{ shapeKey: 'dim_4_shape', offset: 0 }],
     'hdim7': [{ shapeKey: 'min_b5_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 3 }],
     'fdim7': [{ shapeKey: 'dim_4_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 3 }]
   };
@@ -1586,6 +1658,9 @@ export function buildHardcodedShapeVoicings(
           // Contextual override for the Diminished 4th shape
           if (shapeKey === 'dim_4_shape' && offset === 0 && interval === 4) return { role: 'b4th', formula: 'b4' };
           if (shapeKey === 'dim_4_shape' && offset === 0 && interval === 9) return { role: 'bb7th', formula: 'bb7' };
+
+          // Contextual override for b5 shapes to show 3rd for visualization
+          if ((shapeKey === 'maj_b5_shape' || shapeKey === 'sus2_b5_shape') && offset === 0 && interval === 4) return { role: '3rd', formula: '3' };
 
           const defaultRoles = ['root', 'b2', '2nd', 'b3', '3rd', '4th', '#4', '5th', 'b6', '6th', 'b7', '7th'];
           const defaultFormulas = ['R', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
@@ -1696,4 +1771,16 @@ export function buildHardcodedShapeVoicings(
       });
 
   return results;
+}
+
+export function filterVoicingsByInversion(
+  voicings: Voicing[],
+  inversion: 'root' | '1st' | '2nd' | '3rd'
+): Voicing[] {
+  if (inversion === 'root') {
+    // Match both "Root Position" (triads) and "Root Pos" (drop voicings)
+    return voicings.filter(v => v.name.includes('Root Position') || v.name.includes('Root Pos') || !v.name.includes('Inv'));
+  }
+  // Match both "1st Inversion" (triads) and "1st Inv" (drop voicings)
+  return voicings.filter(v => v.name.includes(`${inversion} Inversion`) || v.name.includes(`${inversion} Inv`));
 }

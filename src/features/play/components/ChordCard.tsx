@@ -19,6 +19,8 @@ interface Props {
   onSwipeRight?: () => void;
   onLeftChevronPress?: () => void;
   onRightChevronPress?: () => void;
+  onTopChevronPress?: () => void;
+  onBottomChevronPress?: () => void;
   onNotePress?: (midi: number) => void;
   octave?: number;
   theme?: Theme;
@@ -55,7 +57,7 @@ function AnimatedPill({ p, color, onNotePress }: any) {
 export default function ChordCard({
   rootSemi, chordType, namingMode, subLabel, subLabelRoot, subLabelType,
   onPress, onSwipeLeft, onSwipeRight, onLeftChevronPress, onRightChevronPress, 
-  onNotePress, octave = 4, theme, activeIvs, activeRoles, activeFormula, overrideType
+  onTopChevronPress, onBottomChevronPress, onNotePress, octave = 4, theme, activeIvs, activeRoles, activeFormula, overrideType
 }: Props) {
   const ch = CH[chordType];
   const labelMode = useSettingsStore(s => s.labelMode);
@@ -169,7 +171,7 @@ export default function ChordCard({
     <View style={[styles.card, { backgroundColor: bg, borderColor: border }]}>
       <View style={styles.row}>
 
-        <View style={styles.left} {...panResponder.panHandlers}>
+        <View style={[styles.left, { position: 'relative' }]} {...panResponder.panHandlers}>
           {/* Background Play Button */}
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
@@ -177,30 +179,31 @@ export default function ChordCard({
             onPress={onPress}
           />
 
+          {/* Top Chevron */}
+          <TouchableOpacity
+            onPress={onTopChevronPress}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            style={{ position: 'absolute', top: 4, left: '50%', marginLeft: -10, zIndex: 10, padding: 4 }}
+          >
+            <Ionicons name="chevron-up" size={20} color={txt3} style={{ opacity: 0.6 }} />
+          </TouchableOpacity>
+
+          {/* Bottom Chevron */}
+          <TouchableOpacity
+            onPress={onBottomChevronPress}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            style={{ position: 'absolute', bottom: 4, left: '50%', marginLeft: -10, zIndex: 10, padding: 4 }}
+          >
+            <Ionicons name="chevron-down" size={20} color={txt3} style={{ opacity: 0.6 }} />
+          </TouchableOpacity>
+
           {/* Foreground Content Wrapper */}
-          <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center', position: 'relative' }} pointerEvents="box-none">
-            
-            <TouchableOpacity
-              onPress={onLeftChevronPress}
-              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-              style={{ position: 'absolute', left: -4, zIndex: 10, padding: 4 }}
-            >
-              <Ionicons name="chevron-back" size={22} color={txt3} style={{ opacity: 0.8 }} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={onRightChevronPress}
-              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-              style={{ position: 'absolute', right: -4, zIndex: 10, padding: 4 }}
-            >
-              <Ionicons name="chevron-forward" size={22} color={txt3} style={{ opacity: 0.8 }} />
-            </TouchableOpacity>
-
+          <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center' }} pointerEvents="box-none">
             <View style={[styles.nameRow, { marginBottom: 0 }]} pointerEvents="none">
               <Text style={[styles.root, { color: txt1 }]}>{rootName}</Text>
-              <Text 
-                style={[styles.type, { color: accent }]} 
-                numberOfLines={1} 
+              <Text
+                style={[styles.type, { color: accent }]}
+                numberOfLines={1}
                 adjustsFontSizeToFit
               >
                 {formatChordSymbol(mainSuffix)}
@@ -258,17 +261,35 @@ export default function ChordCard({
           )}
         </View>
 
+        {/* Left Chevron */}
+        <TouchableOpacity
+          onPress={onLeftChevronPress}
+          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+          style={{ position: 'absolute', left: 4, top: '50%', marginTop: -18, zIndex: 10, height: 36, width: 36, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Ionicons name="chevron-back" size={22} color={txt3} style={{ opacity: 0.6 }} />
+        </TouchableOpacity>
+
+        {/* Right Chevron */}
+        <TouchableOpacity
+          onPress={onRightChevronPress}
+          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+          style={{ position: 'absolute', left: '42%', marginLeft: -40, top: '50%', marginTop: -18, zIndex: 10, height: 36, width: 36, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Ionicons name="chevron-forward" size={22} color={txt3} style={{ opacity: 0.6 }} />
+        </TouchableOpacity>
+
       </View>
     </View>
   );
 }
 const styles = StyleSheet.create({
-  card: { borderRadius: 20, marginHorizontal: 16, borderWidth: 1, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'stretch', height: 140 },
+  card: { borderBottomWidth: 1, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'stretch', height: 150, position: 'relative' },
   
-  left: { width: '40%', paddingVertical: 20, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
+  left: { width: '42%', paddingVertical: 20, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
   divider: { width: 1, alignSelf: 'stretch' },
-  right: { width: '60%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, paddingHorizontal: 8, gap: 6 },
+  right: { width: '58%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, paddingHorizontal: 8, gap: 6 },
   pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
   
   nameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center', gap: 4, marginBottom: 4 },

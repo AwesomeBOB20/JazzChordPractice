@@ -7,10 +7,16 @@ export interface QuizState {
   quizScore: number;
   quizTotal: number;
   quizStreak: number;
+  activeVoicingTypes: string[];
+  activeInversions: string[];
 
   setQuizMode: (mode: 'visual' | 'audio') => void;
   resetQuiz: () => void;
   incrementQuiz: (correct: boolean) => void;
+  toggleVoicingType: (type: string) => void;
+  setActiveVoicingTypes: (types: string[]) => void;
+  toggleInversion: (inversion: string) => void;
+  setActiveInversions: (inversions: string[]) => void;
 }
 
 export const useQuizStore = create<QuizState>()(
@@ -20,6 +26,8 @@ export const useQuizStore = create<QuizState>()(
       quizScore: 0,
       quizTotal: 0,
       quizStreak: 0,
+      activeVoicingTypes: ['block', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'],
+      activeInversions: ['root', '1st', '2nd', '3rd'],
 
       setQuizMode: (quizMode) => set({ quizMode }),
       resetQuiz: () => set({ quizScore: 0, quizTotal: 0, quizStreak: 0 }),
@@ -28,10 +36,35 @@ export const useQuizStore = create<QuizState>()(
         quizScore: correct ? state.quizScore + 1 : state.quizScore,
         quizStreak: correct ? state.quizStreak + 1 : 0,
       })),
+      toggleVoicingType: (type) => set((state) => {
+        const next = new Set(state.activeVoicingTypes);
+        if (next.has(type)) {
+          if (next.size > 1) next.delete(type);
+        } else {
+          next.add(type);
+        }
+        return { activeVoicingTypes: Array.from(next) };
+      }),
+      setActiveVoicingTypes: (activeVoicingTypes) => set({ activeVoicingTypes }),
+      toggleInversion: (inversion) => set((state) => {
+        const next = new Set(state.activeInversions);
+        if (next.has(inversion)) {
+          if (next.size > 1) next.delete(inversion);
+        } else {
+          next.add(inversion);
+        }
+        return { activeInversions: Array.from(next) };
+      }),
+      setActiveInversions: (activeInversions) => set({ activeInversions }),
     }),
     {
       name: 'jazz-quiz-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({
+        quizMode: state.quizMode,
+        activeVoicingTypes: state.activeVoicingTypes,
+        activeInversions: state.activeInversions,
+      }),
     }
   )
 );

@@ -79,7 +79,7 @@ export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Pr
         {shape && shape.notes && [0,1,2,3,4,5].map((strIdx) => {
           const hasNotes = shape.notes.some((n: any) => n.stringIdx === strIdx && n.fret !== null);
           if (!hasNotes) {
-              return <SvgText key={`mut-s-${strIdx}`} x={dotR + strIdx * strSpc} y={topY + 3} fill={theme.txt3} fontSize={8} textAnchor="middle" fontWeight="bold">X</SvgText>;
+              return <SvgText key={`mut-s-${strIdx}`} x={dotR + strIdx * strSpc} y={topY - 1} fill={theme.txt3} fontSize={8} textAnchor="middle" fontWeight="bold">X</SvgText>;
           }
           return null;
         })}
@@ -95,7 +95,7 @@ export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Pr
           }
 
           if (note.fret === 0) {
-            return <Circle key={`shape-open-${i}`} cx={dotR + note.stringIdx * strSpc} cy={topY} r={2.5} fill="transparent" stroke={color} strokeWidth={1.5} />;
+            return <Circle key={`shape-open-${i}`} cx={dotR + note.stringIdx * strSpc} cy={topY - 1} r={3.4} fill="transparent" stroke={color} strokeWidth={1.5} />;
           }
 
           const relFret = note.fret - startF;
@@ -108,7 +108,7 @@ export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Pr
 
         {!shape && voicing && voicing.frets.map((f: any, i: number) => {
           if (!f || f.fret === null) {
-              return <SvgText key={`mut-v-${i}`} x={dotR + i * strSpc} y={topY + 3} fill={theme.txt3} fontSize={8} textAnchor="middle" fontWeight="bold">X</SvgText>;
+              return <SvgText key={`mut-v-${i}`} x={dotR + i * strSpc} y={topY - 1} fill={theme.txt3} fontSize={8} textAnchor="middle" fontWeight="bold">X</SvgText>;
           }
           
           const color = isMasked 
@@ -116,7 +116,7 @@ export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Pr
             : getNoteColor(f.role === '1' ? 'R' : f.role, colorMode, theme, selectiveRoles);
 
           if (f.fret === 0) {
-            return <Circle key={`v-open-${i}`} cx={dotR + i * strSpc} cy={topY} r={2.5} fill="transparent" stroke={color} strokeWidth={1.5} />;
+            return <Circle key={`v-open-${i}`} cx={dotR + i * strSpc} cy={topY - 1} r={3.4} fill="transparent" stroke={color} strokeWidth={1.5} />;
           }
           
           const relFret = f.fret - startF;

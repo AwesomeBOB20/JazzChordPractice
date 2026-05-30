@@ -4,6 +4,7 @@ import { WebView } from 'react-native-webview';
 import { Audio } from 'expo-av'; // BRING THIS BACK just for OS configuration
 import { AUDIO_ASSETS } from '@shared/audio/audioAssets';
 import { getAudioEngineHtml } from './audioEngine'; // Update this import
+import { ARP_SLOTS, buildArpPattern } from './arpPattern';
 
 // (Keep your interfaces here: PlayNotesConfig, PlayMeasureConfig, ProgressionMeasure, SoundfontPlayerRef)
 export interface PlayNotesConfig { arp: boolean; bpm: number; volume: number; guitar?: boolean; scale?: boolean; hold?: boolean; arpSwing?: boolean; refFreq?: number; }
@@ -32,6 +33,11 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
   const progSeqIdxRef = useRef(0);
   const progIsLoopingRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const progBaseTimeRef = useRef(0);
+  const progTotalDurationRef = useRef(0);
+  const progLoopOffsetRef = useRef(0);
+  const progMeasureOffsetsRef = useRef<number[]>([]);
+  const bossaMeasureCounterRef = useRef(0);
 
   // Configure OS Audio Session on mount
   useEffect(() => {
@@ -66,7 +72,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     }
   };
 
-  const sendSchedule = (events: any[]) => {
+  const sendSchedule = (events: any[], durationMs?: number) => {
     if (!isEngineReady || !webViewRef.current) {
         console.warn("Dropped audio: Engine not ready yet");
         return;
@@ -79,7 +85,8 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
 
     webViewRef.current.postMessage(JSON.stringify({
       type: 'PLAY_SCHEDULE',
-      events: events
+      events: events,
+      durationMs: durationMs
     }));
   };
 
@@ -93,25 +100,53 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     }
   };
 
+  // Click-free voice stealing: ramps any currently sounding voices to 0 over fadeMs
+  // and stops them. Unlike stopAll, this does NOT clear scheduled timers, so it can
+  // be used at note/measure boundaries to prevent the previous notes from ringing
+  // through (the "sustain pedal" effect) without interrupting the running sequence.
+  const releaseAll = (fadeMs: number = 60) => {
+    if (webViewRef.current) {
+      webViewRef.current.postMessage(JSON.stringify({ type: 'RELEASE_ALL', fadeMs }));
+    }
+  };
+
+
   useImperativeHandle(ref, () => ({
     stop: stopAll,
     
     playNotes: (midiNotes, config) => {
       stopAll();
       const instrument = config.guitar ? 'guitar' : 'piano';
-      const vol = config.volume / 100;
+      const vol = Math.min(1.5, (config.volume / 100) * 1.5);
       const cleanNotes = midiNotes.filter(n => n !== null && !isNaN(n));
       const events: any[] = [];
 
+      const arpBeatSecs = 60 / config.bpm;
+      // For arpeggios, ring each note for one slot then fade out over a generous
+      // release tail so notes crossfade naturally into the next attack instead of
+      // stacking like a held sustain pedal or being chopped off mid-attack.
+      const arpSlotMs = arpBeatSecs * 500; // 0.5 beat slot in ms
+      const arpReleaseMs = 140;
       cleanNotes.forEach((midi, index) => {
         let delaySecs = 0;
         if (config.arp) {
-          const beatSecs = 60 / config.bpm;
           const beatIndex = Math.floor(index / 2);
           const isOffbeat = index % 2 === 1;
-          delaySecs = beatIndex * beatSecs + (isOffbeat ? beatSecs * (config.arpSwing ? 0.66 : 0.5) : 0);
+          delaySecs = beatIndex * arpBeatSecs + (isOffbeat ? arpBeatSecs * (config.arpSwing ? 0.66 : 0.5) : 0);
         } else if (config.guitar) {
           delaySecs = index * 0.012;
+        }
+
+        let durationMs: number | null;
+        let releaseMs: number | undefined;
+        if (config.hold) {
+          durationMs = null;
+        } else if (config.arp) {
+          durationMs = arpSlotMs + arpReleaseMs;
+          releaseMs = arpReleaseMs;
+        } else {
+          durationMs = 1100; // 1100ms total
+          releaseMs = 350;   // 350ms smooth release
         }
 
         events.push({
@@ -119,7 +154,8 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
           midi,
           volume: vol,
           timeOffset: delaySecs,
-          durationMs: config.hold ? null : 2000
+          durationMs,
+          releaseMs,
         });
       });
 
@@ -127,7 +163,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     },
 
     playSingleNote: (midi, volume, guitar = false) => {
-      sendSchedule([{ instrument: guitar ? 'guitar' : 'piano', midi, volume: volume / 100, timeOffset: 0, durationMs: 2000 }]);
+      sendSchedule([{ instrument: guitar ? 'guitar' : 'piano', midi, volume: volume / 100, timeOffset: 0, durationMs: 1000, releaseMs: 350 }]);
     },
 
     playTone: (midi, volume) => {
@@ -140,20 +176,24 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       stopAll();
       const instrument = guitar ? 'guitar' : 'piano';
       const vol = volume / 100;
-      const cleanNotes = midiNotes.filter(n => n !== null && !isNaN(n));
-      if (!cleanNotes.length) return;
-      
-      let noteIdx = 0;
+      const pattern = buildArpPattern(midiNotes);
+      if (!pattern.length) return;
+
+      let slot = 0;
       const beatMs = 60000 / bpm;
-      
+
+      // Each note rings for one slot (half a beat) plus a release tail, so the
+      // next note's attack arrives while the previous is gently fading out.
+      const slotMs = beatMs * 0.5;
+      const arpReleaseMs = 140;
       const playNextArp = () => {
-          const midi = cleanNotes[noteIdx % cleanNotes.length];
-          sendSchedule([{ instrument, midi, volume: vol, timeOffset: 0, durationMs: beatMs * 1.5 }]);
-          
-          const isOffbeat = noteIdx % 2 === 1;
+          const midi = pattern[slot % ARP_SLOTS];
+          sendSchedule([{ instrument, midi, volume: vol, timeOffset: 0, durationMs: slotMs + arpReleaseMs, releaseMs: arpReleaseMs }]);
+
+          const isOffbeat = slot % 2 === 1;
           const delayToNext = isOffbeat ? beatMs * (arpSwing ? 0.66 : 0.5) : beatMs * (arpSwing ? 1.34 : 0.5);
-          
-          noteIdx++;
+
+          slot++;
           timersRef.current.push(setTimeout(playNextArp, delayToNext));
       };
       playNextArp();
@@ -166,24 +206,31 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         const clickVol = (config.clickVolume ?? 80) / 100;
         const events = [];
         for (let i = 0; i < beats; i++) {
-          events.push({ instrument: 'piano', midi: i === 0 ? 84 : 76, volume: clickVol, timeOffset: i * beatSecs, durationMs: 500 });
+          events.push({ instrument: 'metronome', midi: i === 0 ? 84 : 76, volume: clickVol, timeOffset: i * beatSecs, durationMs: 100 });
         }
-        sendSchedule(events);
+        sendSchedule(events, beatSecs * beats * 1000);
         return;
       }
 
       const instrument = config.guitar ? 'guitar' : 'piano';
-      const vol = config.volume / 100;
+      const vol = Math.min(1.5, (config.volume / 100) * 1.5);
       const cleanNotes = midiNotes.filter(n => n !== null && !isNaN(n));
       const events: any[] = [];
 
+      // Release any previously sounding voices so the new chord doesn't ring on top of the old.
+      if (!config.skipTransitionFade) releaseAll(150);
+
+      const beatSecs = 60 / config.bpm;
+      const beats = config.beats || 4;
+      const measureMs = beatSecs * beats * 1000;
+
       cleanNotes.forEach((midi, index) => {
          const delaySecs = config.guitar ? index * 0.012 : 0;
-         events.push({ instrument, midi, volume: vol, timeOffset: delaySecs, durationMs: 2000 });
+         events.push({ instrument, midi, volume: vol, timeOffset: delaySecs, durationMs: measureMs * 0.8 + 150, releaseMs: 150 });
       });
-      
+
       if (config.bassEnabled && cleanNotes.length > 0) {
-         events.push({ instrument: 'bass', midi: cleanNotes[0], volume: (config.bassVolume ?? 70) / 100, timeOffset: 0, durationMs: 2500 });
+         events.push({ instrument: 'bass', midi: cleanNotes[0], volume: Math.min(1.5, ((config.bassVolume ?? 70) / 100) * 1.5), timeOffset: 0, durationMs: measureMs * 0.8 + 150, releaseMs: 150 });
       }
 
       sendSchedule(events);
@@ -191,63 +238,199 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
 
     playProgression: (sequence, onChordChange, onEnd, loop = false) => {
       if (!sequence.length) return;
-      stopAll();
+      // Clear only the JS-side scheduler/timers so the WebView audio clock
+      // (nextMeasureTime) is preserved — crucial when the count-off has
+      // already primed the timeline.
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current = [];
+      if (progSchedulerRef.current) clearTimeout(progSchedulerRef.current);
       
       progSeqRef.current = sequence;
       progSeqIdxRef.current = 0;
       progIsLoopingRef.current = loop;
+      bossaMeasureCounterRef.current = 0;
+
+      // Pre-compute cumulative start offsets for each measure.
+      // This enables absolute-time scheduling so timer jitter never compounds.
+      const offsets: number[] = [];
+      let cumulativeMs = 0;
+      for (const m of sequence) {
+        offsets.push(cumulativeMs);
+        const beatSecs = 60 / m.bpm;
+        cumulativeMs += (beatSecs * 1000) * m.beats;
+      }
+      progMeasureOffsetsRef.current = offsets;
+      progTotalDurationRef.current = cumulativeMs;
+      progBaseTimeRef.current = Date.now() + 100;
+      progLoopOffsetRef.current = 0;
 
       const runNextMeasure = () => {
         if (progSeqIdxRef.current >= progSeqRef.current.length) {
-            if (progIsLoopingRef.current) { progSeqIdxRef.current = 0; } 
-            else { onEnd(); return; }
+            if (progIsLoopingRef.current) { 
+                progLoopOffsetRef.current += progTotalDurationRef.current;
+                progSeqIdxRef.current = 0; 
+            } else { 
+                // Schedule onEnd so the final chord ring-out isn't cut short.
+                const onEndTargetMs = progBaseTimeRef.current + progLoopOffsetRef.current + progTotalDurationRef.current + 250;
+                const onEndDelay = Math.max(0, onEndTargetMs - Date.now());
+                progSchedulerRef.current = setTimeout(onEnd, onEndDelay); 
+                return; 
+            }
         }
 
         const measure = progSeqRef.current[progSeqIdxRef.current];
-        onChordChange(progSeqIdxRef.current, measure.chordIdx);
+        const currentIdx = progSeqIdxRef.current;
+        const currentChordIdx = measure.chordIdx;
+
+        // Compute absolute start time of this measure's audio.
+        // runNextMeasure fires ~100 ms before the measure starts, so the
+        // UI delay lines the highlight up with the first audible beat.
+        const measureStartMs = progBaseTimeRef.current + progLoopOffsetRef.current + progMeasureOffsetsRef.current[currentIdx];
+        const uiDelay = Math.max(0, measureStartMs - Date.now());
+        const uiTimer = setTimeout(() => {
+          onChordChange(currentIdx, currentChordIdx);
+          timersRef.current = timersRef.current.filter(t => t !== uiTimer);
+        }, uiDelay);
+        timersRef.current.push(uiTimer);
         
         const instrument = measure.guitar ? 'guitar' : 'piano';
-        const vol = measure.volume / 100;
+        const vol = Math.min(1.5, (measure.volume / 100) * 1.5);
         const beatSecs = 60 / measure.bpm; 
+        const measureMs = beatSecs * 1000 * measure.beats;
         
-        let chordStrikesSecs: number[] = [0];
-        switch (measure.rhythm) {
-            case 'swing': chordStrikesSecs = [0, beatSecs * 1.66]; break;
-            case 'bossanova': chordStrikesSecs = [beatSecs * 0.5, beatSecs * 1.5, beatSecs * 2.5, beatSecs * 3.5]; break;
-            case 'waltz': chordStrikesSecs = [beatSecs, beatSecs * 2]; break;
-            case 'reggae':
-            case 'twostep': chordStrikesSecs = [beatSecs * 0.5, beatSecs * 1.5, beatSecs * 2.5, beatSecs * 3.5]; break;
-            default: chordStrikesSecs = [0]; break;
+        const isSplit = measure.beats === 2;
+
+        let cumulativeBeats = 0;
+        for (let i = 0; i < currentIdx; i++) {
+            cumulativeBeats += progSeqRef.current[i].beats;
         }
+        const isSecondHalf = isSplit && (cumulativeBeats % 4 === 2);
 
         const events: any[] = [];
+        let hasCustomScheduling = false;
+        let chordStrikesSecs: number[] = [0];
 
-        chordStrikesSecs.forEach(strikeTime => {
-            measure.midiNotes.forEach((midi, i) => {
-                const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
-                events.push({ instrument, midi, volume: vol, timeOffset: strikeTime + guitarStaggerSecs, durationMs: beatSecs * 1500 });
+        switch (measure.rhythm) {
+            case 'swing': {
+                hasCustomScheduling = true;
+                if (isSplit) {
+                    // Split swing: each half-measure chord is handled by its own PLAY_SCHEDULE.
+                    // Just play the current chord at beat 0, sustaining to end of its window.
+                    const strikeDur = measureMs + 400;
+                    measure.midiNotes.forEach((midi, i) => {
+                        const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
+                        events.push({ instrument, midi, volume: vol, timeOffset: guitarStaggerSecs, durationMs: strikeDur, releaseMs: 400 });
+                    });
+                } else {
+                    // Non-split swing: play at 0 and 5/3 beats — both sustain to end of measure
+                    const strike1Dur = measureMs + 400;
+                    measure.midiNotes.forEach((midi, i) => {
+                        const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
+                        events.push({ instrument, midi, volume: vol, timeOffset: guitarStaggerSecs, durationMs: strike1Dur, releaseMs: 400 });
+                    });
+
+                    const strike2Offset = (5/3) * beatSecs;
+                    const strike2Dur = (measureMs - strike2Offset * 1000) + 400;
+                    measure.midiNotes.forEach((midi, i) => {
+                        const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
+                        events.push({ instrument, midi, volume: vol, timeOffset: strike2Offset + guitarStaggerSecs, durationMs: strike2Dur, releaseMs: 400 });
+                    });
+                }
+                break;
+            }
+            case 'bossanova': {
+                const isEvenBossa = (Math.floor(cumulativeBeats / 4) % 2 === 0);
+                if (isSplit) {
+                    if (isSecondHalf) {
+                        chordStrikesSecs = isEvenBossa ? [beatSecs * 1.0] : [beatSecs * 0.5];
+                    } else {
+                        chordStrikesSecs = isEvenBossa ? [0, beatSecs * 1.5] : [beatSecs * 1.0];
+                    }
+                } else {
+                    chordStrikesSecs = isEvenBossa
+                        ? [0, beatSecs * 1.5, beatSecs * 3.0]
+                        : [beatSecs * 1.0, beatSecs * 2.5];
+                }
+                break;
+            }
+            case 'twostep': {
+                if (isSplit) {
+                    chordStrikesSecs = [beatSecs * 1.0];
+                } else {
+                    chordStrikesSecs = [beatSecs * 1.0, beatSecs * 3.0];
+                }
+                break;
+            }
+            case 'reggae': {
+                if (isSplit) {
+                    if (isSecondHalf) {
+                        chordStrikesSecs = [beatSecs * 1.0];
+                    } else {
+                        chordStrikesSecs = [beatSecs * 1.0, beatSecs * (5 / 3)];
+                    }
+                } else {
+                    chordStrikesSecs = [beatSecs * 1.0, beatSecs * (5 / 3), beatSecs * 3.0];
+                }
+                break;
+            }
+            case 'straight':
+            default: {
+                // For split (2-beat) measures only strike on beat 0 so chord 1
+                // sustains cleanly into chord 2 without a restrike at the handoff.
+                if (isSplit) {
+                    chordStrikesSecs = [0];
+                } else {
+                    chordStrikesSecs = [];
+                    for (let i = 0; i < measure.beats; i++) {
+                        chordStrikesSecs.push(i * beatSecs);
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!hasCustomScheduling) {
+            // Clamp: remove any strikes that fall at or beyond the measure window
+            chordStrikesSecs = chordStrikesSecs.filter(t => t < beatSecs * measure.beats);
+
+            chordStrikesSecs.forEach((strikeTime) => {
+                // Each strike sustains to the end of the measure so chords ring out
+                // naturally and crossfade into the next chord via the measure-boundary
+                // RELEASE_ALL fade rather than being cut short mid-ring.
+                const remainingMs = (beatSecs * measure.beats - strikeTime) * 1000;
+                const strikeDurMs = remainingMs + 400;
+                measure.midiNotes.forEach((midi, i) => {
+                    const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
+                    events.push({ instrument, midi, volume: vol, timeOffset: strikeTime + guitarStaggerSecs, durationMs: strikeDurMs, releaseMs: 400 });
+                });
             });
-        });
+        }
 
         if (measure.bassEnabled && measure.bassLine && measure.bassLine.length > 0) {
             measure.bassLine.forEach((bassMidi, i) => {
-                events.push({ instrument: 'bass', midi: bassMidi, volume: measure.bassVolume / 100, timeOffset: i * beatSecs, durationMs: beatSecs * 1500 });
+                events.push({ instrument: 'bass', midi: bassMidi, volume: Math.min(1.5, (measure.bassVolume / 100) * 1.5), timeOffset: i * beatSecs, durationMs: beatSecs * 1000 * 0.8 + 150, releaseMs: 120 });
             });
         } else if (measure.bassEnabled && measure.midiNotes.length > 0) {
-             events.push({ instrument: 'bass', midi: measure.midiNotes[0], volume: measure.bassVolume / 100, timeOffset: 0, durationMs: 2500 });
+             events.push({ instrument: 'bass', midi: measure.midiNotes[0], volume: Math.min(1.5, (measure.bassVolume / 100) * 1.5), timeOffset: 0, durationMs: measureMs * 0.8 + 150, releaseMs: 150 });
         }
 
         if (measure.metronomeEnabled) {
             for (let i = 0; i < measure.beats; i++) {
-                events.push({ instrument: 'piano', midi: i === 0 ? 84 : 76, volume: measure.clickVolume / 100, timeOffset: i * beatSecs, durationMs: 500 });
+                events.push({ instrument: 'metronome', midi: i === 0 ? 84 : 76, volume: measure.clickVolume / 100, timeOffset: i * beatSecs, durationMs: 100 });
             }
         }
 
-        sendSchedule(events);
-
         const currentMeasureMs = (beatSecs * 1000) * measure.beats;
+        sendSchedule(events, currentMeasureMs);
+        
+        // Schedule the next check at absolute time: 100ms before next measure starts.
+        // This prevents timer jitter from compounding across measures.
+        const nextMeasureStartMs = measureStartMs + currentMeasureMs;
+        const nextCheckTargetMs = nextMeasureStartMs - 100;
+        const nextCheckDelay = Math.max(100, nextCheckTargetMs - Date.now());
+
         progSeqIdxRef.current++;
-        progSchedulerRef.current = setTimeout(runNextMeasure, currentMeasureMs);
+        progSchedulerRef.current = setTimeout(runNextMeasure, nextCheckDelay);
       };
 
       runNextMeasure();

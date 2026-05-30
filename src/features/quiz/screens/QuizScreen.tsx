@@ -1,20 +1,35 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, Animated, Platform
+  ScrollView, Animated
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useIsFocused, useFocusEffect } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
 import { THEMES } from '@shared/ui/themes';
-import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval } from '@shared/theory/musicTheory';
+import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CommandSheet } from '@shared/ui';
 import { useAudio } from '@shared/audio/AudioContext';
-import { DROP_VOICINGS } from '@shared/guitar/dropVoicings';
-import { buildTriadVoicings, buildDropVoicings, buildShellVoicings, Voicing } from '@shared/guitar/voicings';
+import { 
+  buildTriadVoicings, 
+  buildDropVoicings, 
+  buildShellVoicings, 
+  buildOpenVoicings, 
+  buildBarreVoicings, 
+  buildScaleVoicings,
+  buildHardcodedShapeVoicings,
+  getArpSubsets,
+  getIntervalSubsets,
+  Voicing,
+  VoicingGroup,
+  filterVoicingsByInversion,
+} from '@shared/guitar';
+import { buildPianoVoicings, applyInversion } from '@shared/piano/pianoVoicings';
+import { UnifiedVoicing } from '@shared/types/models';
 
 const ALL_CHORD_KEYS = Object.keys(CH);
 
@@ -22,37 +37,162 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function findAudibleChordType(
+  root: number,
+  playedNotes: number[],
+  pool: string[]
+): string | null {
+  const playedPCs = new Set(playedNotes.map(n => n % 12));
+  for (const type of pool) {
+    const ch = CH[type];
+    if (!ch) continue;
+    const chordPCs = new Set(ch.iv.map(iv => (root + iv) % 12));
+    if (chordPCs.size < playedPCs.size) continue;
+    if (ch.iv.every(iv => playedPCs.has((root + iv) % 12))) return type;
+  }
+  return null;
+}
+
+function findSimplestContainedChordType(
+  root: number,
+  playedNotes: number[],
+  pool: string[]
+): string | null {
+  const playedPCs = new Set(playedNotes.map(n => n % 12));
+  let best: string | null = null;
+  let bestSize = Infinity;
+  for (const type of pool) {
+    const ch = CH[type];
+    if (!ch) continue;
+    if (ch.iv.every(iv => playedPCs.has((root + iv) % 12))) {
+      if (ch.iv.length < bestSize) {
+        bestSize = ch.iv.length;
+        best = type;
+      }
+    }
+  }
+  return best;
+}
+
 function buildOptions(
   correctRoot: number,
   correctType: string,
   pool: string[],
   quizMode: 'visual' | 'audio',
-  namingMode: 'sharp' | 'flat'
+  namingMode: 'sharp' | 'flat',
+  playedNotes?: number[],
+  inversion: 'root' | '1st' | '2nd' | '3rd' = 'root'
 ): { root: number; type: string; label: string }[] {
   const opts: { root: number; type: string; label: string }[] = [];
   const seenTypes = new Set<string>();
 
-  // Labels never include the root note to focus purely on testing chord quality
-  const makeLabel = (type: string) => CH[type]?.l ?? type;
+  const makeLabel = (type: string, isInverted: boolean = false) => {
+    const ch = CH[type];
+    if (!ch) return type;
+
+    const chordSymbol = ch.s;
+
+    // In audio mode, don't show slash notation since there's no visual reference
+    if (quizMode === 'audio') {
+      return chordSymbol;
+    }
+
+    if (!isInverted || inversion === 'root') {
+      return chordSymbol;
+    }
+
+    // Calculate bass note for slash notation
+    // Guard against accessing index that doesn't exist (e.g., 3rd inversion on triads)
+    const shiftIndex = inversion === '1st' ? 1 : inversion === '2nd' ? 2 : 3;
+    const bassInterval = ch.iv[Math.min(shiftIndex, ch.iv.length - 1)];
+    const bassSemi = (correctRoot + bassInterval) % 12;
+    const bassNote = namingMode === 'flat' ? NOTE_FLAT[bassSemi] : NOTE_SHARP[bassSemi];
+
+    return `${chordSymbol} / ${bassNote}`;
+  };
+
+  // In audio mode, filter pool to only include chord types that match the played notes
+  let filteredPool = pool;
+  if (quizMode === 'audio' && playedNotes && playedNotes.length > 0) {
+    const playedPCs = new Set(playedNotes.map(n => n % 12));
+
+    filteredPool = pool.filter(type => {
+      const ch = CH[type];
+      if (!ch) return false;
+
+      // Calculate the pitch classes this chord type would produce
+      const chordPCs = new Set(ch.iv.map(iv => (correctRoot + iv) % 12));
+
+      // Allow subset matches for shell voicings (e.g., R-3-7 played for R-3-5-7 chord)
+      // but still require that all played notes are valid chord tones
+      if (!ch.iv.every(iv => playedPCs.has((correctRoot + iv) % 12))) return false;
+
+      // Check that all played notes are contained within the chord's pitch classes
+      // This allows shell voicings to match their full chord counterparts
+      return playedPCs.size <= chordPCs.size && [...playedPCs].every((pc: number) => chordPCs.has(pc));
+    });
+
+    // NOTE: The blind fallback (if filteredPool.length < 4) has been completely removed
+    // to prevent superset chords from being forced back into the multiple choice array.
+  }
 
   seenTypes.add(correctType);
-  opts.push({ root: correctRoot, type: correctType, label: makeLabel(correctType) });
+  opts.push({ root: correctRoot, type: correctType, label: makeLabel(correctType, true) });
 
+  // Pass 1: Try to fill from the strictly filtered pool
   let attempts = 0;
   while (opts.length < 4 && attempts < 200) {
     attempts++;
-    const randType = pickRandom(pool);
+    if (filteredPool.length === 0) break;
+
+    const randType = pickRandom(filteredPool);
     
-    // Uniqueness is strictly based on chord quality (type) now
     if (!seenTypes.has(randType) && CH[randType]) {
       seenTypes.add(randType);
-      // Using correctRoot for all options means if the user clicks a wrong option 
-      // after revealing, they can compare qualities on the exact same root note!
-      opts.push({ root: correctRoot, type: randType, label: makeLabel(randType) });
+      opts.push({ root: correctRoot, type: randType, label: makeLabel(randType, true) });
     }
   }
 
-  // Shuffle
+  // Pass 2 (Safe Distractor Generator): If we STILL don't have 4 options,
+  // pad with distinct, unrelated core qualities that won't trick the user.
+  const SAFE_DISTRACTORS = ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'sus4', 'sus2', 'minMaj7', 'aug', 'dim', 'maj_b5', 'sus2_b5'];
+  const filteredSafeDistractors = SAFE_DISTRACTORS.filter(t => pool.includes(t));
+  attempts = 0;
+  while (opts.length < 4 && attempts < 100) {
+    attempts++;
+    const safeType = pickRandom(filteredSafeDistractors);
+    if (!seenTypes.has(safeType) && CH[safeType]) {
+      seenTypes.add(safeType);
+      opts.push({ root: correctRoot, type: safeType, label: makeLabel(safeType, true) });
+    }
+  }
+
+  for (let i = opts.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [opts[i], opts[j]] = [opts[j], opts[i]];
+  }
+  return opts;
+}
+
+function buildCategoryOptions(
+  correctKey: string,
+  correctLabel: string,
+  pool: { key: string; label: string }[]
+): { root: number; type: string; label: string }[] {
+  const opts: { root: number; type: string; label: string }[] = [];
+  const seen = new Set<string>();
+  seen.add(correctKey);
+  opts.push({ root: 0, type: correctKey, label: correctLabel });
+  let attempts = 0;
+  while (opts.length < 4 && attempts < 300) {
+    attempts++;
+    if (!pool.length) break;
+    const item = pool[Math.floor(Math.random() * pool.length)];
+    if (item && !seen.has(item.key)) {
+      seen.add(item.key);
+      opts.push({ root: 0, type: item.key, label: item.label });
+    }
+  }
   for (let i = opts.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [opts[i], opts[j]] = [opts[j], opts[i]];
@@ -61,29 +201,18 @@ function buildOptions(
 }
 
 export default function QuizScreen() {
+  const insets = useSafeAreaInsets();
   const { playChord: onPlay, stopAudio: onStop, playSingleNote: onNotePress } = useAudio();
-  const { octave, labelMode, setLabelMode, theme, arp, instrument, isSettingsOpen, bpm } = useSettingsStore();
+  const { octave, labelMode, theme, arp, instrument, isSettingsOpen, bpm } = useSettingsStore();
   const { activeTypes, namingMode } = useChordStore();
-  const { quizMode, setQuizMode, quizScore, quizTotal, quizStreak, resetQuiz, incrementQuiz } = useQuizStore();
+  const { quizMode, quizScore, quizTotal, quizStreak, resetQuiz, incrementQuiz, activeVoicingTypes, activeInversions } = useQuizStore();
 
   const t = THEMES[theme];
-
   const isFocused = useIsFocused();
-  const originalLabelMode = useRef(labelMode);
 
-  useFocusEffect(
-    useCallback(() => {
-      // 1. Save whatever label mode they had BEFORE entering the quiz
-      originalLabelMode.current = useSettingsStore.getState().labelMode;
-      // 2. Force it to 'none' for the quiz
-      setLabelMode('none');
-
-      return () => {
-        // 3. When they leave the quiz screen, put it back to what it was
-        setLabelMode(originalLabelMode.current);
-      };
-    }, [setLabelMode])
-  );
+  // FIX 4: Remove destructive global labelMode override here. 
+  // We handle label visibility dynamically on the components themselves.
+  const quizLabelMode = (labelMode === 'notes') ? 'degrees' : labelMode;
 
   useEffect(() => {
     if (!isFocused) {
@@ -95,30 +224,42 @@ export default function QuizScreen() {
   // ── Quiz state ──────────────────────────────────────────────
   const [questionRoot, setQuestionRoot] = useState(0);
   const [questionType, setQuestionType] = useState('maj7');
+  const [questionInversion, setQuestionInversion] = useState<'root' | '1st' | '2nd' | '3rd'>('root');
   const [options, setOptions] = useState<{ root: number; type: string; label: string }[]>([]);
   const [answered, setAnswered] = useState<null | 'correct' | 'wrong'>(null);
   const [chosenIdx, setChosenIdx] = useState<number | null>(null);
-  const [correctIdx, setCorrectIdx] = useState<number>(0);
+  const [correctIdxs, setCorrectIdxs] = useState<number[]>([0]);
   const [revealed, setRevealed] = useState(false);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [guitarVoicing, setGuitarVoicing] = useState<Voicing | null>(null);
+  const [pianoVoicing, setPianoVoicing] = useState<UnifiedVoicing | null>(null);
   const [activeQuizInstrument, setActiveQuizInstrument] = useState<'piano' | 'guitar'>(instrument);
+
+  const [questionVoicingTab, setQuestionVoicingTab] = useState<string>('block');
+  const [scaleVoicings, setScaleVoicings] = useState<any[]>([]);
+  const [shapeVoicings, setShapeVoicings] = useState<any[]>([]);
+  const [arpSubsets, setArpSubsets] = useState<any[]>([]);
+  const [intervalSubsets, setIntervalSubsets] = useState<any[]>([]);
+  const [safeArpSubsetIdx, setSafeArpSubsetIdx] = useState<number>(0);
+  const [safeIntervalSubsetIdx, setSafeIntervalSubsetIdx] = useState<number>(0);
+  const [quizCategory, setQuizCategory] = useState<'chord' | 'scale' | 'arp' | 'interval' | 'shape'>('chord');
 
   const tapAnim = useRef(new Animated.Value(1)).current;
   const bgOpacityAnim = useRef(new Animated.Value(0)).current;
+  const borderColorAnim = useRef(new Animated.Value(0)).current;
   const pianoRef = useRef<PianoViewRef>(null);
   const fretboardRef = useRef<FretboardViewRef>(null);
 
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const stopSeqFlash = () => {
-    seqFlashTimers.current.forEach(t => clearTimeout(t));
+    seqFlashTimers.current.forEach(time => clearTimeout(time));
     seqFlashTimers.current = [];
   };
 
   const fireSeqFlash = (midiNotes: number[]) => {
     stopSeqFlash();
     const msPerStep = 60000 / bpm / 2;
-    const AUDIO_LATENCY = 60; // Offset to perfectly sync visual with audio bridge
+    const AUDIO_LATENCY = 60; 
     midiNotes.forEach((midi, i) => {
       const fire = () => { pianoRef.current?.flashMidi(midi); fretboardRef.current?.flashMidi(midi); };
       seqFlashTimers.current.push(setTimeout(fire, Math.round(msPerStep * i) + AUDIO_LATENCY));
@@ -135,44 +276,208 @@ export default function QuizScreen() {
   useEffect(() => {
     if (answered) {
       bgOpacityAnim.setValue(0.5);
+      borderColorAnim.setValue(1);
       Animated.timing(bgOpacityAnim, { toValue: 0, duration: 1000, useNativeDriver: true }).start();
+      Animated.timing(borderColorAnim, { toValue: 0, duration: 1000, useNativeDriver: true }).start();
     }
   }, [answered]);
 
-  const rawMidiNotes = getChordNotes(questionRoot, questionType, octave);
-  const noteNames = CH[questionType]?.f.map((formula: string) =>
-    spellInterval(questionRoot, formula, namingMode === 'flat')
-  ) ?? [];
-
-  const roles = CH[questionType]?.r ?? [];
-  const formulaByPC: Record<number, string> = {};
-  CH[questionType]?.iv.forEach((iv: number, i: number) => {
-    const pc = (questionRoot + iv) % 12;
-    formulaByPC[pc] = CH[questionType]?.f?.[i] ?? '';
-  });
-
   const GS_MIDI = [40, 45, 50, 55, 59, 64];
 
-  const guitarData = React.useMemo(() => {
-    if (activeQuizInstrument !== 'guitar' || !guitarVoicing) return null;
-    if (!guitarVoicing.frets) return null;
+  // FIX 2 & 3: Perfectly extract the exact MIDI, Roles, and Formulas directly from the generated Voicing engine objects
+  const { activeMidiNotes, activeRoles, activeFormulas, formulaByPC, noteNames } = React.useMemo(() => {
+    let notes: number[] = [];
+    let r: string[] = [];
+    let f: string[] = [];
+    let names: string[] = [];
+    const fbpc: Record<number, string> = {};
 
-    const specificMidi: number[] = [];
-    const frets = Array(6).fill(null).map(() => ({ fret: null, role: '' }));
-
-    guitarVoicing.frets.forEach((f: any, str: number) => {
-      if (f.fret !== null) {
-        const midi = GS_MIDI[str] + f.fret;
-        specificMidi.push(midi);
-        frets[str] = { fret: f.fret, role: f.role || '' };
+    if (activeQuizInstrument === 'piano' && pianoVoicing) {
+      notes = pianoVoicing.notes || [];
+      r = pianoVoicing.roles || [];
+      f = pianoVoicing.formulas || pianoVoicing.roles || [];
+    } else if (activeQuizInstrument === 'guitar') {
+      if (['scales', 'shapes', 'arps', 'intervals'].includes(questionVoicingTab) && pianoVoicing) {
+        notes = pianoVoicing.notes || [];
+        r = pianoVoicing.roles || [];
+        f = pianoVoicing.formulas || pianoVoicing.roles || [];
+      } else if (guitarVoicing && guitarVoicing.frets) {
+        guitarVoicing.frets.forEach((fret, str) => {
+          if (fret.fret !== null) {
+            notes.push(GS_MIDI[str] + fret.fret);
+            r.push(fret.role || '');
+          }
+        });
+        const combined = notes.map((n, i) => ({ n, ro: r[i] })).sort((a,b) => a.n - b.n);
+        notes = combined.map(x => x.n);
+        r = combined.map(x => x.ro);
+        f = [...r];
       }
+    }
+
+    if (notes.length === 0) {
+      notes = getChordNotes(questionRoot, questionType, octave);
+      const chDef = CH[questionType];
+      if (chDef) {
+        r = notes.map(n => {
+          const idx = chDef.iv.findIndex(iv => (questionRoot + iv) % 12 === n % 12);
+          return idx !== -1 ? chDef.r[idx] : '';
+        });
+        f = notes.map(n => {
+          const idx = chDef.iv.findIndex(iv => (questionRoot + iv) % 12 === n % 12);
+          return idx !== -1 ? (chDef.f?.[idx] || chDef.r[idx]) : '';
+        });
+      }
+    }
+
+    notes.forEach((midi, idx) => {
+      const pc = midi % 12;
+      fbpc[pc] = f[idx] || '';
+      names.push(spellInterval(questionRoot, f[idx] || '', namingMode === 'flat'));
     });
 
-    specificMidi.sort((a, b) => a - b);
-    return { specificMidi, frets };
-  }, [activeQuizInstrument, guitarVoicing]);
+    return { activeMidiNotes: notes, activeRoles: r, activeFormulas: f, formulaByPC: fbpc, noteNames: names };
+  }, [activeQuizInstrument, pianoVoicing, guitarVoicing, questionVoicingTab, questionRoot, questionType, octave, namingMode]);
 
-  const activeMidiNotes = guitarData ? guitarData.specificMidi : rawMidiNotes;
+
+  const getGuitarVoicingsForTab = (
+    tab: string,
+    chordType: string,
+    rootSemi: number,
+    nMode: 'sharp' | 'flat'
+  ): Voicing[] => {
+    const rootNoteName = (nMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[rootSemi];
+    const ch = CH[chordType];
+    if (!ch) return [];
+
+    if (['scales', 'shapes', 'arps', 'intervals'].includes(tab)) {
+      const uVoicings = getPianoVoicingsForTab(tab, chordType, rootSemi, nMode);
+      return uVoicings.map(uv => ({
+        name: uv.name,
+        chordLabel: uv.chordLabel,
+        frets: [],
+        notes: uv.notes,
+        fingerprint: uv.fingerprint
+      })) as any[];
+    }
+
+    let groups: VoicingGroup[] = [];
+    if (tab === 'open') {
+      groups = buildOpenVoicings(chordType, rootSemi, rootNoteName, '');
+    } else if (tab === 'barre') {
+      groups = buildBarreVoicings(chordType, rootSemi, rootNoteName, '');
+    } else if (tab === 'triads') {
+      groups = buildTriadVoicings(ch, rootSemi, rootNoteName, nMode);
+    } else if (tab === 'shells') {
+      if (ch.iv.length >= 4) {
+        groups = buildShellVoicings(chordType, ch, rootSemi, rootNoteName, '', nMode);
+      }
+    } else if (tab === 'drop2' || tab === 'drop3' || tab === 'drop2and4') {
+      if (ch.iv.length >= 4) {
+        const allDrops = buildDropVoicings(chordType, ch, rootSemi, rootNoteName, '', nMode);
+        groups = allDrops.filter(g => g.voicings[0]?.type === tab);
+      }
+    }
+
+    return groups.flatMap(g => g.voicings);
+  };
+
+  const getPianoVoicingsForTab = (
+    tab: string,
+    chordType: string,
+    rootSemi: number,
+    nMode: 'sharp' | 'flat'
+  ): UnifiedVoicing[] => {
+    const ch = CH[chordType];
+    if (!ch) return [];
+
+    const rootNoteName = (nMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[rootSemi];
+    const displayChordName = `${rootNoteName}${ch.s}`;
+
+    if (tab === 'scales' || tab === 'shapes') {
+      const scaleIds = CHORD_SCALE_MAP[chordType] ?? [];
+      const sVoicings = buildScaleVoicings(scaleIds, SCALES, rootSemi, ch.iv, nMode);
+      const shapeSvs = buildHardcodedShapeVoicings(chordType, rootSemi, nMode);
+      const activeSvs = tab === 'scales' ? sVoicings : shapeSvs;
+
+      const uniqueScales: UnifiedVoicing[] = [];
+      const seen = new Set<string>();
+
+      activeSvs.forEach(sv => {
+        const nameToUse = tab === 'scales' ? sv.scaleName : sv.boxName;
+        if (!seen.has(nameToUse)) {
+          seen.add(nameToUse);
+          const pcMap = new Map<number, { role: string, formula: string }>();
+          sv.notes.forEach(n => {
+            const midi = GS_MIDI[n.stringIdx] + n.fret;
+            pcMap.set(midi % 12, { role: n.role, formula: n.formula });
+          });
+          const startMidi = (octave + 1) * 12 + rootSemi;
+          const pianoNotes: { note: number, role: string, formula: string }[] = [];
+          for (const [pc, data] of pcMap) {
+            let midi = Math.floor(startMidi / 12) * 12 + pc;
+            if (midi < startMidi) midi += 12;
+            if (midi >= 0 && midi <= 127) {
+              pianoNotes.push({ note: midi, role: data.role, formula: data.formula });
+            }
+          }
+          pianoNotes.sort((a, b) => a.note - b.note);
+          if (pianoNotes.length > 0) {
+            uniqueScales.push({
+              name: nameToUse,
+              chordLabel: displayChordName,
+              notes: pianoNotes.map((s: any) => s.note),
+              roles: pianoNotes.map((s: any) => s.role),
+              formulas: pianoNotes.map((s: any) => s.formula),
+              fingerprint: JSON.stringify(sv),
+              categoryId: tab === 'scales' ? sv.scaleId : sv.boxName,
+            });
+          }
+        }
+      });
+      return uniqueScales;
+    }
+
+    if (tab === 'arps' || tab === 'intervals') {
+      const subsets = tab === 'arps'
+        ? getArpSubsets(ch.iv, ch.r, ch.f || [], rootSemi, nMode)
+        : getIntervalSubsets(ch.iv, ch.r, ch.f || []);
+
+      if (subsets.length > 0) {
+        const startMidi = (octave + 1) * 12 + rootSemi;
+        return subsets.map((subset, subsetIdx) => {
+          const notes = (subset.ivs || []).map((iv: number) => startMidi + iv);
+          return {
+            name: subset.label || '',
+            chordLabel: displayChordName,
+            notes,
+            roles: subset.roles || [],
+            formulas: subset.formulaLabels || subset.roles || [],
+            fingerprint: JSON.stringify({ subsetIdx, subset }),
+            categoryId: subset.label || (tab === 'arps' ? 'Arpeggio' : 'Interval'),
+          };
+        });
+      }
+      return [];
+    }
+
+    const pV = buildPianoVoicings(rootSemi, chordType, octave, null, nMode);
+    
+    if (tab === 'block') {
+      const notes = getChordNotes(rootSemi, chordType, octave);
+      const rolesArr = notes.map(n => { const idx = ch.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? ch.r[idx] : ''; });
+      const formulasArr = notes.map(n => { const idx = ch.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? ch.f[idx] : ''; });
+      return [{ name: 'Root Position', chordLabel: ch.l, notes, roles: rolesArr, formulas: formulasArr }];
+    }
+
+    if (tab === 'triads') return pV.triads || [];
+    if (tab === 'shells') return pV.shells || [];
+    if (tab === 'drop2') return pV.drop2 || [];
+    if (tab === 'drop3') return pV.drop3 || [];
+    if (tab === 'drop2and4') return pV.drop2and4 || [];
+
+    return [];
+  };
 
   // ── Generate a new question ─────────────────────────────────
   const nextQuestion = useCallback(() => {
@@ -180,67 +485,430 @@ export default function QuizScreen() {
       stopSeqFlash();
       onStop();
       
-      let pool: string[] = activeTypes.length > 0 ? activeTypes : ALL_CHORD_KEYS;
-      if (instrument === 'guitar') {
-        const validGuitarTypes = new Set([
-          ...Object.keys(DROP_VOICINGS.drop2 || {}), 
-          ...Object.keys(DROP_VOICINGS.drop3 || {}),
-          ...Object.keys(DROP_VOICINGS.shells || {}),
-          ...Object.keys(CH).filter(k => CH[k].iv.length === 3)
-        ]);
-        pool = pool.filter((t: string) => validGuitarTypes.has(t));
-        if (pool.length < 4) pool = ['maj', 'min', 'maj7', 'min7']; 
-      } else if (pool.length < 4) {
-        pool = ALL_CHORD_KEYS;
-      }
+      let finalRoot = 0;
+      let finalType = 'maj7';
+      let finalGuitarVoicing: Voicing | null = null;
+      let finalPianoVoicing: UnifiedVoicing | null = null;
+      let finalPool: string[] = [];
+      let finalVoicingTab = 'block';
 
-      const root = Math.floor(Math.random() * 12);
-      const type = pickRandom(pool);
+      setScaleVoicings([]);
+      setShapeVoicings([]);
+      setArpSubsets([]);
+      setIntervalSubsets([]);
+      setSafeArpSubsetIdx(0);
+      setSafeIntervalSubsetIdx(0);
+
+      const basePool = activeTypes.length > 0 ? activeTypes : ALL_CHORD_KEYS;
+      const allowedVoicings = instrument === 'piano'
+        ? ['block', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales']
+        : ['open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'];
       
-      const opts = buildOptions(root, type, pool, quizMode, namingMode);
-      const cIdx = opts.findIndex(o => o.root === root && o.type === type);
+      const currentVoicingPool = activeVoicingTypes.filter(v => allowedVoicings.includes(v));
+      const finalVoicingPool = currentVoicingPool.length > 0 ? currentVoicingPool : allowedVoicings;
 
-      let randomVoicing: Voicing | null = null;
-      if (instrument === 'guitar' && CH[type]) {
-        let availableVoicings: Voicing[] = [];
-        const def = CH[type];
-        if (def.iv.length === 3) {
-          availableVoicings = buildTriadVoicings(def, root, '', namingMode).flatMap((g: any) => g.voicings);
-        } else {
-          availableVoicings = [
-            ...buildDropVoicings(type, def, root, '', '', namingMode).flatMap((g: any) => g.voicings),
-            ...buildShellVoicings(type, def, root, '', '', namingMode).flatMap((g: any) => g.voicings)
-          ];
+      // Filter inversions based on chord type (triads don't support 3rd inversion)
+      const isTriadType = (type: string) => {
+        const ch = CH[type];
+        return ch && ch.iv.length === 3;
+      };
+
+      // Determine valid inversions for the current chord type
+      const getValidInversions = (chordType: string) => {
+        if (isTriadType(chordType)) {
+          return activeInversions.filter(inv => inv !== '3rd');
         }
-        if (availableVoicings.length > 0) {
-          randomVoicing = pickRandom(availableVoicings);
+        return activeInversions;
+      };
+
+      // Select random inversion from active pool (will be filtered after chord type is selected)
+      let finalInversion = activeInversions.length > 0
+        ? (pickRandom(activeInversions) as 'root' | '1st' | '2nd' | '3rd')
+        : 'root';
+
+      let found = false;
+      for (let attempt = 0; attempt < 24; attempt++) {
+        const root = Math.floor(Math.random() * 12);
+        const chosenVoicingTab = pickRandom(finalVoicingPool);
+        
+        let tempPool = [...basePool];
+        if (instrument === 'guitar') {
+          tempPool = tempPool.filter(t => getGuitarVoicingsForTab(chosenVoicingTab, t, root, namingMode).length > 0);
+        } else {
+          tempPool = tempPool.filter(t => getPianoVoicingsForTab(chosenVoicingTab, t, root, namingMode).length > 0);
+        }
+
+        if (chosenVoicingTab === 'triads') {
+          const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'];
+          tempPool = tempPool.filter(t => TRIAD_KEYS.includes(t));
+
+          // Verify that triad voicings actually exist for each chord type
+          tempPool = tempPool.filter(t => {
+            if (instrument === 'guitar') {
+              const vcs = getGuitarVoicingsForTab('triads', t, root, namingMode);
+              return vcs.length > 0;
+            } else {
+              const vcs = getPianoVoicingsForTab('triads', t, root, namingMode);
+              return vcs.length > 0;
+            }
+          });
+        }
+
+        if (tempPool.length > 0) {
+          finalRoot = root;
+          finalType = pickRandom(tempPool);
+          finalPool = tempPool;
+          finalVoicingTab = chosenVoicingTab;
+
+          // Filter inversion to be valid for the selected chord type
+          const validInversions = getValidInversions(finalType);
+          finalInversion = validInversions.length > 0
+            ? (pickRandom(validInversions) as 'root' | '1st' | '2nd' | '3rd')
+            : 'root';
+
+          found = true;
+          
+          if (instrument === 'guitar') {
+            const vcs = getGuitarVoicingsForTab(finalVoicingTab, finalType, finalRoot, namingMode);
+            if (['scales', 'shapes', 'arps', 'intervals'].includes(finalVoicingTab)) {
+              finalGuitarVoicing = null;
+              
+              const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
+              const displayChordName = `${rootNoteName}${CH[finalType]?.s || ''}`;
+              
+              if (finalVoicingTab === 'scales') {
+                const scaleIds = CHORD_SCALE_MAP[finalType] || [];
+                const sVoicings = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, namingMode);
+                if (sVoicings.length > 0) {
+                  const randBox = pickRandom(sVoicings);
+                  setScaleVoicings([randBox]);
+                  const uniqueMidis = Array.from(new Set(randBox.notes.map(n => GS_MIDI[n.stringIdx] + n.fret))).sort((a,b)=>a-b);
+                  finalPianoVoicing = {
+                    name: randBox.scaleName,
+                    chordLabel: displayChordName,
+                    notes: uniqueMidis,
+                    roles: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.role : ''; }),
+                    formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
+                    categoryId: randBox.scaleId,
+                  };
+                }
+              } else if (finalVoicingTab === 'shapes') {
+                const shapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
+                if (shapeSvs.length > 0) {
+                  const randBox = pickRandom(shapeSvs);
+                  setShapeVoicings([randBox]);
+                  const uniqueMidis = Array.from(new Set(randBox.notes.map(n => GS_MIDI[n.stringIdx] + n.fret))).sort((a,b)=>a-b);
+                  finalPianoVoicing = {
+                    name: randBox.boxName,
+                    chordLabel: displayChordName,
+                    notes: uniqueMidis,
+                    roles: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.role : ''; }),
+                    formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
+                    categoryId: randBox.boxName,
+                  };
+                }
+              } else if (finalVoicingTab === 'arps' || finalVoicingTab === 'intervals') {
+                const subsets = finalVoicingTab === 'arps'
+                  ? getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode)
+                  : getIntervalSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || []);
+                
+                if (subsets.length > 0) {
+                  const subsetIdx = Math.floor(Math.random() * subsets.length);
+                  const subset = subsets[subsetIdx];
+                  if (finalVoicingTab === 'arps') {
+                    setArpSubsets(subsets);
+                    setSafeArpSubsetIdx(subsetIdx);
+                  } else {
+                    setIntervalSubsets(subsets);
+                    setSafeIntervalSubsetIdx(subsetIdx);
+                  }
+                  const startMidi = (octave + 1) * 12 + finalRoot;
+                  const notes = (subset.ivs || []).map(iv => startMidi + iv);
+                  finalPianoVoicing = {
+                    name: subset.label || '',
+                    chordLabel: displayChordName,
+                    notes,
+                    roles: subset.roles || [],
+                    formulas: subset.formulaLabels || subset.roles || [],
+                    categoryId: subset.label || (finalVoicingTab === 'arps' ? 'Arpeggio' : 'Interval'),
+                  };
+                }
+              }
+            } else {
+              let guitarVcs = vcs.length > 0 ? vcs : [];
+              // Filter by inversion if applicable
+              if (finalInversion !== 'root' && guitarVcs.length > 0) {
+                guitarVcs = filterVoicingsByInversion(guitarVcs, finalInversion);
+              }
+              // Fallback to any voicing if filtered result is empty
+              finalGuitarVoicing = guitarVcs.length > 0 ? pickRandom(guitarVcs) : (vcs.length > 0 ? pickRandom(vcs) : null);
+            }
+          } else {
+            const vcs = getPianoVoicingsForTab(finalVoicingTab, finalType, finalRoot, namingMode);
+            let pianoVc = vcs.length > 0 ? pickRandom(vcs) : null;
+            // Apply inversion to piano voicing
+            if (pianoVc && pianoVc.notes && finalInversion !== 'root') {
+              const invertedNotes = applyInversion(pianoVc.notes, finalInversion);
+              finalPianoVoicing = {
+                ...pianoVc,
+                notes: invertedNotes,
+              };
+            } else {
+              finalPianoVoicing = pianoVc;
+            }
+          }
+          break;
         }
       }
-      setGuitarVoicing(randomVoicing);
 
-      setQuestionRoot(root);
-      setQuestionType(type);
+      if (!found) {
+        finalRoot = Math.floor(Math.random() * 12);
+        finalType = basePool.includes('maj7') ? 'maj7' : basePool[0] || 'maj';
+        finalVoicingTab = instrument === 'piano' ? 'block' : 'open';
+        
+        if (instrument === 'guitar') {
+          const vcs = getGuitarVoicingsForTab('open', finalType, finalRoot, namingMode);
+          finalGuitarVoicing = vcs.length > 0 ? pickRandom(vcs) : null;
+        } else {
+          const vcs = getPianoVoicingsForTab('block', finalType, finalRoot, namingMode);
+          finalPianoVoicing = vcs.length > 0 ? pickRandom(vcs) : null;
+        }
+      }
+
+      let category: 'chord' | 'scale' | 'arp' | 'interval' | 'shape' = 'chord';
+      if (finalVoicingTab === 'scales') category = 'scale';
+      else if (finalVoicingTab === 'arps') category = 'arp';
+      else if (finalVoicingTab === 'intervals') category = 'interval';
+      else if (finalVoicingTab === 'shapes') category = 'shape';
+
+      const catId = finalPianoVoicing?.categoryId ?? '';
+
+      // Extract actual MIDI notes from the voicing for audio mode filtering
+      let playedNotes: number[] = [];
+      if (quizMode === 'audio') {
+        if (activeQuizInstrument === 'piano' && finalPianoVoicing) {
+          playedNotes = finalPianoVoicing.notes || [];
+        } else if (activeQuizInstrument === 'guitar' && finalGuitarVoicing && finalGuitarVoicing.frets) {
+          finalGuitarVoicing.frets.forEach((fret, str) => {
+            if (fret.fret !== null) {
+              playedNotes.push(GS_MIDI[str] + fret.fret);
+            }
+          });
+        }
+        if (playedNotes.length === 0) {
+          playedNotes = getChordNotes(finalRoot, finalType, octave);
+        }
+
+        // In audio chord mode, ensure the correct answer matches what was actually heard
+        if (category === 'chord') {
+          let audibleType = findAudibleChordType(finalRoot, playedNotes, basePool);
+          if (!audibleType) {
+            audibleType = findSimplestContainedChordType(finalRoot, playedNotes, basePool);
+          }
+          if (audibleType && audibleType !== finalType) {
+            finalType = audibleType;
+            const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
+            const newLabel = `${rootNoteName}${CH[finalType]?.s || ''}`;
+            if (finalPianoVoicing) {
+              finalPianoVoicing = {
+                ...finalPianoVoicing,
+                name: CH[finalType]?.s || finalType,
+                chordLabel: newLabel,
+              };
+            }
+            if (finalGuitarVoicing) {
+              finalGuitarVoicing = {
+                ...finalGuitarVoicing,
+                chordLabel: newLabel,
+              };
+            }
+          }
+        }
+      }
+
+      let opts: { root: number; type: string; label: string }[] = [];
+      let cIdxs: number[] = [];
+
+      // FIX 1: Generate dynamic, accurate pools based on actual shapes/arps available, ensuring cIdx is never -1
+      if (category === 'chord') {
+        let optsPool = finalPool.length >= 4 ? finalPool : basePool;
+        if (finalVoicingTab === 'triads') {
+          const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'];
+          optsPool = optsPool.filter(t => TRIAD_KEYS.includes(t));
+          if (optsPool.length < 4) optsPool = TRIAD_KEYS;
+        }
+        if (optsPool.length < 4) optsPool = ALL_CHORD_KEYS;
+        opts = buildOptions(finalRoot, finalType, optsPool, quizMode, namingMode, playedNotes, finalInversion);
+        cIdxs = [opts.findIndex(o => o.root === finalRoot && o.type === finalType)];
+
+        // Fallback: if correct answer not found, force it to be the first option
+        if (cIdxs[0] === -1) {
+          opts[0] = { root: finalRoot, type: finalType, label: CH[finalType]?.s || finalType };
+          cIdxs = [0];
+        }
+      } else if (category === 'scale') {
+        const scaleIds = CHORD_SCALE_MAP[finalType] || [];
+        let scalePool = scaleIds.map(id => ({ key: id, label: SCALES[id]?.name || id }));
+        // Ensure at least 4 options by adding other scales from the full SCALES object
+        if (scalePool.length < 4) {
+          const allScaleIds = Object.keys(SCALES);
+          const additionalScales = allScaleIds
+            .filter(id => !scalePool.some(sp => sp.key === id))
+            .map(id => ({ key: id, label: SCALES[id]?.name || id }));
+          scalePool = [...scalePool, ...additionalScales];
+        }
+        opts = buildCategoryOptions(catId, finalPianoVoicing?.name ?? catId, scalePool);
+        cIdxs = [opts.findIndex(o => o.type === catId)];
+
+        // Fallback: if correct answer not found, force it to be the first option
+        if (cIdxs[0] === -1) {
+          opts[0] = { root: 0, type: catId, label: finalPianoVoicing?.name ?? catId };
+          cIdxs = [0];
+        }
+      } else if (category === 'arp') {
+        const arpPool: { key: string; label: string }[] = [];
+        const arpSeen = new Set<string>([catId]);
+        const allSubs = getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode);
+        allSubs.forEach(s => {
+          if (s.label && s.label !== 'Arpeggio' && !arpSeen.has(s.label)) {
+            arpSeen.add(s.label);
+            arpPool.push({ key: s.label, label: s.label });
+          }
+        });
+        for (const ct of basePool) {
+          if (arpPool.length >= 15) break;
+          const subs = getArpSubsets(CH[ct].iv, CH[ct].r, CH[ct].f || [], finalRoot, namingMode);
+          subs.forEach(s => {
+            if (s.label && s.label !== 'Arpeggio' && !arpSeen.has(s.label)) {
+              arpSeen.add(s.label);
+              arpPool.push({ key: s.label, label: s.label });
+            }
+          });
+        }
+        // Ensure at least 4 options by adding generic arpeggio labels if needed
+        if (arpPool.length < 4) {
+          const genericArps = ['3-5-7', '1-3-5', '1-3-5-7', '1-5-7', '1-3-7', '3-5-7-9', '1-2-3-5', '1-3-5-9'];
+          for (const gen of genericArps) {
+            if (!arpSeen.has(gen)) {
+              arpSeen.add(gen);
+              arpPool.push({ key: gen, label: gen });
+            }
+            if (arpPool.length >= 4) break;
+          }
+        }
+        opts = buildCategoryOptions(catId, catId, arpPool);
+        cIdxs = [opts.findIndex(o => o.type === catId)];
+
+        // Fallback: if correct answer not found, force it to be the first option
+        if (cIdxs[0] === -1) {
+          opts[0] = { root: 0, type: catId, label: catId };
+          cIdxs = [0];
+        }
+      } else if (category === 'interval') {
+        const ch = CH[finalType];
+        const intervalPool: {key: string, label: string}[] = [];
+        const seenIntervals = new Set<string>();
+        for (let i = 0; i < ch.iv.length - 1; i++) {
+          for (let j = i + 1; j < ch.iv.length; j++) {
+            const st = Math.abs(ch.iv[j] - ch.iv[i]);
+            const intNames = ['P1','m2','M2','m3','M3','P4','TT','P5','m6','M6','m7','M7','P8','m9','M9','m10','M10','P11','aug11','P12','m13','M13'];
+            const intLabel = intNames[st] || `${st}st`;
+            if (!seenIntervals.has(intLabel)) {
+              seenIntervals.add(intLabel);
+              intervalPool.push({ key: intLabel, label: intLabel });
+            }
+          }
+        }
+        // Ensure at least 4 options by adding common intervals if needed
+        if (intervalPool.length < 4) {
+          const commonIntervals = ['P5', 'M3', 'm3', 'P4', 'M6', 'm6', 'M7', 'm7', 'TT', 'M2', 'm2'];
+          for (const ci of commonIntervals) {
+            if (!seenIntervals.has(ci)) {
+              seenIntervals.add(ci);
+              intervalPool.push({ key: ci, label: ci });
+            }
+            if (intervalPool.length >= 4) break;
+          }
+        }
+        opts = buildCategoryOptions(catId, catId, intervalPool);
+        cIdxs = [opts.findIndex(o => o.type === catId)];
+
+        // Fallback: if correct answer not found, force it to be the first option
+        if (cIdxs[0] === -1) {
+          opts[0] = { root: 0, type: catId, label: catId };
+          cIdxs = [0];
+        }
+      } else if (category === 'shape') {
+        const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
+        const uniqueBoxNames = Array.from(new Set(allShapeSvs.map(s => s.boxName)));
+        
+        // Fallback: if no shapes exist, switch to chord category
+        if (uniqueBoxNames.length === 0) {
+          category = 'chord';
+          finalVoicingTab = 'block';
+          let optsPool = finalPool.length >= 4 ? finalPool : basePool;
+          if (finalVoicingTab === 'triads') {
+            const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'];
+            optsPool = optsPool.filter(t => TRIAD_KEYS.includes(t));
+            if (optsPool.length < 4) optsPool = TRIAD_KEYS;
+          }
+          if (optsPool.length < 4) optsPool = ALL_CHORD_KEYS;
+          opts = buildOptions(finalRoot, finalType, optsPool, quizMode, namingMode, playedNotes, finalInversion);
+          cIdxs = [opts.findIndex(o => o.root === finalRoot && o.type === finalType)];
+          if (cIdxs[0] === -1) {
+            opts[0] = { root: finalRoot, type: finalType, label: CH[finalType]?.s || finalType };
+            cIdxs = [0];
+          }
+        } else {
+          let DYNAMIC_SHAPE_POOL = uniqueBoxNames.map(name => ({ key: name, label: name }));
+          // Ensure at least 4 options by adding generic box names if needed
+          if (DYNAMIC_SHAPE_POOL.length < 4) {
+            const genericBoxNames = ['Box 1', 'Box 2', 'Box 3', 'Box 4', 'Box 5', 'Box 6'];
+            for (const gen of genericBoxNames) {
+              if (!DYNAMIC_SHAPE_POOL.some(sp => sp.key === gen)) {
+                DYNAMIC_SHAPE_POOL.push({ key: gen, label: gen });
+              }
+              if (DYNAMIC_SHAPE_POOL.length >= 4) break;
+            }
+          }
+          opts = buildCategoryOptions(catId, catId, DYNAMIC_SHAPE_POOL);
+          cIdxs = [opts.findIndex(o => o.type === catId)];
+
+          // Fallback: if correct answer not found, force it to be the first option
+          if (cIdxs[0] === -1) {
+            opts[0] = { root: 0, type: catId, label: catId };
+            cIdxs = [0];
+          }
+        }
+      }
+
+      setQuestionVoicingTab(finalVoicingTab);
+      setGuitarVoicing(finalGuitarVoicing);
+      setPianoVoicing(finalPianoVoicing);
+      setQuizCategory(category);
+
+      setQuestionRoot(finalRoot);
+      setQuestionType(finalType);
+      setQuestionInversion(finalInversion);
       setOptions(opts);
-      setCorrectIdx(cIdx);
+      setCorrectIdxs(cIdxs);
       setAnswered(null);
       setChosenIdx(null);
       setRevealed(false);
       setActiveQuizInstrument(instrument);
     } catch (e) {
-      console.log('nextQuestion error', e);
+      // Silently handle errors to prevent quiz crashes
     }
-  }, [activeTypes, quizMode, namingMode, onStop, instrument]);
+  }, [activeTypes, quizMode, namingMode, onStop, instrument, activeVoicingTypes, activeInversions]);
 
   useEffect(() => {
     nextQuestion();
-  }, [quizMode, instrument, namingMode]); // Retrigger if namingMode changes globally
+  }, [quizMode, instrument, namingMode, activeVoicingTypes, activeInversions, nextQuestion]);
 
-  // The Explicit Intent Lock: Only true when the user physically presses a button
   const autoPlayNext = useRef(false);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
-    // Only play if the lock was explicitly opened by a button press
     if (autoPlayNext.current && questionType && CH[questionType] && !isSettingsOpen) {
       timer = setTimeout(() => {
         onPlay(activeMidiNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
@@ -251,10 +919,10 @@ export default function QuizScreen() {
           fretboardRef.current?.flashAll(activeMidiNotes);
         }
       }, 200);
-      autoPlayNext.current = false; // Instantly lock it back down
+      autoPlayNext.current = false;
     }
     return () => { if (timer) clearTimeout(timer); };
-  }, [options]); // Fires when the new question finishes loading
+  }, [options]);
 
   const replay = () => {
     stopSeqFlash();
@@ -273,7 +941,7 @@ export default function QuizScreen() {
 
   const handleAnswer = (idx: number) => {
     if (answered) return;
-    const correct = idx === correctIdx;
+    const correct = correctIdxs.includes(idx);
     
     setAnswered(correct ? 'correct' : 'wrong');
     setChosenIdx(idx);
@@ -311,42 +979,23 @@ export default function QuizScreen() {
   const rootName = namingMode === 'flat' ? NOTE_FLAT[questionRoot] : NOTE_SHARP[questionRoot];
   const accuracy = quizTotal > 0 ? Math.round((quizScore / quizTotal) * 100) : null;
 
-  const fretboardGroup: any = guitarData ? [{
+  // FIX 5: Feed FretboardView the exact Voicing objects so it builds internally
+  const fretboardGroup: any = guitarVoicing ? [{
     label: 'Quiz',
     stringNums: '012345',
     voicings: [{ 
       name: 'Quiz', 
-      frets: guitarData.frets.map(f => ({ ...f, role: revealed ? f.role : 'unknown' })) 
+      frets: guitarVoicing.frets.map(f => ({ ...f, role: f.role || '' })) 
     }]
-  }] : [{ 
-    label: 'Quiz', 
-    stringNums: '012345',
-    voicings: [{ name: 'Quiz', frets: Array(6).fill({ fret: null }) }] 
-  }];
+  }] : [];
 
-  const fretboardOverlay = React.useMemo(() => {
-    if (guitarData) return []; 
-    const notes: any[] = [];
-    activeMidiNotes.forEach((midi: number, idx: number) => {
-      const r = revealed ? (roles[idx] || '') : 'unknown';
-      const nName = noteNames[idx] || '';
-      const pc = midi % 12;
-      const form = formulaByPC[pc] || '';
-      for (let s = 0; s < 6; s++) {
-        const fret = midi - GS_MIDI[s];
-        if (fret >= 0 && fret <= 15) {
-          notes.push({ stringIdx: s, fret, role: r, formula: form, noteName: nName, isGhost: false });
-        }
-      }
-    });
-    return notes;
-  }, [activeMidiNotes, roles, noteNames, formulaByPC, guitarData, revealed]);
+  const isFretboardSpecialMode = ['scales', 'shapes', 'arps', 'intervals'].includes(questionVoicingTab);
 
   return (
-    <View style={[styles.safe, { backgroundColor: t.bg }]}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} removeClippedSubviews={true}>
+    <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
 
-        {/* Compact Score Panel — Top */}
+        {/* Compact Score Panel */}
         <View style={[styles.compactScore, { backgroundColor: t.bg2, borderColor: t.border }]}>
           <View style={styles.scoreItem}>
             <Text style={[styles.scoreVal, { color: t.txt1 }]}>{quizScore}/{quizTotal}</Text>
@@ -370,51 +1019,88 @@ export default function QuizScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Combined mode + question card */}
         <Animated.View style={[
           styles.card,
-          { backgroundColor: t.bg2, borderColor: t.border },
-          answered === 'correct' && { borderColor: CORRECT_COLOR },
-          answered === 'wrong' && { borderColor: WRONG_COLOR },
+          { 
+            backgroundColor: t.bg2,
+            borderColor: borderColorAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [t.border, answered === 'wrong' ? WRONG_COLOR : CORRECT_COLOR]
+            })
+          },
           { transform: [{ translateX: shakeAnim }] },
         ]}>
-          
           <Animated.View style={[
             StyleSheet.absoluteFill, 
-            { backgroundColor: answered === 'wrong' ? WRONG_COLOR : CORRECT_COLOR, opacity: bgOpacityAnim, borderRadius: 20 }
+            { backgroundColor: answered === 'wrong' ? WRONG_COLOR : CORRECT_COLOR, opacity: bgOpacityAnim }
           ]} pointerEvents="none" />
 
           <View style={styles.cardInner}>
             <View style={[styles.cardLeft, { borderRightColor: t.border }]}>
-              <Text style={[styles.questionLabel, { color: t.accent }]}>IDENTIFY</Text>
+              <Text style={[styles.questionLabel, { color: t.accent }]}>
+                {quizCategory === 'scale' ? 'IDENTIFY SCALE' :
+                 quizCategory === 'arp' ? 'IDENTIFY ARPEGGIO' :
+                 quizCategory === 'interval' ? 'IDENTIFY INTERVAL' :
+                 quizCategory === 'shape' ? 'IDENTIFY SHAPE' : 'IDENTIFY'}
+              </Text>
 
               <TouchableOpacity onPress={() => { animateTap(); replay(); }} activeOpacity={1}>
                 <Animated.View style={[styles.chordDisplay, { transform: [{ scale: tapAnim }] }]}>
-                  {quizMode === 'visual' ? (
-                    <View style={styles.chordNameRow}>
-                      <Text style={[styles.questionRoot, { color: t.txt1 }]}>{rootName}</Text>
-                      <Text style={[styles.questionType, { color: revealed ? t.accent : t.txt3 }]}>
-                        {revealed ? CH[questionType]?.l : '???'}
-                      </Text>
-                    </View>
-                  ) : (
-                    revealed ? (
+                  {quizCategory === 'chord' ? (
+                    quizMode === 'visual' ? (
                       <View style={styles.chordNameRow}>
                         <Text style={[styles.questionRoot, { color: t.txt1 }]}>{rootName}</Text>
-                        <Text style={[styles.questionType, { color: t.accent }]}>{CH[questionType]?.l}</Text>
+                        <Text style={[styles.questionType, { color: revealed ? t.accent : t.txt3 }]}>
+                          {revealed ? (CH[questionType] ? CH[questionType].s : '???') : '???'}
+                        </Text>
                       </View>
                     ) : (
+                      revealed ? (
+                        <View style={styles.chordNameRow}>
+                          <Text style={[styles.questionRoot, { color: t.txt1 }]}>{rootName}</Text>
+                          <Text style={[styles.questionType, { color: t.accent }]}>
+                            {CH[questionType] ? CH[questionType].s : ''}
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={[styles.audioQuestion, { color: t.txt3 }]}>?</Text>
+                      )
+                    )
+                  ) : (
+                    quizCategory === 'scale' ? (
                       <Text style={[styles.audioQuestion, { color: t.txt3 }]}>?</Text>
+                    ) : (
+                      <View>
+                        <Text style={{ fontSize: 11, color: t.txt3, fontWeight: '600', marginBottom: 2 }}>
+                          {rootName}{CH[questionType]?.s ?? ''}
+                        </Text>
+                        <Text style={[styles.questionType, { color: revealed ? t.accent : t.txt3, fontSize: 15 }]} numberOfLines={2}>
+                          {revealed ? (options[correctIdxs[0]]?.label ?? '???') : '???'}
+                        </Text>
+                      </View>
                     )
                   )}
                 </Animated.View>
               </TouchableOpacity>
 
-              <View style={styles.typesTooltip}>
-                <Ionicons name="layers-outline" size={14} color={t.txt3} />
-                <Text style={{ fontSize: 10, fontWeight: '700', color: t.txt3 }}>
-                  {activeTypes.length} Types
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: t.accent + '40', backgroundColor: t.accent + '15', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 }}>
+                  <Ionicons name="musical-notes-outline" size={12} color={t.accent} />
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: t.accent }}>
+                    {questionVoicingTab === 'block' ? 'Block' : 
+                     questionVoicingTab === 'open' ? 'Open' :
+                     questionVoicingTab === 'barre' ? 'Barre' :
+                     questionVoicingTab === 'triads' ? 'Triads' :
+                     questionVoicingTab === 'shells' ? 'Shells' :
+                     questionVoicingTab === 'drop2' ? 'Drop 2' :
+                     questionVoicingTab === 'drop3' ? 'Drop 3' :
+                     questionVoicingTab === 'drop2and4' ? 'Drop 2 & 4' : 
+                     questionVoicingTab === 'intervals' ? 'Intervals' :
+                     questionVoicingTab === 'arps' ? 'Arps' :
+                     questionVoicingTab === 'shapes' ? 'Shapes' :
+                     questionVoicingTab === 'scales' ? 'Scales' : questionVoicingTab}
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -422,7 +1108,7 @@ export default function QuizScreen() {
               <View style={styles.optionsGrid}>
                 {options.map((opt, idx) => {
                   const isChosen = chosenIdx === idx;
-                  const isCorrectOpt = idx === correctIdx;
+                  const isCorrectOpt = correctIdxs.includes(idx);
                   let bg = t.bg3;
                   let border = t.border;
                   let textColor = t.txt1;
@@ -430,24 +1116,20 @@ export default function QuizScreen() {
                     if (isCorrectOpt) { bg = CORRECT_COLOR; border = CORRECT_COLOR; textColor = '#fff'; }
                     else if (isChosen) { bg = WRONG_COLOR; border = WRONG_COLOR; textColor = '#fff'; }
                   }
-                  const isCorrectRevealed = revealed && isCorrectOpt;
-                    return (
-                    <Animated.View key={idx} style={isCorrectRevealed ? { transform: [{ scale: correctScaleAnim }] } : undefined}>
+                  return (
+                    <Animated.View key={idx} style={revealed && isCorrectOpt ? { transform: [{ scale: correctScaleAnim }] } : undefined}>
                     <TouchableOpacity
                       style={[styles.optBtn, { backgroundColor: bg, borderColor: border }]}
                       onPressIn={() => {
                         if (!revealed) {
                           handleAnswer(idx);
-                        } else {
+                        } else if (quizCategory === 'chord') {
                           stopSeqFlash();
-                          const optionNotes = getChordNotes(opt.root, opt.type, octave);
+                          const vcs = getPianoVoicingsForTab(questionVoicingTab, opt.type, questionRoot, namingMode);
+                          const optionNotes = vcs.length > 0 ? vcs[0].notes : getChordNotes(questionRoot, opt.type, octave);
                           onPlay(optionNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
-                          if (arp) {
-                            fireSeqFlash(optionNotes);
-                          } else {
-                            pianoRef.current?.flashAll(optionNotes);
-                            fretboardRef.current?.flashAll(optionNotes);
-                          }
+                          if (arp) fireSeqFlash(optionNotes);
+                          else { pianoRef.current?.flashAll(optionNotes); fretboardRef.current?.flashAll(optionNotes); }
                         }
                       }}
                       activeOpacity={0.75}>
@@ -459,26 +1141,32 @@ export default function QuizScreen() {
               </View>
             </View>
           </View>
-       </Animated.View>
+        </Animated.View>
 
-        {/* Instrument View */}
         {quizMode === 'visual' && (
           <View style={styles.pianoWrap}>
             {activeQuizInstrument === 'guitar' ? (
-              <View style={{ marginTop: 10, marginBottom: 10 }}>
-                <FretboardView
-                  ref={fretboardRef}
-                  groups={fretboardGroup}
-                  theme={t}
-                  rootSemi={questionRoot}
-                  labelMode={labelMode}
-                  namingMode={namingMode}
-                  onNotePress={(midi: number) => onNotePress?.(midi, 80, true)}
-                  overlayNotes={fretboardOverlay}
-                  hideNavigators={true}
-                  colorModeOverride={!revealed ? 'theme' : undefined}
-                />
-              </View>
+              <FretboardView
+                ref={fretboardRef}
+                groups={isFretboardSpecialMode ? [] : fretboardGroup}
+                theme={t}
+                rootSemi={questionRoot}
+                labelMode={quizLabelMode}
+                namingMode={namingMode}
+                onNotePress={(midi: number) => onNotePress?.(midi, 80, true)}
+                hideNavigators={true}
+                colorModeOverride={!revealed ? 'theme' : undefined}
+                scaleVoicings={scaleVoicings}
+                scaleMode={questionVoicingTab === 'scales'}
+                arpMode={questionVoicingTab === 'arps' || questionVoicingTab === 'intervals'}
+                arpVoicings={scaleVoicings}
+                arpSubsets={questionVoicingTab === 'intervals' ? intervalSubsets : arpSubsets}
+                arpSubsetIdx={questionVoicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
+                shapesMode={questionVoicingTab === 'shapes'}
+                shapeVoicings={shapeVoicings}
+                selectedScaleId={pianoVoicing?.categoryId || null}
+                selectedBoxName={pianoVoicing?.name || null}
+              />
             ) : (
               <PianoView
                 ref={pianoRef}
@@ -486,10 +1174,11 @@ export default function QuizScreen() {
                 theme={t}
                 showAllLabels={true}
                 noteNames={noteNames}
-                roles={revealed ? roles : Array(activeMidiNotes.length).fill('unknown')}
+                roles={activeRoles}
+                formulas={activeFormulas}
                 formulaByPC={formulaByPC}
                 octave={octave}
-                labelMode={labelMode}
+                labelMode={quizLabelMode}
                 accentColor={revealed ? undefined : t.accent}
                 rootSemi={questionRoot}
                 namingMode={namingMode}
@@ -499,13 +1188,9 @@ export default function QuizScreen() {
             )}
           </View>
         )}
+      </ScrollView>
 
-        </ScrollView>
-
-      {/* Global Sticky Player Dock */}
-      <View style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border }]}>
-        
-        {/* STANDARDIZED ACTION ROW */}
+      <View style={[styles.stickyPlayer, { backgroundColor: t.bg2, borderTopColor: t.border }]}>
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[styles.poolBtn, { backgroundColor: t.bg2, borderColor: t.border }]}
@@ -539,19 +1224,12 @@ export default function QuizScreen() {
         </View>
       </View>
 
-      <CommandSheet 
-        visible={sheetVisible} 
-        onClose={() => setSheetVisible(false)} 
+      <CommandSheet
+        visible={sheetVisible}
+        onClose={() => setSheetVisible(false)}
         forceMode="random"
-        executeLabel="SAVE QUIZ POOL"
-        executeIcon="checkmark"
-        onExecute={() => {
-          resetQuiz();
-          autoPlayNext.current = true;
-          nextQuestion();
-        }}
+        isQuiz={true}
       />
-
     </View>
   );
 }
@@ -562,70 +1240,34 @@ const WRONG_COLOR = '#D4537E';
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: { paddingVertical: 16, paddingBottom: 32, gap: 12 },
-
-  compactScore: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 10, paddingHorizontal: 16, marginHorizontal: 16,
-    borderRadius: 16, borderWidth: 1
-  },
+  compactScore: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 16 },
   scoreItem: { alignItems: 'center', gap: 2, flex: 1 },
   scoreVal: { fontSize: 16, fontWeight: '700' },
   scoreLbl: { fontSize: 9, fontWeight: '700', letterSpacing: 1 },
   scoreDivider: { width: 1, height: 24 },
   scoreResetBtn: { paddingHorizontal: 8, paddingVertical: 8 },
-
-  settingsCard: {
-    borderRadius: 20, marginHorizontal: 16, padding: 16, borderWidth: 1,
-  },
-  settingsTitle: {
-    fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 12,
-  },
-  settingRow: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingVertical: 6,
-  },
-  settingLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  settingLabel: { fontSize: 14, fontWeight: '600' },
-  toggleRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  toggleBtn: {
-    borderRadius: 12, paddingHorizontal: 14,
-    paddingVertical: 8, borderWidth: 1,
-  },
-  toggleText: { fontWeight: '700', fontSize: 13 },
-
-  card: { borderRadius: 20, borderWidth: 1, padding: 16, marginHorizontal: 16 },
+  card: { borderTopWidth: 1, borderBottomWidth: 1, padding: 16 },
   cardInner: { flexDirection: 'row', alignItems: 'stretch' },
-  cardLeft: { flex: 1, borderRightWidth: 1, paddingRight: 12, alignItems: 'center', justifyContent: 'center' },
+  cardLeft: { flex: 1, paddingRight: 12, alignItems: 'center', justifyContent: 'center' },
   cardRight: { flex: 1.1, paddingLeft: 12, justifyContent: 'center' },
-  typesTooltip: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 },
-
   questionLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 2, textAlign: 'center', marginBottom: 8 },
   chordDisplay: { alignItems: 'center', justifyContent: 'center', gap: 2 },
   chordNameRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 4 },
   questionRoot: { fontSize: 44, fontWeight: '700', lineHeight: 48 },
   questionType: { fontSize: 20, fontWeight: '600', marginBottom: 6 },
   audioQuestion: { fontSize: 60, fontWeight: '700', lineHeight: 66 },
-  
   optionsGrid: { flexDirection: 'column', gap: 8, width: '100%' },
   optBtn: { width: '100%', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
   optText: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
-
-  stickyPlayer: {
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
-  },
+  stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
-  
   poolBtn: { width: 56, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   badge: { position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
   badgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
-
   revealBtn: { flex: 1, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   revealText: { fontSize: 14, fontWeight: '700' },
   playQuizBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   nextBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 56, borderRadius: 20 },
   nextText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-
-  pianoWrap: { marginHorizontal: 0 },
+  pianoWrap: { justifyContent: 'center', marginHorizontal: 0 },
 });

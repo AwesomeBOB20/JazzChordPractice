@@ -19,6 +19,7 @@ export interface ChordState {
   setChord: (rootSemi: number, type: string) => void;
   randomChord: (preferredTypes?: string[]) => void;
   shiftRoot: (direction: 'up' | 'down') => void;
+  cycleType: (direction: 'next' | 'prev') => void;
   toggleType: (type: string) => void;
   setActiveTypes: (types: string[]) => void;
   setSelectedBoxName: (box: string | null) => void;
@@ -68,6 +69,14 @@ export const useChordStore = create<ChordState>()(
         const namingMode = [0, 1, 3, 5, 8, 10].includes(rootSemi) ? 'flat' : 'sharp';
         set({ chordType: type, rootSemi, namingMode });
       },
+
+      cycleType: (direction) => set((state) => {
+        const allTypes = CHORD_CATEGORIES.flatMap((c) => c.keys);
+        const idx = allTypes.indexOf(state.chordType);
+        const delta = direction === 'next' ? 1 : -1;
+        const nextIdx = (idx + delta + allTypes.length) % allTypes.length;
+        return { chordType: allTypes[nextIdx] };
+      }),
 
       toggleType: (type) => set((state) => {
         const next = new Set(state.activeTypes);

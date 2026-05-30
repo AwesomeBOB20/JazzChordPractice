@@ -58,22 +58,48 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   // Expand repeat marks into a flat, ordered list of progression indices.
+  // Volta (1st/2nd ending) rules:
+  //   - pass 1 through a repeat region: play volta:1 measures, skip volta:2 measures
+  //   - pass 2 (after jumping back from repeatEnd): skip volta:1 measures, play volta:2 measures
   const unrollRepeats = (progression: any[]): number[] => {
     const result: number[] = [];
     const hasRepeated: Record<number, boolean> = {};
+    // passCount tracks which pass we are on for each repeatEnd barline index
+    const passCount: Record<number, number> = {};
     let i = 0;
     while (i < progression.length) {
       if (!progression[i]) { i++; continue; }
+
+      // Determine which repeat region (if any) this chord belongs to, and what pass we're on
+      const chord = progression[i];
+
+      // Find the nearest enclosing repeatEnd to determine current pass for this position
+      // We use the passCount of the nearest upcoming/enclosing repeatEnd
+      let enclosingRepeatEndIdx: number | null = null;
+      for (let j = i; j < progression.length; j++) {
+        if (progression[j]?.repeatEnd) { enclosingRepeatEndIdx = j; break; }
+      }
+      const currentPass = enclosingRepeatEndIdx !== null ? (passCount[enclosingRepeatEndIdx] ?? 1) : 1;
+
+      // Skip this chord if its volta doesn't match the current pass
+      if (chord.volta === 1 && currentPass === 2) { i++; continue; }
+      if (chord.volta === 2 && currentPass === 1) { i++; continue; }
+
       result.push(i);
-      if (progression[i].repeatEnd && !hasRepeated[i]) {
+
+      if (chord.repeatEnd && !hasRepeated[i]) {
         hasRepeated[i] = true;
+        passCount[i] = 2; // next time through this repeatEnd it will be pass 2
         let startIdx = 0;
         for (let j = i; j >= 0; j--) {
           if (progression[j]?.repeatStart) { startIdx = j; break; }
         }
         i = startIdx; // jump back to repeat start
       } else {
-        if (progression[i]?.repeatEnd) hasRepeated[i] = false;
+        if (chord.repeatEnd) {
+          hasRepeated[i] = false;
+          passCount[i] = 1; // reset for any future loops (e.g. when the player loops the whole piece)
+        }
         i++;
       }
     }
@@ -150,7 +176,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
   // Build the full ordered sequence of ProgressionMeasure objects.
   // All computation (voicing resolution, repeat unrolling) happens once here,
   // before handing the sequence to the look-ahead scheduler.
-  const buildSequence = (): ProgressionMeasure[] => {
+  const buildSequence = (startChordIdx: number = 0): ProgressionMeasure[] => {
     const progressionStore = useProgressionStore.getState();
     const settingsStore    = useSettingsStore.getState();
     const { progression, rhythm } = progressionStore;
@@ -160,10 +186,15 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     const orderedIndices = unrollRepeats(progression);
     if (!orderedIndices.length) return [];
 
-    return orderedIndices.map((chordIdx, seqPos): ProgressionMeasure | null => {
+    // Slice from the first occurrence of startChordIdx in the unrolled list.
+    // Fall back to 0 if not found (e.g. empty cell selected).
+    const startPos = startChordIdx > 0 ? orderedIndices.indexOf(startChordIdx) : 0;
+    const slicedIndices = startPos > 0 ? orderedIndices.slice(startPos) : orderedIndices;
+
+    return slicedIndices.map((chordIdx, seqPos): ProgressionMeasure | null => {
       const chord   = progression[chordIdx];
       if (!chord) return null;
-      const nextProgIdx  = seqPos + 1 < orderedIndices.length ? orderedIndices[seqPos + 1] : chordIdx;
+      const nextProgIdx  = seqPos + 1 < slicedIndices.length ? slicedIndices[seqPos + 1] : chordIdx;
       const nextRoot     = progression[nextProgIdx]?.rootSemi ?? chord.rootSemi;
       const beats        = chord.beats || 4;
       // Safely access voicing data with bounds checking
@@ -209,7 +240,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     const chordStore = useChordStore.getState();
     prePlaybackChord.current = { rootSemi: chordStore.rootSemi, chordType: chordStore.chordType };
 
-    const sequence = buildSequence();
+    const sequence = buildSequence(selectedCell ?? 0);
     if (!sequence.length) return;
 
     isPlayingRef.current = true;
@@ -219,6 +250,11 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     // SoundfontPlayer (resetClock: true), so the scheduler's first tick lands
     // exactly after the count-off finishes.
     const firstChord = sequence[0];
+    const settingsStore = useSettingsStore.getState();
+    const bpm = settingsStore.bpm;
+    const beatSecs = 60 / bpm;
+    const countOffDurationMs = beatSecs * firstChord.beats * 1000;
+
     onPlay([], {
       isMeasure:   true,
       resetClock:  true,
@@ -226,21 +262,27 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
       countOff:    true,
     });
 
-    // Hand the entire pre-computed sequence to the player's internal look-ahead
-    // scheduler. From this point the JS thread is out of the timing loop —
-    // the Web Audio clock drives everything.
-    playProgression(
-      sequence,
-      (_seqIdx, chordIdx) => {
-        // This callback is fired by an audio-clock-synchronised setTimeout inside
-        // SoundfontPlayer — accurate to within a few ms regardless of JS load.
-        setPlayingIdx(chordIdx);
-        const chord = useProgressionStore.getState().progression[chordIdx];
-        if (chord) useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
-      },
-      () => stopPlayback(true),
-      isLoopingRef.current,
-    );
+    // Start the progression scheduler 100 ms before the count-off ends.
+    // This matches the scheduler's internal early-fire pattern so the first
+    // chord is already queued and lands seamlessly right as the last click
+    // finishes, with no perceptible gap.
+    timers.current.push(setTimeout(() => {
+      // Hand the entire pre-computed sequence to the player's internal look-ahead
+      // scheduler. From this point the JS thread is out of the timing loop —
+      // the Web Audio clock drives everything.
+      playProgression(
+        sequence,
+        (_seqIdx, chordIdx) => {
+          // This callback is fired by an audio-clock-synchronised setTimeout inside
+          // SoundfontPlayer — accurate to within a few ms regardless of JS load.
+          setPlayingIdx(chordIdx);
+          const chord = useProgressionStore.getState().progression[chordIdx];
+          if (chord) useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
+        },
+        () => stopPlayback(true),
+        isLoopingRef.current,
+      );
+    }, Math.max(0, countOffDurationMs - 100)));
   };
 
   return {

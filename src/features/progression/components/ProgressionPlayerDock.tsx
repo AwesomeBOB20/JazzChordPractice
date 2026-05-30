@@ -6,16 +6,11 @@ import { useProgressionStore } from '@features/progression/store/progressionStor
 import { THEMES } from '@shared/ui/themes';
 import * as Haptics from 'expo-haptics';
 
-// ── Touch-draggable slider ──────────────────────────────────────────────────
-// Renders a labelled horizontal slider with no external dependencies.
-// Touching / dragging anywhere on the track sets the value proportionally.
-interface MixSliderProps {
+// ── Block row mixer control ────────────────────────────────────────────────
+// Shows 10 labelled blocks (1-10). Tapping a block sets the level directly.
+interface MixBlocksProps {
   label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  unit?: string;
+  value: number; // 1-10
   accent: string;
   border: string;
   bg: string;
@@ -23,41 +18,31 @@ interface MixSliderProps {
   onSet: (v: number) => void;
 }
 
-function MixSlider({ label, value, min, max, step, unit = '', accent, border, bg, txt3, onSet }: MixSliderProps) {
-  const [trackWidth, setTrackWidth] = useState(200);
-  const pct = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  const fillPx = pct * trackWidth;
-  const thumbLeft = Math.max(0, Math.min(trackWidth - 14, fillPx - 7));
-
-  const clamp = (v: number) => {
-    const stepped = Math.round(v / step) * step;
-    return Math.max(min, Math.min(max, parseFloat(stepped.toFixed(2))));
-  };
-
-  const handleTouch = (e: any) => {
-    const x = Math.max(0, Math.min(trackWidth, e.nativeEvent.locationX));
-    onSet(clamp(min + (x / trackWidth) * (max - min)));
-  };
-
+function MixBlocks({ label, value, accent, border, bg, txt3, onSet }: MixBlocksProps) {
   return (
-    <View style={{ marginBottom: 10 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
+    <View style={{ marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
         <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1, color: txt3 }}>{label}</Text>
-        <Text style={{ fontSize: 11, fontWeight: '700', color: accent }}>{value}{unit}</Text>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: accent }}>{value}</Text>
       </View>
-      <View
-        onLayout={e => setTrackWidth(e.nativeEvent.layout.width)}
-        onStartShouldSetResponder={() => true}
-        onResponderGrant={handleTouch}
-        onResponderMove={handleTouch}
-        style={{ height: 26, justifyContent: 'center' }}
-      >
-        {/* track background */}
-        <View style={{ height: 3, backgroundColor: border, borderRadius: 2 }} />
-        {/* filled portion */}
-        <View style={{ position: 'absolute', left: 0, top: 11.5, height: 3, width: fillPx, backgroundColor: accent, borderRadius: 2 }} />
-        {/* thumb */}
-        <View style={{ position: 'absolute', top: 6, left: thumbLeft, width: 14, height: 14, borderRadius: 7, backgroundColor: accent, borderWidth: 2, borderColor: bg }} />
+      <View style={{ flexDirection: 'row', gap: 4 }}>
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+          <TouchableOpacity
+            key={n}
+            activeOpacity={0.7}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onSet(n); }}
+            style={{
+              flex: 1,
+              height: 32,
+              borderRadius: 6,
+              backgroundColor: n <= value ? accent : border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 10, fontWeight: '700', color: n <= value ? '#fff' : txt3 }}>{n}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
     </View>
   );
@@ -86,8 +71,6 @@ export default function ProgressionPlayerDock({
     mixChordVol, setMixChordVol,
     mixBassVol,  setMixBassVol,
     mixClickVol, setMixClickVol,
-    mixHiCutFreq, setMixHiCutFreq,
-    mixHiCutGain, setMixHiCutGain,
   } = useSettingsStore();
   const { rhythm, setRhythm } = useProgressionStore();
   const t = THEMES[theme];
@@ -96,7 +79,7 @@ export default function ProgressionPlayerDock({
 
   const RHYTHMS = [
     { key: 'straight', label: 'Straight' }, { key: 'swing', label: 'Swing' },
-    { key: 'bossanova', label: 'Bossa' }, { key: 'waltz', label: 'Waltz' },
+    { key: 'bossanova', label: 'Bossa' },
     { key: 'twostep', label: 'Two-Step' }, { key: 'reggae', label: 'Reggae' }
   ];
 
@@ -147,57 +130,39 @@ export default function ProgressionPlayerDock({
       {!isPlayingSystem && showMixer && (
         <View style={{ paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: t.border, marginBottom: 12 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 2, color: t.txt3 }}>MIXER</Text>
-            <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => {
+            <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 2, color: t.txt3 }}>MIXER</Text>
+            <TouchableOpacity hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }} onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setMixChordVol(80);
-              setMixBassVol(70);
-              setMixClickVol(80);
-              setMixHiCutFreq(3500);
-              setMixHiCutGain(-8);
+              setMixChordVol(70);
+              setMixBassVol(100);
+              setMixClickVol(30);
             }}>
-              <Text style={{ fontSize: 10, fontWeight: '800', color: t.accent }}>RESET</Text>
+              <Text style={{ fontSize: 14, fontWeight: '800', color: t.accent }}>RESET</Text>
             </TouchableOpacity>
           </View>
 
           {/* CHORD — master chord instrument level */}
-          <MixSlider
+          <MixBlocks
             label="CHORD"
-            value={mixChordVol} min={0} max={100} step={1} unit="%"
+            value={Math.min(10, Math.round(mixChordVol / 10))}
             accent={t.accent} border={t.border} bg={t.bg} txt3={t.txt3}
-            onSet={setMixChordVol}
+            onSet={(v) => setMixChordVol(Math.min(100, v * 10))}
           />
 
           {/* BASS — bass instrument level */}
-          <MixSlider
+          <MixBlocks
             label="BASS"
-            value={mixBassVol} min={0} max={100} step={1} unit="%"
+            value={Math.min(10, Math.round(mixBassVol / 10))}
             accent={t.accent} border={t.border} bg={t.bg} txt3={t.txt3}
-            onSet={setMixBassVol}
+            onSet={(v) => setMixBassVol(Math.min(100, v * 10))}
           />
 
           {/* CLICK — metronome click level */}
-          <MixSlider
+          <MixBlocks
             label="CLICK"
-            value={mixClickVol} min={0} max={100} step={1} unit="%"
+            value={Math.min(10, Math.round(mixClickVol / 10))}
             accent={t.accent} border={t.border} bg={t.bg} txt3={t.txt3}
-            onSet={setMixClickVol}
-          />
-
-          {/* HI-CUT FREQ — where the chord high-shelf EQ starts */}
-          <MixSlider
-            label="HI-CUT FREQ"
-            value={mixHiCutFreq} min={500} max={8000} step={100} unit=" Hz"
-            accent={t.accent} border={t.border} bg={t.bg} txt3={t.txt3}
-            onSet={setMixHiCutFreq}
-          />
-
-          {/* HI-CUT GAIN — how many dB to cut above that frequency */}
-          <MixSlider
-            label="HI-CUT GAIN"
-            value={mixHiCutGain} min={-20} max={0} step={1} unit=" dB"
-            accent={t.accent} border={t.border} bg={t.bg} txt3={t.txt3}
-            onSet={setMixHiCutGain}
+            onSet={(v) => setMixClickVol(Math.min(100, v * 10))}
           />
         </View>
       )}
@@ -235,7 +200,7 @@ export default function ProgressionPlayerDock({
 }
 
 const styles = StyleSheet.create({
-  stickyPlayer: { paddingVertical: 12, paddingBottom: Platform.OS === 'ios' ? 24 : 12 },
+  stickyPlayer: { paddingVertical: 12, paddingBottom: 12 },
   enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
   enginePillTxt: { fontSize: 14, fontWeight: '700' },
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },

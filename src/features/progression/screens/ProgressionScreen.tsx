@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Platform, StatusBar as RNStatusBar, TextInput, UIManager, Dimensions, Animated, TouchableWithoutFeedback, PanResponder, BackHandler } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useIsFocused } from '@react-navigation/native';
@@ -17,7 +17,7 @@ import { calculateOptimalVoiceLeading, buildHardcodedShapeVoicings } from '@shar
 import { buildPianoVoicings } from '@shared/piano';
 
 // NOTICE: ProgressionSettings has been completely removed from this import list!
-import { ProgressionToolbar, ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
+import { ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -59,7 +59,7 @@ const ProgressionCell = React.memo(function ProgressionCell({
           
           {/* Absolute Measure Number */}
           {!isRightHalf && (
-            <Text style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
+            <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
           )}
           
           {/* Left Zone: Time Sig, Start Repeat */}
@@ -84,12 +84,12 @@ const ProgressionCell = React.memo(function ProgressionCell({
               </View>
             ) : (
               <View style={{ alignItems: 'center' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 0 }}>
                   <Text style={{ fontSize: 13, fontWeight: '800', color: txtColor1 }}>{rootText}</Text>
                   <Text style={{ fontSize: 10, fontWeight: '700', color: txtColor2, marginTop: 1 }}>{typeText}</Text>
                 </View>
                 {chord && (
-                  <View style={{ marginTop: 2 }}>
+                  <View style={{ marginTop: 10 }}>
                     {instrument === 'piano' ? (
                       <MiniPianoDiagram chord={chord} notes={showShapes ? pianoShapes[idx]?.notes : pianoVoicings[idx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
                     ) : (
@@ -117,7 +117,7 @@ const ProgressionCell = React.memo(function ProgressionCell({
     const { isSelected, isPlaying, bgColor, borderColor } = getCellProps(idx);
     return (
       <TouchableOpacity activeOpacity={0.7}
-        style={[styles.cell, { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight }, (isSelected || isPlaying) && { margin: 0, borderWidth: 2 }]}
+        style={[styles.cell, { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight }, (isSelected || isPlaying) && { borderWidth: 2 }]}
         onPress={() => handleCellPress(idx, chord)} onLongPress={() => handleCellLongPress(idx, chord)} delayLongPress={300}>
         {renderContent(chord, idx, isPlaying, false, false)}
       </TouchableOpacity>
@@ -157,10 +157,10 @@ const ProgressionCell = React.memo(function ProgressionCell({
     };
 
     return (
-      <View style={[styles.cell, { flexBasis: '25%', flexGrow: 1, maxWidth: '26%', backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 0, flexDirection: 'row' }, (isSelected || isPlaying) && { margin: 0, borderWidth: 2 }]}>
+      <View style={[styles.cell, { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 0, flexDirection: 'row' }, (isSelected || isPlaying) && { borderWidth: 2 }]}>
           
           {/* Absolute Measure Number */}
-          <Text style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
+          <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
 
           {/* Left Zone */}
           <View style={viewMode === 'diagram' ? { position: 'absolute', left: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-start', justifyContent: 'flex-end', paddingBottom: 4, paddingLeft: 4, height: '100%', zIndex: 2 }} pointerEvents="none">
@@ -186,7 +186,7 @@ const ProgressionCell = React.memo(function ProgressionCell({
                 <>
                   <View style={{ alignItems: 'center', justifyContent: 'center' }}>
                       {renderSplitText(left, pLeft.isPlaying)}
-                      <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: -8, marginBottom: -6 }}>
+                      <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                         {instrument === 'piano' ? (
                           <MiniPianoDiagram chord={left} notes={showShapes ? pianoShapes[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
                         ) : (
@@ -196,7 +196,7 @@ const ProgressionCell = React.memo(function ProgressionCell({
                   </View>
                   <View style={{ alignItems: 'center', justifyContent: 'center' }}>
                       {renderSplitText(right, pRight.isPlaying)}
-                      <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: -8, marginBottom: -6 }}>
+                      <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                         {instrument === 'piano' ? (
                           <MiniPianoDiagram chord={right} notes={showShapes ? pianoShapes[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
                         ) : (
@@ -227,7 +227,7 @@ export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
   const { theme, instrument, bpm, setBpm, voiceLeading, fretCap, pianoZone, octave, arp } = useSettingsStore();
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
-  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone } = useProgressionStore();
+  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta } = useProgressionStore();
   
   const t = THEMES[theme];
   const insets = useSafeAreaInsets();
@@ -242,6 +242,18 @@ export default function ProgressionScreen() {
   const [viewMode, setViewMode] = useState<'text' | 'diagram'>('text');
   const [showShapes, setShowShapes] = useState(false);
   const lastTap = useRef<{ idx: number, time: number }>({ idx: -1, time: 0 });
+
+  const cycleViewMode = () => {
+    if (viewMode === 'text') {
+      setViewMode('diagram');
+      setShowShapes(false);
+    } else if (!showShapes) {
+      setShowShapes(true);
+    } else {
+      setViewMode('text');
+      setShowShapes(false);
+    }
+  };
 
   const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone), [progression, voiceLeading, fretCap, guitarNeckZone]);
 
@@ -614,51 +626,130 @@ export default function ProgressionScreen() {
     }
   };
 
+  // Compute repeat targets for selected cell (handles split measures)
+  let isLeft = false, isRight = false, pairLeftIdx = selectedCell, pairRightIdx = selectedCell;
+  if (selectedCell !== null) {
+    for (let i = 0; i < progression.length; i++) {
+      if (progression[i]?.beats === 2 && i + 1 < progression.length && progression[i+1]?.beats === 2) {
+        if (i === selectedCell) { isLeft = true; pairLeftIdx = i; pairRightIdx = i + 1; break; }
+        else if (i + 1 === selectedCell) { isRight = true; pairLeftIdx = i; pairRightIdx = i + 1; break; }
+        i++;
+      } else if (i === selectedCell) { break; }
+    }
+  }
+
+  const targetStartCell = isRight ? pairLeftIdx : selectedCell;
+  const targetEndCell = isLeft ? pairRightIdx : selectedCell;
+  const isRepeatStart = targetStartCell !== null && progression[targetStartCell]?.repeatStart;
+  const isRepeatEnd = targetEndCell !== null && progression[targetEndCell]?.repeatEnd;
+
+  const selectedVolta = selectedCell !== null ? progression[selectedCell]?.volta : undefined;
+
   return (
     <View style={[styles.safe, { backgroundColor: t.bg }]}>
       <View style={[styles.card, { 
         backgroundColor: t.bg2, 
-        paddingTop: isPlayingSystem ? 0 : 16,
-        paddingBottom: isPlayingSystem ? 0 : 14,
+        justifyContent: 'center',
+        zIndex: 30,
+        paddingTop: 10,       
+        paddingBottom: 10,
         borderBottomWidth: 1,
-        borderBottomColor: t.border,
-        zIndex: 30
+        borderBottomColor: t.border
       }]}>
         {!isPlayingSystem && (
-          <View style={[styles.measureHeader, { justifyContent: 'space-between', marginBottom: 0 }]}>
-            <View style={{ flexDirection: 'row', gap: 8, flex: 1, justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-              {viewMode === 'diagram' && (
-                <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={() => setShowShapes(s => !s)}>
-                  <Ionicons name={showShapes ? 'color-filter' : 'color-filter-outline'} size={14} color={showShapes ? t.accent : t.txt2} />
-                  <Text style={{ fontSize: 10, fontWeight: '800', color: showShapes ? t.accent : t.txt2 }}>{showShapes ? 'SHAPES' : 'CHORDS'}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 44 }} style={{ height: 44 }}>
+            <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={cycleViewMode}>
+              <Ionicons name={viewMode === 'text' ? 'text-outline' : showShapes ? 'color-filter' : 'grid-outline'} size={14} color={viewMode === 'text' ? t.txt2 : showShapes ? t.accent : t.txt2} />
+              <Text style={{ fontSize: 10, fontWeight: '800', color: viewMode === 'text' ? t.txt2 : showShapes ? t.accent : t.txt2 }}>{viewMode === 'text' ? 'TEXT' : showShapes ? 'SHAPES' : 'CHORDS'}</Text>
+            </TouchableOpacity>
+            
+            {instrument === 'guitar' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+                <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 12 : (guitarNeckZone <= 1 ? null : guitarNeckZone - 1))} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>-</Text>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={() => setViewMode(v => v === 'text' ? 'diagram' : 'text')}>
-                <Ionicons name={viewMode === 'text' ? 'grid-outline' : 'text-outline'} size={14} color={t.txt2} />
-                <Text style={{ fontSize: 10, fontWeight: '800', color: t.txt2 }}>{viewMode === 'text' ? 'DIAGRAMS' : 'TEXT'}</Text>
-              </TouchableOpacity>
-              
-              {instrument === 'guitar' && (
-                <View style={{ flexDirection: 'row', backgroundColor: t.bg3, borderRadius: 18, borderWidth: 1, borderColor: t.border, overflow: 'hidden', alignItems: 'center' }}>
-                  <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 12 : (guitarNeckZone <= 1 ? null : guitarNeckZone - 1))} style={{ height: 34, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
-                    <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>-</Text>
-                  </TouchableOpacity>
-                  <View style={{ alignItems: 'center', minWidth: 36 }}>
-                    <Text style={{ fontSize: 8, fontWeight: '800', color: t.txt3 }}>ZONE</Text>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt1 }}>{guitarNeckZone === null ? 'AUTO' : guitarNeckZone}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 1 : (guitarNeckZone >= 12 ? null : guitarNeckZone + 1))} style={{ height: 34, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
-                    <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>+</Text>
-                  </TouchableOpacity>
+                <View style={{ alignItems: 'center', minWidth: 36 }}>
+                  <Text style={{ fontSize: 8, fontWeight: '800', color: t.txt3 }}>ZONE</Text>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt1 }}>{guitarNeckZone === null ? 'AUTO' : guitarNeckZone}</Text>
                 </View>
-              )}
+                <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 1 : (guitarNeckZone >= 12 ? null : guitarNeckZone + 1))} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>+</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Time Signature */}
+            <TouchableOpacity disabled={selectedCell === null} onPress={() => {
+              if (selectedCell === null) return;
+              const current = progression[selectedCell]?.beats || 4;
+              const next = (current === 4 ? 2 : current + 1) as 2 | 3 | 4;
+              setChordBeats(selectedCell, next);
+            }} style={{ height: 40, minWidth: 44, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg3, borderWidth: 1, borderColor: t.border }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 12, fontWeight: 'bold', color: t.txt1, lineHeight: 12 }}>{selectedCell !== null ? (progression[selectedCell]?.beats || 4) : 4}</Text>
+                <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 12, fontWeight: 'bold', color: t.txt1, lineHeight: 12 }}>4</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Repeats */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+              <TouchableOpacity disabled={targetStartCell === null} onPress={() => targetStartCell !== null && toggleRepeatStart(targetStartCell)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: isRepeatStart ? t.accent : t.txt2, transform: [{ translateY: 1 }] }}>𝄆</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={targetEndCell === null} onPress={() => targetEndCell !== null && toggleRepeatEnd(targetEndCell)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: isRepeatEnd ? t.accent : t.txt2, transform: [{ translateY: 1 }] }}>𝄇</Text>
+              </TouchableOpacity>
             </View>
-            <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
+
+            {/* Volta Endings */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+              <TouchableOpacity
+                disabled={selectedCell === null || !progression[selectedCell]}
+                onPress={() => {
+                  if (selectedCell === null || !progression[selectedCell]) return;
+                  setVolta(selectedCell, selectedVolta === 1 ? undefined : 1);
+                }}
+                style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}
+              >
+                <View style={{ width: 22, height: 16, justifyContent: 'flex-start', alignItems: 'flex-start' }}>
+                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: selectedVolta === 1 ? t.accent : t.txt2 }} />
+                  <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 12, backgroundColor: selectedVolta === 1 ? t.accent : t.txt2 }} />
+                  <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 9, fontWeight: '800', color: selectedVolta === 1 ? t.accent : t.txt2, lineHeight: 10 }}>1.</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={selectedCell === null || !progression[selectedCell]}
+                onPress={() => {
+                  if (selectedCell === null || !progression[selectedCell]) return;
+                  setVolta(selectedCell, selectedVolta === 2 ? undefined : 2);
+                }}
+                style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}
+              >
+                <View style={{ width: 22, height: 16, justifyContent: 'flex-start', alignItems: 'flex-start' }}>
+                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: selectedVolta === 2 ? t.accent : t.txt2 }} />
+                  <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 12, backgroundColor: selectedVolta === 2 ? t.accent : t.txt2 }} />
+                  <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 9, fontWeight: '800', color: selectedVolta === 2 ? t.accent : t.txt2, lineHeight: 10 }}>2.</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Transposition */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+              <TouchableOpacity onPress={() => transposeProgression(-1)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt1, transform: [{ translateY: -2 }] }}>♭</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => transposeProgression(1)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt1, transform: [{ translateY: -2 }] }}>♯</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Measure Management */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, gap: 8 }}>
               <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]} onPress={() => {
                 removeMeasure(selectedCell);
                 if (selectedCell !== null && selectedCell >= progression.length - 1) setSelectedCell(Math.max(0, progression.length - 2));
               }}>
-                <Ionicons name="remove" size={18} color={t.txt3} />
+                <Ionicons name="remove" size={18} color={t.accent} />
               </TouchableOpacity>
               <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]} onPress={() => {
                 addMeasure(selectedCell);
@@ -666,16 +757,22 @@ export default function ProgressionScreen() {
                   setSelectedCell(selectedCell + 1);
                 }
               }}>
-                <Ionicons name="add" size={18} color={t.txt3} />
+                <Ionicons name="add" size={18} color={t.accent} />
               </TouchableOpacity>
             </View>
-          </View>
+
+            {/* Delete Chord */}
+            <TouchableOpacity disabled={selectedCell === null} onPress={() => selectedCell !== null && removeProgressionChord(selectedCell)}
+              style={{ height: 40, width: 44, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg3, borderWidth: 1, borderColor: t.border }}>
+              <MaterialCommunityIcons name="eraser" size={18} color={t.accent} />
+            </TouchableOpacity>
+          </ScrollView>
         )}
       </View>
-      <ScrollView ref={scrollRef} style={{ zIndex: 20 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} removeClippedSubviews={true}>
+      <ScrollView ref={scrollRef} style={{ zIndex: 20, flex: 1, backgroundColor: t.bg2 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} removeClippedSubviews={true} bounces={false} overScrollMode="never">
         <View style={[styles.card, { backgroundColor: t.bg2, paddingTop: 0 }]}>
           
-          <View style={[styles.grid, { borderTopColor: t.border, borderBottomColor: t.border }]}>
+          <View style={[styles.grid, { borderLeftWidth: 1, borderLeftColor: t.border }]}>
             {groupedCells.map((group, gIdx) => {
               const getCellProps = (idx: number) => {
                 const isSelected = selectedCell === idx;
@@ -722,8 +819,9 @@ export default function ProgressionScreen() {
               const showTimeSig = gIdx === 0 || currentEffectiveBeats !== prevEffectiveBeats;
 
               const renderContent = (chord: any, idx: number, isPlaying: boolean, isRightHalf: boolean = false, isSplit: boolean = false) => {
-                  const txtColor1 = isPlaying ? t.accent : t.txt1;
-                  const txtColor2 = isPlaying ? t.accent : t.txt2;
+                  const isSelected = selectedCell === idx;
+                  const txtColor1 = (isPlaying || isSelected) ? t.accent : t.txt1;
+                  const txtColor2 = (isPlaying || isSelected) ? t.accent : t.txt2;
                   const rootText = chord ? (chord.namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[chord.rootSemi % 12] : '-';
                   const typeText = chord ? CH[chord.chordType]?.s : '';
 
@@ -732,9 +830,18 @@ export default function ProgressionScreen() {
                   return (
                     <View style={{ flex: 1, width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                       
+                      {/* Volta Bracket */}
+                      {!!chord?.volta && (
+                        <View style={{ position: 'absolute', top: 4, left: 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
+                          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
+                          <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
+                          <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{chord.volta}.</Text>
+                        </View>
+                      )}
+
                       {/* Absolute Measure Number */}
                       {!isRightHalf && (
-                        <Text style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
+                        <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
                       )}
                       
                       {/* Left Zone: Time Sig, Start Repeat */}
@@ -759,12 +866,12 @@ export default function ProgressionScreen() {
                           </View>
                         ) : (
                           <View style={{ alignItems: 'center' }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 0 }}>
                               <Text style={{ fontSize: 13, fontWeight: '800', color: txtColor1 }}>{rootText}</Text>
                               <Text style={{ fontSize: 10, fontWeight: '700', color: txtColor2, marginTop: 1 }}>{typeText}</Text>
                             </View>
                             {chord && (
-                              <View style={{ marginTop: 2 }}>
+                              <View style={{ marginTop: 10 }}>
                                 {instrument === 'piano' ? (
                                   <MiniPianoDiagram chord={chord} notes={showShapes ? pianoShapes[idx]?.notes : pianoVoicings[idx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
                                 ) : (
@@ -791,8 +898,12 @@ export default function ProgressionScreen() {
                 const { idx, chord } = group;
                 const { isSelected, isPlaying, bgColor, borderColor } = getCellProps(idx);
                 return (
-                  <TouchableOpacity key={`cell-${idx}`} activeOpacity={0.7}
-                    style={[styles.cell, { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight }, (isSelected || isPlaying) && { margin: 0, borderWidth: 2 }]}
+                  <TouchableOpacity key={`cell-${idx}`} activeOpacity={1}
+                    style={[
+                      styles.cell, 
+                      { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight }, 
+                      (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 }
+                    ]}
                     onPress={() => handleCellPress(idx, chord)} onLongPress={() => handleCellLongPress(idx, chord)} delayLongPress={300}>
                     {renderContent(chord, idx, isPlaying, false, false)}
                   </TouchableOpacity>
@@ -808,11 +919,14 @@ export default function ProgressionScreen() {
                 if (isSelected) { borderColor = t.accent; bgColor = t.bg2; }
                 if (isPlaying) { bgColor = t.bg2; borderColor = t.accent; }
 
-                const renderSplitText = (chord: any, isPlayingChord: boolean) => {
+                const renderSplitText = (chord: any, isPlayingChord: boolean, isSelectedChord: boolean) => {
                    const rootText = chord ? (chord.namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[chord.rootSemi % 12] : '-';
                    const typeText = chord ? CH[chord.chordType]?.s : '';
-                   const txtColor1 = isPlaying ? (isPlayingChord ? t.accent : t.txt3) : t.txt1;
-                   const txtColor2 = isPlaying ? (isPlayingChord ? t.accent : t.txt3) : t.txt2;
+                   const isActiveMeasure = isPlaying || isSelected;
+                   const isActiveChord = isPlayingChord || isSelectedChord;
+                   
+                   const txtColor1 = isActiveMeasure ? (isActiveChord ? t.accent : t.txt1) : t.txt1;
+                   const txtColor2 = isActiveMeasure ? (isActiveChord ? t.accent : t.txt2) : t.txt2;
 
                    if (viewMode === 'text') {
                      return (
@@ -832,10 +946,14 @@ export default function ProgressionScreen() {
                 };
 
                 return (
-                  <View key={`split-${leftIdx}`} style={[styles.cell, { flexBasis: '25%', flexGrow: 1, maxWidth: '26%', backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 0, flexDirection: 'row' }, (isSelected || isPlaying) && { margin: 0, borderWidth: 2 }]}>
+                  <View key={`split-${leftIdx}`} style={[
+                    styles.cell, 
+                    { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 0, flexDirection: 'row' }, 
+                    (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 }
+                  ]}>
                      
                      {/* Absolute Measure Number */}
-                     <Text style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
+                     <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
 
                      {/* Left Zone */}
                      <View style={viewMode === 'diagram' ? { position: 'absolute', left: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-start', justifyContent: 'flex-end', paddingBottom: 4, paddingLeft: 4, height: '100%', zIndex: 2 }} pointerEvents="none">
@@ -854,14 +972,14 @@ export default function ProgressionScreen() {
                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'space-evenly', paddingVertical: 0 }} pointerEvents="none">
                         {viewMode === 'text' ? (
                            <View style={{ flexDirection: 'row', width: '100%', justifyContent: 'center', gap: 8 }}>
-                              {renderSplitText(left, pLeft.isPlaying)}
-                              {renderSplitText(right, pRight.isPlaying)}
+                              {renderSplitText(left, pLeft.isPlaying, pLeft.isSelected)}
+                              {renderSplitText(right, pRight.isPlaying, pRight.isSelected)}
                            </View>
                         ) : (
                            <>
                               <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-                                 {renderSplitText(left, pLeft.isPlaying)}
-                                 <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: -8, marginBottom: -6 }}>
+                                 {renderSplitText(left, pLeft.isPlaying, pLeft.isSelected)}
+                                 <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                                    {instrument === 'piano' ? (
                                      <MiniPianoDiagram chord={left} notes={showShapes ? pianoShapes[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
                                    ) : (
@@ -870,8 +988,8 @@ export default function ProgressionScreen() {
                                  </View>
                               </View>
                               <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-                                 {renderSplitText(right, pRight.isPlaying)}
-                                 <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: -8, marginBottom: -6 }}>
+                                 {renderSplitText(right, pRight.isPlaying, pRight.isSelected)}
+                                 <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                                    {instrument === 'piano' ? (
                                      <MiniPianoDiagram chord={right} notes={showShapes ? pianoShapes[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
                                    ) : (
@@ -888,10 +1006,26 @@ export default function ProgressionScreen() {
                         {!!right?.repeatEnd && ( <Text style={{ fontSize: 22, color: t.accent, fontWeight: '800', marginBottom: 1 }}>𝄇</Text> )}
                      </View>
 
-                     {/* NOTE: Tappable layer is now a COLUMN. Top half selects Chord 1, Bottom half selects Chord 2 */}
-                     <View style={[StyleSheet.absoluteFill, { flexDirection: 'column', zIndex: 5 }]}>
-                       <TouchableOpacity style={{ flex: 1 }} onPress={() => handleCellPress(leftIdx, left)} onLongPress={() => handleCellLongPress(leftIdx, left)} delayLongPress={300} />
-                       <TouchableOpacity style={{ flex: 1 }} onPress={() => handleCellPress(rightIdx, right)} onLongPress={() => handleCellLongPress(rightIdx, right)} delayLongPress={300} />
+                     {/* Volta Brackets for split halves */}
+                     {!!left?.volta && (
+                       <View style={{ position: 'absolute', top: 4, left: 4, width: '50%', height: 14, zIndex: 11 }} pointerEvents="none">
+                         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
+                         <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
+                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{left.volta}.</Text>
+                       </View>
+                     )}
+                     {!!right?.volta && (
+                       <View style={{ position: 'absolute', top: 4, left: '50%', right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
+                         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
+                         <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
+                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{right.volta}.</Text>
+                       </View>
+                     )}
+
+                     {/* NOTE: Tappable layer adapts to view mode. Column for diagrams, Row for text. */}
+                     <View style={[StyleSheet.absoluteFill, { flexDirection: viewMode === 'text' ? 'row' : 'column', zIndex: 5 }]}>
+                       <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => handleCellPress(leftIdx, left)} onLongPress={() => handleCellLongPress(leftIdx, left)} delayLongPress={300} />
+                       <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => handleCellPress(rightIdx, right)} onLongPress={() => handleCellLongPress(rightIdx, right)} delayLongPress={300} />
                      </View>
                   </View>
                 );
@@ -902,10 +1036,6 @@ export default function ProgressionScreen() {
         </View>
 
       </ScrollView>
-
-      <View style={{ backgroundColor: t.bg2 }}>
-        {!isPlayingSystem && <ProgressionToolbar selectedCell={selectedCell} />}
-      </View>
 
       <ProgressionPlayerDock
         playingIdx={playingIdx} isPlayingSystem={isPlayingSystem} isLooping={isLooping} toggleLooping={toggleLooping}
@@ -1005,7 +1135,7 @@ export default function ProgressionScreen() {
                             const isActive = brushType === key;
                             return (
                               <TouchableOpacity key={key} activeOpacity={0.7} onLayout={(e) => drawerQualItemY.current[key] = e.nativeEvent.layout.y} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }} onPress={() => handleTypePick(key)}>
-                                <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{String(CH[key]?.l ?? '')}</Text>
+                                <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}
@@ -1069,18 +1199,18 @@ export default function ProgressionScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { paddingBottom: 32 },
+  scroll: { paddingBottom: 0 },
   card: { paddingTop: 16, paddingBottom: 0 },
   sectionLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 14, paddingHorizontal: 16 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 0, borderTopWidth: 1, borderBottomWidth: 1 },
-  cell: { flexBasis: '25%', flexGrow: 1, maxWidth: '26%', flexShrink: 0, height: 60, borderWidth: 1, marginTop: -1, marginLeft: -1, alignItems: 'center', justifyContent: 'center', padding: 2, position: 'relative' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 0 },
+  cell: { width: '25%', height: 60, borderRightWidth: 1, borderBottomWidth: 1, alignItems: 'center', justifyContent: 'center', padding: 2, position: 'relative' },
   measureNum: { position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: '700' },
   repeatSign: { position: 'absolute', bottom: 2, fontSize: 18, fontWeight: '900', lineHeight: 20 },
   cellRoot: { fontSize: 22, fontWeight: '800', lineHeight: 26 },
   cellType: { fontSize: 11, fontWeight: '700' },
   beatsBadge: { position: 'absolute', top: 2, right: 3, borderRadius: 6, paddingHorizontal: 3, height: 12, alignItems: 'center', justifyContent: 'center' },
   measureHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 14 },
-  measureBtn: { height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', minWidth: 36 },
+  measureBtn: { height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center', minWidth: 40 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalBox: { width: '100%', padding: 20, borderRadius: 16, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
   fullModal: { flex: 1, paddingTop: Platform.OS === 'ios' ? 40 : 0 },

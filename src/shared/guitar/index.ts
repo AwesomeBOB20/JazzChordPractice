@@ -4,3 +4,4 @@ export * from '@shared/guitar/dropVoicings';
 export * from '@shared/guitar/voicings';
 export * from '@shared/guitar/voiceLeading';
 export * from '@shared/guitar/caged';
+export { filterVoicingsByInversion } from '@shared/guitar/voicings';

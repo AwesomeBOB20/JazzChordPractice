@@ -33,6 +33,7 @@ export interface SettingsState {
   pianoKeyWidth: number;
   referenceFrequency: number;
   isSettingsOpen: boolean;
+  octaveNumbering: boolean;
 
   // Mixer
   mixChordVol:  number; // 0-100  chord instrument level         (default 80)
@@ -68,6 +69,7 @@ export interface SettingsState {
   setMixClickVol:  (v: number) => void;
   setMixHiCutFreq: (v: number) => void;
   setMixHiCutGain: (v: number) => void;
+  setOctaveNumbering: (enabled: boolean) => void;
   factoryReset: () => void;
 }
 
@@ -95,11 +97,12 @@ export const useSettingsStore = create<SettingsState>()(
       pianoKeyWidth: 24,
       referenceFrequency: 440,
       isSettingsOpen: false,
+      octaveNumbering: false,
 
       // Mixer defaults
       mixChordVol:  70,
-      mixBassVol:   70,
-      mixClickVol:  80,
+      mixBassVol:   100,
+      mixClickVol:  21,
       mixHiCutFreq: 3500,
       mixHiCutGain: -8,
 
@@ -145,6 +148,7 @@ export const useSettingsStore = create<SettingsState>()(
       setMixClickVol:  (mixClickVol)  => set({ mixClickVol }),
       setMixHiCutFreq: (mixHiCutFreq) => set({ mixHiCutFreq }),
       setMixHiCutGain: (mixHiCutGain) => set({ mixHiCutGain }),
+      setOctaveNumbering: (octaveNumbering) => set({ octaveNumbering }),
 
       factoryReset: () => set({
         bpm: DEFAULT_BPM,
@@ -161,6 +165,7 @@ export const useSettingsStore = create<SettingsState>()(
         theme: 'light',
         selectiveRoles: ['root', '3', '5', '7'],
         pianoKeyWidth: 24,
+        octaveNumbering: false,
       }),
     }),
     {
@@ -191,6 +196,7 @@ export const useSettingsStore = create<SettingsState>()(
         mixClickVol:  state.mixClickVol,
         mixHiCutFreq: state.mixHiCutFreq,
         mixHiCutGain: state.mixHiCutGain,
+        octaveNumbering: state.octaveNumbering,
       }),
     }
   )

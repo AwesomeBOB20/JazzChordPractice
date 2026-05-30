@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
+import { useQuizStore } from '@features/quiz/store/quizStore';
 import { THEMES } from '@shared/ui/themes';
 import { CH, NOTE_FLAT, NOTE_SHARP, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
 
@@ -13,23 +14,54 @@ const ROOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 interface CommandSheetProps {
   visible: boolean;
   onClose: () => void;
-  onExecute: () => void;
+  onExecute?: () => void;
   onLivePreview?: (root: number, type: string) => void;
   forceMode?: 'manual' | 'random';
   executeLabel?: string;
   executeIcon?: keyof typeof Ionicons.glyphMap;
+  isQuiz?: boolean;
 }
 
 
 export default function CommandSheet({ 
   visible, onClose, onExecute, onLivePreview, forceMode, 
-  executeLabel = 'PLAY', executeIcon = 'play'
+  executeLabel, executeIcon = 'play', isQuiz
 }: CommandSheetProps) {
   const { theme, octave, instrument } = useSettingsStore();
   const {
     inputMode, setInputMode, rootSemi, chordType, setChord, 
     activeTypes, toggleType, setActiveTypes, namingMode 
   } = useChordStore();
+  
+  const { activeVoicingTypes, toggleVoicingType, setActiveVoicingTypes, activeInversions, toggleInversion, setActiveInversions } = useQuizStore();
+  const [quizSubTab, setQuizSubTab] = useState<'chords' | 'voicings'>('chords');
+
+  const voicingOptions = instrument === 'piano'
+    ? [
+        { key: 'block', label: 'Block' },
+        { key: 'triads', label: 'Triads' },
+        { key: 'shells', label: 'Shells' },
+        { key: 'drop2', label: 'Drop 2' },
+        { key: 'drop3', label: 'Drop 3' },
+        { key: 'drop2and4', label: 'Drop 2 & 4' },
+        { key: 'intervals', label: 'Intervals' },
+        { key: 'arps', label: 'Arps' },
+        { key: 'shapes', label: 'Shapes' },
+        { key: 'scales', label: 'Scales' },
+      ]
+    : [
+        { key: 'open', label: 'Open' },
+        { key: 'barre', label: 'Barre' },
+        { key: 'triads', label: 'Triads' },
+        { key: 'shells', label: 'Shells' },
+        { key: 'drop2', label: 'Drop 2' },
+        { key: 'drop3', label: 'Drop 3' },
+        { key: 'drop2and4', label: 'Drop 2 & 4' },
+        { key: 'intervals', label: 'Intervals' },
+        { key: 'arps', label: 'Arps' },
+        { key: 'shapes', label: 'Shapes' },
+        { key: 'scales', label: 'Scales' },
+      ];
   
   const t = THEMES[theme];
   const insets = useSafeAreaInsets();
@@ -103,7 +135,6 @@ export default function CommandSheet({
   const [modalVisible, setModalVisible] = useState(false);
 
   const handleClose = () => {
-    onExecute();
     onClose();
   };
 
@@ -189,15 +220,26 @@ export default function CommandSheet({
 
           {/* Center Column */}
           <View style={{ flex: 2, alignItems: 'center' }}>
-            {!forceMode && (
+            {isQuiz ? (
               <View style={{ flexDirection: 'row', backgroundColor: t.bg3, borderRadius: 20, padding: 4, borderWidth: 1, borderColor: t.border }}>
-                <TouchableOpacity onPress={() => setTimeout(() => setInputMode('random'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: inputMode === 'random' ? t.accent : 'transparent' }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: inputMode === 'random' ? '#fff' : t.txt2 }}>RANDOM</Text>
+                <TouchableOpacity onPress={() => setTimeout(() => setQuizSubTab('chords'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'chords' ? t.accent : 'transparent' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: quizSubTab === 'chords' ? '#fff' : t.txt2 }}>CHORDS</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setTimeout(() => setInputMode('manual'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: inputMode === 'manual' ? t.accent : 'transparent' }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: inputMode === 'manual' ? '#fff' : t.txt2 }}>MANUAL</Text>
+                <TouchableOpacity onPress={() => setTimeout(() => setQuizSubTab('voicings'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'voicings' ? t.accent : 'transparent' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: quizSubTab === 'voicings' ? '#fff' : t.txt2 }}>VOICINGS</Text>
                 </TouchableOpacity>
               </View>
+            ) : (
+              !forceMode && (
+                <View style={{ flexDirection: 'row', backgroundColor: t.bg3, borderRadius: 20, padding: 4, borderWidth: 1, borderColor: t.border }}>
+                  <TouchableOpacity onPress={() => setTimeout(() => setInputMode('random'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: inputMode === 'random' ? t.accent : 'transparent' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: inputMode === 'random' ? '#fff' : t.txt2 }}>RANDOM</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setTimeout(() => setInputMode('manual'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: inputMode === 'manual' ? t.accent : 'transparent' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: inputMode === 'manual' ? '#fff' : t.txt2 }}>MANUAL</Text>
+                  </TouchableOpacity>
+                </View>
+              )
             )}
           </View>
 
@@ -211,7 +253,156 @@ export default function CommandSheet({
 
         {/* Content */}
         <View style={{ flex: 1 }}>
-          {currentMode === 'manual' ? (
+          {isQuiz ? (
+            quizSubTab === 'chords' ? (
+              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 24 }} nestedScrollEnabled>
+                <View style={{ gap: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <TouchableOpacity 
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                      activeOpacity={0.6}
+                      onPress={() => {
+                        const isAllSelected = ALL_TYPES.every((k: string) => activeTypes.includes(k));
+                        if (isAllSelected) {
+                          setActiveTypes([ALL_TYPES[0]]); // Keep at least one to prevent crash
+                        } else {
+                          setActiveTypes(ALL_TYPES);
+                        }
+                      }}
+                    >
+                      <Ionicons name={ALL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                      <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeTypes.length} Selected</Text>
+                  </View>
+                  <View>
+                    {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
+                      const allCatSelected = cat.keys.every((k: string) => activeTypes.includes(k));
+                      return (
+                        <View key={cat.label} style={{ marginBottom: 20 }}>
+                          <TouchableOpacity 
+                            style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
+                            onPress={() => handleToggleCategory(cat.keys)} activeOpacity={0.6}>
+                            <Ionicons name={allCatSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={allCatSelected ? t.accent : t.txt3} />
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
+                          </TouchableOpacity>
+                          
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                            {cat.keys.map((key: string) => {
+                              const isActive = activeTypes.includes(key);
+                              if (!CH[key]) return null;
+                              return (
+                                <TouchableOpacity key={key} activeOpacity={0.7}
+                                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
+                                  onPress={() => toggleType(key)}>
+                                  <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                          {catIdx < CHORD_CATEGORIES.length - 1 && (
+                            <View style={{ height: 1, backgroundColor: t.border, marginTop: 24, marginBottom: -4 }} />
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              </ScrollView>
+            ) : (
+              <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 24 }} nestedScrollEnabled>
+                <View style={{ gap: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <TouchableOpacity 
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                      activeOpacity={0.6}
+                      onPress={() => {
+                        const allKeys = voicingOptions.map(o => o.key);
+                        const isAllSelected = allKeys.every(v => activeVoicingTypes.includes(v));
+                        if (isAllSelected) {
+                          setActiveVoicingTypes([allKeys[0]]); // Keep at least one to prevent crash
+                        } else {
+                          setActiveVoicingTypes(allKeys);
+                        }
+                      }}
+                    >
+                      <Ionicons name={voicingOptions.map(o => o.key).every(v => activeVoicingTypes.includes(v)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                      <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>ACTIVE VOICING POOL</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{voicingOptions.map(o => o.key).filter(v => activeVoicingTypes.includes(v)).length} Selected</Text>
+                  </View>
+                  
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {voicingOptions.map(item => {
+                      const isActive = activeVoicingTypes.includes(item.key);
+                      return (
+                        <TouchableOpacity
+                          key={item.key}
+                          activeOpacity={0.7}
+                          style={{
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                            borderRadius: 24,
+                            backgroundColor: isActive ? t.accent : t.bg3,
+                          }}
+                          onPress={() => toggleVoicingType(item.key)}
+                        >
+                          <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>
+                            {item.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={{ gap: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                      activeOpacity={0.6}
+                      onPress={() => {
+                        const allInversions = ['root', '1st', '2nd', '3rd'];
+                        const isAllSelected = allInversions.every(v => activeInversions.includes(v));
+                        if (isAllSelected) {
+                          setActiveInversions(['root']);
+                        } else {
+                          setActiveInversions(allInversions);
+                        }
+                      }}
+                    >
+                      <Ionicons name={['root', '1st', '2nd', '3rd'].every(v => activeInversions.includes(v)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                      <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>INVERSIONS</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeInversions.length} Selected</Text>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {['root', '1st', '2nd', '3rd'].map(inv => {
+                      const isActive = activeInversions.includes(inv);
+                      return (
+                        <TouchableOpacity
+                          key={inv}
+                          activeOpacity={0.7}
+                          style={{
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                            borderRadius: 24,
+                            backgroundColor: isActive ? t.accent : t.bg3,
+                          }}
+                          onPress={() => toggleInversion(inv)}
+                        >
+                          <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>
+                            {inv.charAt(0).toUpperCase() + inv.slice(1)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              </ScrollView>
+            )
+          ) : currentMode === 'manual' ? (
             <View style={{ flexDirection: 'row', flex: 1 }}>
               
               {/* LEFT COLUMN: Sticky Roots */}
@@ -281,7 +472,7 @@ export default function CommandSheet({
                                   onLivePreview?.(rootSemi, key);
                                 }, 0);
                               }}>
-                                <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{String(CH[key]?.l ?? '')}</Text>
+                                <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}
@@ -340,7 +531,7 @@ export default function CommandSheet({
                               <TouchableOpacity key={key} activeOpacity={0.7}
                                 style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
                                 onPress={() => toggleType(key)}>
-                                <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>{String(CH[key]?.l ?? '')}</Text>
+                                <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}
@@ -357,6 +548,19 @@ export default function CommandSheet({
 
           )}
         </View>
+
+        {executeLabel && (
+          <View style={{ borderTopWidth: 1, borderColor: t.border, paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 12 + insets.bottom }}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => { onExecute?.(); }}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 12, backgroundColor: t.accent }}
+            >
+              <Ionicons name={executeIcon} size={18} color="#fff" />
+              <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff', letterSpacing: 1 }}>{executeLabel}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </Animated.View>
     </View>
   );

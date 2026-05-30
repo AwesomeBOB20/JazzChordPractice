@@ -80,6 +80,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   const keyWidth = useSettingsStore((s: any) => s.pianoKeyWidth);
   const setKeyWidth = useSettingsStore((s: any) => s.setPianoKeyWidth);
   const activeSet = new Set(midiNotes);
+  const octaveNumbering = useSettingsStore((s: any) => s.octaveNumbering);
 
   const computeScrollX = useCallback((kw?: number) => {
     if (!midiNotes.length) return 0;
@@ -117,6 +118,9 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   
 
   const getLabelStr = (midi: number, pc: number, role: string, activeFormula: string, isActive: boolean, noteNamesArr: string[], isOverlay: boolean = false, overlayFormula: string = '') => {
+    // If role is hidden ('unknown'), never show any label regardless of settings
+    if (role === 'unknown') return '';
+
     let standardLabel = '';
 
     // 1. Calculate whatever the label *should* be based on user settings
@@ -130,12 +134,21 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
       standardLabel = getGlobalLabel(labelMode, namingMode || 'sharp', rootSemi, formulaToUse, passedRole, midi, passedNoteName);
     }
 
-    // 2. UX Standard: Anchor the keyboard by showing the octave number on 'C' keys
-    if (pc === 0) {
-      const octaveNum = Math.floor(midi / 12) - 1; // e.g. MIDI 60 becomes C4
-      // If the label is completely empty, or if the global setting just spit out a plain "C", force the octave number!
-      if (!standardLabel || standardLabel === 'C') {
-        return `C${octaveNum}`;
+    // 2. UX Standard: Anchor the keyboard by showing the octave number on 'C' keys (if enabled)
+    // Only apply to active or overlay keys — inactive C keys should stay blank.
+    // Skip entirely if labelMode is 'none' (user wants no labels at all)
+    if (pc === 0 && (isActive || isOverlay) && labelMode !== 'none') {
+      if (octaveNumbering) {
+        const octaveNum = Math.floor(midi / 12) - 1; // e.g. MIDI 60 becomes C4
+        // If the label is completely empty, or if the global setting just spit out a plain "C", force the octave number!
+        if (!standardLabel || standardLabel === 'C') {
+          return `C${octaveNum}`;
+        }
+      } else {
+        // If octaveNumbering is disabled, return 'C' if label is empty, otherwise keep standard label
+        if (!standardLabel) {
+          return 'C';
+        }
       }
     }
 
@@ -161,15 +174,17 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           
           let keyColor = '#ffffff'; let keyTextColor = theme.txt3;
           if (isActive) {
-             const resolvedColor = getNoteColor(activeFormula || role, colorMode, theme, selectiveRoles);
+             // Ensure every active note gets a color - use degree relative to root as fallback
+             const defaultDegree = degreeForPc(pc, rootSemi);
+             const resolvedColor = getNoteColor(activeFormula || role || defaultDegree, colorMode, theme, selectiveRoles);
              if (colorMode === 'theme') {
-                keyColor = accentColor ?? theme.accent; 
+                keyColor = accentColor ?? theme.accent;
                 keyTextColor = '#fff';
              } else if (colorMode === 'selective') {
                 keyColor = resolvedColor;
                 keyTextColor = resolvedColor === theme.mutedNote ? theme.txt1 : '#fff';
              } else {
-                const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role];
+                const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role] ?? ROLE_COLORS_GLOBAL[defaultDegree];
                 if (roleColor) {
                    keyColor = accentColor ?? roleColor; keyTextColor = '#fff';
                 } else {
@@ -178,7 +193,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
              }
           }
           // Show overlay ONLY within the root-to-root octaves the current voicing spans!
-          const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= lowestRoot && midi <= highestRoot;
+          const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= lowestRoot && midi < highestRoot;
           let overlayColor = 'transparent';
           let overlayF = '';
           
@@ -209,17 +224,19 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           
           let keyColor = '#1c1c1e'; let keyTextColor = '#888'; let keyBorder = 0;
           if (isActive) {
-             const resolvedColor = getNoteColor(activeFormula || role, colorMode, theme, selectiveRoles);
+             // Ensure every active note gets a color - use degree relative to root as fallback
+             const defaultDegree = degreeForPc(pc, rootSemi);
+             const resolvedColor = getNoteColor(activeFormula || role || defaultDegree, colorMode, theme, selectiveRoles);
              if (colorMode === 'theme') {
-                keyColor = accentColor ?? theme.accent; 
-                keyTextColor = '#fff'; 
+                keyColor = accentColor ?? theme.accent;
+                keyTextColor = '#fff';
                 keyBorder = 0;
              } else if (colorMode === 'selective') {
                 keyColor = resolvedColor;
                 keyTextColor = resolvedColor === theme.mutedNote ? theme.txt1 : '#fff';
                 keyBorder = resolvedColor === theme.mutedNote ? 1 : 0;
              } else {
-                const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role];
+                const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role] ?? ROLE_COLORS_GLOBAL[defaultDegree];
                 if (roleColor) {
                    keyColor = accentColor ?? roleColor; keyTextColor = '#fff'; keyBorder = 0;
                 } else {
@@ -229,7 +246,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           }
 
           // Show overlay ONLY within the root-to-root octaves the current voicing spans!
-          const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= lowestRoot && midi <= highestRoot;
+          const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= lowestRoot && midi < highestRoot;
           let overlayColor = 'transparent';
           let overlayF = '';
           
@@ -329,7 +346,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={onNextVoicing}><Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text></TouchableOpacity>
         </View>
       )}
-      <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ borderTopWidth: 0, backgroundColor: theme.bg2 }} contentContainerStyle={[styles.content, { height: WKH + 20 }]} onLayout={(e) => { viewWidth.current = e.nativeEvent.layout.width; }} onContentSizeChange={() => { if (!isReady.current) { isReady.current = true; scrollRef.current?.scrollTo({ x: computeScrollX(), animated: false }); } }}>
+      <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ borderTopWidth: 0, backgroundColor: theme.bg2 }} contentContainerStyle={[styles.content, { height: WKH }]} onLayout={(e) => { viewWidth.current = e.nativeEvent.layout.width; }} onContentSizeChange={() => { if (!isReady.current) { isReady.current = true; scrollRef.current?.scrollTo({ x: computeScrollX(), animated: false }); } }}>
         {OCTAVE_LIST.map(oct => renderOctave(oct))}
       </ScrollView>
       <View style={[styles.zoomBar, { backgroundColor: theme.bg2, borderTopColor: theme.border }]}>
@@ -343,7 +360,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
 export default PianoView;
 
 const styles = StyleSheet.create({
-  container: { borderRadius: 20, marginHorizontal: 16, borderWidth: 1, overflow: 'hidden', position: 'relative', paddingTop: 0 },
+  container: { overflow: 'hidden', position: 'relative', paddingTop: 0 },
   navContainer: { 
   flexDirection: 'row', 
   alignItems: 'center', 
@@ -360,7 +377,7 @@ const styles = StyleSheet.create({
   zoomBar: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, borderTopWidth: 1 },
   zoomBtn: { flex: 1, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   zoomBtnText: { fontSize: 24, fontWeight: '600', lineHeight: 42 },
-  content: { flexDirection: 'row', paddingHorizontal: 0, paddingTop: 0, paddingBottom: 10 },
+  content: { flexDirection: 'row', paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
   octave: { flexDirection: 'row', position: 'relative', height: WKH },
   whiteKey: { height: WKH, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, borderWidth: 1, borderTopWidth: 0, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 10, shadowOffset: { width: 0, height: 2 }, shadowRadius: 3, elevation: 2 },
   blackKeyTouch: { position: 'absolute', top: 0, height: BKH, zIndex: 2 },

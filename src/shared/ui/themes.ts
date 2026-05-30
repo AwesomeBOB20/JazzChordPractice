@@ -176,7 +176,7 @@ export const THEMES: Record<string, Theme> = {
 export const DEFAULT_THEME = 'light';
 
 export const ROLE_COLORS_GLOBAL: Record<string, string> = {
-  'root': '#D95D39', 'R': '#D95D39',
+  'root': '#D95D39', 'R': '#D95D39', '1': '#D95D39',
   '2nd': '#857AEE', '2': '#857AEE', 'b2': '#857AEE', '#2': '#857AEE',
   '3rd': '#3D94ED', '3': '#3D94ED', 'b3': '#3D94ED',
   '4th': '#20A67B', '4': '#20A67B', 'b4': '#20A67B', '#4': '#20A67B',

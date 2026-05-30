@@ -5,38 +5,14 @@ import {
 } from 'react-native';
 import Svg, { Line, G, Text as SvgText, Polyline, Defs, ClipPath, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { THEMES } from '@shared/ui/themes';
 import { useAudio } from '@shared/audio/AudioContext';
 import { startListening, stopListening, addPitchListener } from '../../../../modules/native-tuner';
 import { Audio } from 'expo-av';
-
-const PopUpModal = ({ visible, onClose, children }: { visible: boolean, onClose: () => void, children: React.ReactNode }) => {
-  const [show, setShow] = useState(visible);
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (visible) {
-      setShow(true);
-      Animated.spring(anim, { toValue: 1, useNativeDriver: true, bounciness: 8, speed: 16 }).start();
-    } else {
-      Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShow(false));
-    }
-  }, [visible]);
-
-  if (!show) return null;
-  return (
-    <View style={[StyleSheet.absoluteFill, { zIndex: 1000, elevation: 10 }]}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)', opacity: anim }]} />
-      </TouchableWithoutFeedback>
-      <Animated.View pointerEvents="box-none" style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }] }}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-};
+import { PopUpModal } from '@shared/ui/SharedModals';
 
 const TUNINGS: Record<string, { label: string; strings: { name: string; midi: number; hz: number }[] }> = {
   standard: { label: 'Standard', strings: [ { name: 'E2', midi: 40, hz: 82.41 }, { name: 'A2', midi: 45, hz: 110.0 }, { name: 'D3', midi: 50, hz: 146.83 }, { name: 'G3', midi: 55, hz: 196.0 }, { name: 'B3', midi: 59, hz: 246.94 }, { name: 'E4', midi: 64, hz: 329.63 } ] },
@@ -61,7 +37,7 @@ const GRAPH_WIDTH = SCREEN_WIDTH;
 const NOTE_SCALE_WIDTH = 44;
 const GRAPH_AREA_WIDTH = GRAPH_WIDTH - NOTE_SCALE_WIDTH;
 const GRAPH_CENTER_X = NOTE_SCALE_WIDTH + GRAPH_AREA_WIDTH / 2;
-const VISIBLE_SEMITONE_RANGE = 6; // How many semitones to show vertically
+const VISIBLE_SEMITONE_RANGE = 10; // How many semitones to show vertically
 const HEADROOM_SEMITONES = 0.9; // Bias the chart so the live pitch line never touches the top
 
 function calculatePitch(frequency: number, refFreq: number) {
@@ -81,6 +57,7 @@ function findClosestString(midi: number, cents: number, strings: { name: string;
 }
 
 export default function TunerScreen() {
+  const insets = useSafeAreaInsets();
   const { playTone: onPlayTone, stopTone: onStopTone } = useAudio();
   const { theme, referenceFrequency } = useSettingsStore();
   const t = THEMES[theme];
@@ -94,7 +71,7 @@ export default function TunerScreen() {
 
   const [isRecording, setIsRecording] = useState(false);
   const [playingStringIdx, setPlayingStringIdx] = useState<number | null>(null);
-  const [graphHeight, setGraphHeight] = useState<number>(Math.round(Dimensions.get('window').height * 0.55));
+  const [flexHeight, setFlexHeight] = useState<number>(300);
 
   // Producer side (written from the native pitch listener; no setState here)
   const latestNoteFloatRef = useRef<number | null>(null); // raw most-recent sample
@@ -255,11 +232,12 @@ export default function TunerScreen() {
   const gridLines = [];
   const halfRange = Math.ceil(VISIBLE_SEMITONE_RANGE / 2) + 1;
   const centerInt = Math.round(displayCenter);
+  const effectiveHeight = flexHeight || 300;
 
   for (let i = centerInt - halfRange; i <= centerInt + halfRange; i++) {
     // Map MIDI note distance to Y coordinate (continuous center -> smooth slide)
-    const yOffset = ((i - displayCenter) / VISIBLE_SEMITONE_RANGE) * graphHeight;
-    const y = graphHeight / 2 - yOffset;
+    const yOffset = ((i - displayCenter) / VISIBLE_SEMITONE_RANGE) * effectiveHeight;
+    const y = effectiveHeight / 2 - yOffset;
 
     const noteName = NOTES[((i % 12) + 12) % 12];
     const octave = Math.floor(i / 12) - 1;
@@ -294,19 +272,40 @@ export default function TunerScreen() {
         </View>
       </PopUpModal>
 
-      <View style={styles.container}>
+      <ScrollView style={{ flex: 1 }} scrollEnabled={false} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={styles.container}>
         {mode === 'listen' && (
-          <View
-            style={styles.listenLayout}
-            onLayout={(e) => {
-              const h = e.nativeEvent.layout.height;
-              if (h && Math.abs(h - graphHeight) > 1) setGraphHeight(h);
-            }}
-          >
-            <Svg width="100%" height="100%" viewBox={`0 0 ${GRAPH_WIDTH} ${graphHeight}`} preserveAspectRatio="none">
+          <View style={{ flex: 1 }}>
+            {isRecording && livePitchInfo && liveSmoothedHz !== null && (
+              <>
+                <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 8 }}>
+                  <Text style={{ fontSize: 44, fontWeight: '800', color: t.txt1 }}>{livePitchInfo.fullName}</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: tuneColor }}>
+                    {cents > 0 ? '+' : ''}{cents.toFixed(1)} cents
+                  </Text>
+                  <Text style={{ fontSize: 13, fontWeight: '500', color: t.txt3 }}>
+                    {liveSmoothedHz.toFixed(1)} Hz
+                  </Text>
+                </View>
+
+                {/* Horizontal divider between note display and pitch monitor */}
+                <View style={{ width: '100%', height: 1, backgroundColor: t.border }} />
+              </>
+            )}
+
+            <View
+              style={[styles.listenLayout, { flex: 1 }]}
+              onLayout={(e) => {
+                const h = e.nativeEvent.layout.height;
+                if (h && h > 0) {
+                  setFlexHeight(h);
+                }
+              }}
+            >
+            <Svg width="100%" height="100%" viewBox={`0 0 ${GRAPH_WIDTH} ${flexHeight || 300}`} preserveAspectRatio="none">
               <Defs>
                 <ClipPath id="chartClip">
-                  <Rect x={NOTE_SCALE_WIDTH} y={0} width={GRAPH_AREA_WIDTH} height={graphHeight} />
+                  <Rect x={NOTE_SCALE_WIDTH} y={0} width={GRAPH_AREA_WIDTH} height={flexHeight || 300} />
                 </ClipPath>
               </Defs>
 
@@ -316,14 +315,14 @@ export default function TunerScreen() {
                   <Line
                     x1={NOTE_SCALE_WIDTH} y1={line.y}
                     x2={GRAPH_WIDTH} y2={line.y}
-                    stroke={line.midi === highlightMidi && isRecording ? tuneColor : t.border}
-                    strokeWidth={line.midi === highlightMidi ? 2 : 1}
-                    strokeDasharray={line.midi === highlightMidi ? "none" : "5, 5"}
-                    opacity={line.midi === highlightMidi ? 0.7 : 0.3}
+                    stroke={t.border}
+                    strokeWidth={1.5}
+                    strokeDasharray="6, 4"
+                    opacity={0.5}
                   />
                   <SvgText
                     x={NOTE_SCALE_WIDTH / 2} y={line.y + 4}
-                    fill={line.midi === highlightMidi && isRecording ? tuneColor : t.txt3}
+                    fill={t.txt3}
                     fontSize={13}
                     fontWeight="700"
                     textAnchor="middle"
@@ -336,7 +335,7 @@ export default function TunerScreen() {
               {/* Vertical divider between note-name gutter and chart area */}
               <Line
                 x1={NOTE_SCALE_WIDTH} y1={0}
-                x2={NOTE_SCALE_WIDTH} y2={graphHeight}
+                x2={NOTE_SCALE_WIDTH} y2={flexHeight || 300}
                 stroke={t.border}
                 strokeWidth={1}
                 opacity={0.6}
@@ -355,8 +354,8 @@ export default function TunerScreen() {
                   const age = nowMs - p.t;
                   if (age > WINDOW_MS) continue;
                   const x = GRAPH_CENTER_X - (age / WINDOW_MS) * halfW;
-                  const yOffset = ((p.noteFloat - displayCenter) / VISIBLE_SEMITONE_RANGE) * graphHeight;
-                  const y = graphHeight / 2 - yOffset;
+                  const yOffset = ((p.noteFloat - displayCenter) / VISIBLE_SEMITONE_RANGE) * (flexHeight || 300);
+                  const y = (flexHeight || 300) / 2 - yOffset;
                   pts += (pts ? ' ' : '') + x + ',' + y;
                 }
                 if (!pts) return null;
@@ -366,7 +365,7 @@ export default function TunerScreen() {
                     points={pts}
                     fill="none"
                     stroke={tuneColor}
-                    strokeWidth={4}
+                    strokeWidth={2.5}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -377,13 +376,14 @@ export default function TunerScreen() {
               {isRecording && (
                  <Line
                     x1={GRAPH_CENTER_X} y1={0}
-                    x2={GRAPH_CENTER_X} y2={graphHeight}
+                    x2={GRAPH_CENTER_X} y2={flexHeight || 300}
                     stroke={tuneColor}
                     strokeWidth={1}
                     opacity={0.3}
                  />
               )}
             </Svg>
+          </View>
           </View>
         )}
 
@@ -411,8 +411,8 @@ export default function TunerScreen() {
             <Text style={[styles.playHint, { color: t.txt3 }]}>tap to play · tap again to stop</Text>
           </View>
         )}
-
-      </View>
+        </View>
+      </ScrollView>
 
       <View style={[styles.dock, { backgroundColor: t.bg, borderTopColor: t.border }]}>
         <View style={{ marginBottom: 12 }}>
@@ -431,18 +431,20 @@ export default function TunerScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setShowTunings(!showTunings);
-              }}
-              style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border }]}
-            >
-              <Ionicons name="musical-note" size={16} color={t.txt2} />
-              <Text style={[styles.enginePillTxt, { color: t.txt2 }]}>{tuning.label}</Text>
-              <Ionicons name={showTunings ? 'chevron-up' : 'chevron-down'} size={16} color={t.txt2} />
-            </TouchableOpacity>
+            {mode === 'play' && (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowTunings(!showTunings);
+                }}
+                style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border }]}
+              >
+                <Ionicons name="musical-note" size={16} color={t.txt2} />
+                <Text style={[styles.enginePillTxt, { color: t.txt2 }]}>{tuning.label}</Text>
+                <Ionicons name={showTunings ? 'chevron-up' : 'chevron-down'} size={16} color={t.txt2} />
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </View>
 
@@ -476,7 +478,7 @@ const styles = StyleSheet.create({
   tuningOverlayLabel: { fontSize: 15, fontWeight: '700' },
   tuningOverlayNotes: { fontSize: 12, fontWeight: '500', marginTop: 2 },
   
-  listenLayout: { flex: 1, width: '100%', overflow: 'hidden' },
+  listenLayout: { width: '100%', overflow: 'hidden' },
   
   enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
   enginePillTxt: { fontSize: 14, fontWeight: '700' },

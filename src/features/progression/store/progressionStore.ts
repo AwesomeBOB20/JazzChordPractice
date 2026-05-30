@@ -19,6 +19,7 @@ export interface ProgressionState {
   removeMeasure: (selectedIndex?: number | null) => void;
   toggleRepeatStart: (index: number) => void;
   toggleRepeatEnd: (index: number) => void;
+  setVolta: (index: number, volta: 1 | 2 | undefined) => void;
   transposeProgression: (semitones: number) => void;
   setChordBeats: (index: number, beats: 2 | 3 | 4) => void;
   setRhythm: (rhythm: string) => void;
@@ -267,6 +268,7 @@ export const useProgressionStore = create<ProgressionState>()(
           namingMode: smartNamingMode,
           repeatStart: existing?.repeatStart,
           repeatEnd: existing?.repeatEnd,
+          volta: existing?.volta,
           intervals: getChordIntervals(chordType),
         };
         return { progression: next };
@@ -304,6 +306,11 @@ export const useProgressionStore = create<ProgressionState>()(
       toggleRepeatEnd: (index) => set((state) => {
         const next = [...state.progression];
         if (next[index]) next[index] = { ...next[index]!, repeatEnd: !next[index]!.repeatEnd };
+        return { progression: next };
+      }),
+      setVolta: (index, volta) => set((state) => {
+        const next = [...state.progression];
+        if (next[index]) next[index] = { ...next[index]!, volta };
         return { progression: next };
       }),
       transposeProgression: (semitones) => set((state) => {

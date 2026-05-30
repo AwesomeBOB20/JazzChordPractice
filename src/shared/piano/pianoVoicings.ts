@@ -1,11 +1,7 @@
 import { CH, SCALES, CHORD_SCALE_MAP, NOTE_SHARP, NOTE_FLAT, spellInterval, formatDegree } from '@shared/theory/musicTheory';
-import { findTriads } from '@shared/guitar/voicings';
+import { findTriads, TRIAD_FULL_NAMES } from '@shared/guitar/voicings';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { UnifiedVoicing } from '@shared/types/models';
-
-const TRIAD_FULL_NAMES: Record<string, string> = {
-  maj:  'Major', min:  'Minor', aug:  'Augmented', dim:  'Diminished', sus4: 'Sus4', sus2: 'Sus2',
-};
 
 export function buildPianoVoicings(rootSemi: number, chordType: string, octave: number = 4, selectedScaleId: string | null = null, namingMode: 'sharp' | 'flat' = 'sharp') {
   const ch = CH[chordType];
@@ -32,6 +28,7 @@ export function buildPianoVoicings(rootSemi: number, chordType: string, octave: 
     // This forces the bass note of EVERY generated voicing to stay anchored to the root's octave set.
     while (notes[0] >= rootMidi + 12) notes = notes.map(n => n - 12);
     while (notes[0] < rootMidi - 12)  notes = notes.map(n => n + 12);
+    while (notes[notes.length-1] >= rootMidi + 24) notes = notes.map(n => n - 12);
 
     const roles: string[] = [];
     const formulas: string[] = [];
@@ -55,7 +52,7 @@ export function buildPianoVoicings(rootSemi: number, chordType: string, octave: 
       const idx = ch.iv.findIndex(iv => (rootSemi + iv) % 12 === pc);
       if (idx !== -1) {
         const f = ch.f ? ch.f[idx] : ch.r[idx];
-        return f.replace(/root/gi, 'R').replace(/nd|rd|th/gi, '');
+        return f.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
       }
       return '?';
     }).join('-');
@@ -120,16 +117,20 @@ export function buildPianoVoicings(rootSemi: number, chordType: string, octave: 
     }
   }
 
-  // Pass 2: Rootless Substitutions for Extended Chords (3-5-7-9)
+  // Pass 2: Rootless Substitutions for Extended Chords (3-5-7-9, 3-7-9-11, 3-7-9-13)
   const dHas3 = ch.iv.find(iv => iv === 3 || iv === 4);
   const dHas5 = ch.iv.find(iv => iv === 6 || iv === 7 || iv === 8);
   const dHas7 = ch.iv.find(iv => iv === 10 || iv === 11 || iv === 9);
   const dHas9 = ch.iv.find(iv => iv === 13 || iv === 14 || iv === 15);
+  const dHas11 = ch.iv.find(iv => iv === 17 || iv === 18);
+  const dHas13 = ch.iv.find(iv => iv === 21 || iv === 20);
   const dHas6 = ch.iv.find(iv => iv === 9 && !chordType.includes('7'));
 
   let d2base: number[] | null = null;
   if (ch.iv.length > 4 && dHas3 !== undefined && dHas7 !== undefined && dHas9 !== undefined) {
-    d2base = [dHas3, dHas5 !== undefined ? dHas5 : 7, dHas7, dHas9 % 12].sort((a,b)=>a-b);
+    // Prioritize 13th over 5th for 13th chords, and 11th over 5th for 11th chords
+    const fifthOrExtension = dHas13 !== undefined ? dHas13 : (dHas11 !== undefined ? dHas11 : (dHas5 !== undefined ? dHas5 : 7));
+    d2base = [dHas3, fifthOrExtension, dHas7, dHas9 % 12].sort((a,b)=>a-b);
   } else if (chordType.includes('69') && dHas3 !== undefined && dHas5 !== undefined && dHas6 !== undefined && dHas9 !== undefined) {
     d2base = [dHas3, dHas5, dHas6, dHas9 % 12].sort((a,b)=>a-b);
   }
@@ -138,16 +139,15 @@ export function buildPianoVoicings(rootSemi: number, chordType: string, octave: 
     'maj9': { type: 'min7', rootFormula: '3' },
     'maj11': { type: 'min7', rootFormula: '3' },
     'maj13': { type: 'min7', rootFormula: '3' },
-    'maj69': { type: 'min7', rootFormula: '6' },
+    'maj69': { type: 'dom7sus4', rootFormula: '6' },
     'min9': { type: 'maj7', rootFormula: 'b3' },
     'min11': { type: 'maj7', rootFormula: 'b3' },
     'min13': { type: 'maj7', rootFormula: 'b3' },
-    'min69': { type: 'hdim7', rootFormula: '6' },
     'dom9': { type: 'hdim7', rootFormula: '3' },
     'dom11': { type: 'hdim7', rootFormula: '3' },
     'dom13': { type: 'hdim7', rootFormula: '3' },
     'dom7b9': { type: 'fdim7', rootFormula: '3' },
-    'dom13b9': { type: 'fdim7', rootFormula: '3' },
+    // Removed min69 and dom13b9 - engine falls back to explicit drop2 shapes
   };
 
   let subChordLabel: string | undefined = undefined;
@@ -210,4 +210,27 @@ export function buildPianoVoicings(rootSemi: number, chordType: string, octave: 
   }
 
   return { triads, shells, drop2, drop3, drop2and4 };
+}
+
+export function applyInversion(
+  notes: number[],
+  inversion: 'root' | '1st' | '2nd' | '3rd'
+): number[] {
+  if (inversion === 'root' || notes.length === 0) return [...notes];
+
+  let inverted = [...notes].sort((a, b) => a - b);
+  const shifts = inversion === '1st' ? 1 : inversion === '2nd' ? 2 : inversion === '3rd' ? 3 : 0;
+
+  // Guard against trying to shift more notes than exist (e.g. 3rd inv on a triad)
+  if (shifts >= inverted.length) return inverted;
+
+  for (let i = 0; i < shifts; i++) {
+    // Move the lowest pitch up by exactly one octave
+    const lowest = inverted.shift();
+    if (lowest !== undefined) {
+      inverted.push(lowest + 12);
+    }
+  }
+
+  return inverted.sort((a, b) => a - b);
 }

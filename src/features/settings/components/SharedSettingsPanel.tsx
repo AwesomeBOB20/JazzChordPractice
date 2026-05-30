@@ -11,7 +11,7 @@ export default function SharedSettingsPanel() {
     theme, labelMode, setLabelMode, colorMode, setColorMode, 
     selectiveRoles, toggleSelectiveRole,
     instrument, setInstrument, arp, setArp, referenceFrequency, setReferenceFrequency,
-    octave, setOctave
+    octave, setOctave, octaveNumbering, setOctaveNumbering
   } = useSettingsStore();
   const { namingMode, setNamingMode } = useChordStore();
   const t = THEMES[theme];
@@ -58,6 +58,11 @@ export default function SharedSettingsPanel() {
                 {m}
               </ToggleButton>
             ))}
+          </SettingRow>
+          {renderDivider()}
+          <SettingRow icon="musical-note-outline" label="Octave Numbering" theme={t}>
+            <ToggleButton isActive={octaveNumbering} theme={t} onPress={() => setOctaveNumbering(true)}>On</ToggleButton>
+            <ToggleButton isActive={!octaveNumbering} theme={t} onPress={() => setOctaveNumbering(false)}>Off</ToggleButton>
           </SettingRow>
           {renderDivider()}
           <SettingRow icon="color-palette-outline" label="Note Color" theme={t}>
