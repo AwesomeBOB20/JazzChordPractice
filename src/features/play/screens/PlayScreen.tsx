@@ -8,7 +8,7 @@ import * as Haptics from 'expo-haptics';
 import { useIsFocused } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
-import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval } from '@shared/theory/musicTheory';
+import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
 import { ChordCard, CommandSheet, PianoView, type PianoViewRef, FretboardView, type FretboardViewRef } from '@shared/ui';
 import { buildTriadVoicings, buildShellVoicings, buildDropVoicings, buildScaleVoicings, buildArpVoicings, getArpSubsets, getIntervalSubsets, VoicingGroup, ScaleVoicing, buildOpenVoicings, buildBarreVoicings, buildHardcodedShapeVoicings, ShapeDisplayMode, OPEN_SHAPES, BARRE_SHAPES, findTriads, DROP_VOICINGS } from '@shared/guitar';
@@ -506,7 +506,7 @@ export default function PlayScreen() {
     const scale = activeScaleId ? SCALES[activeScaleId] : null;
     if (!scale) return [];
 
-    const GS = [40, 45, 50, 55, 59, 64];
+    const GS = GUITAR_TUNING;
     const overlay: any[] = [];
     const scalePCs = new Set(scale.iv.map((iv: number) => (rootSemi + iv) % 12));
 
@@ -618,7 +618,7 @@ export default function PlayScreen() {
 
   const pianoVoicings = React.useMemo(() => {
     if (!currentChordDef) return [];
-    const GS = [40, 45, 50, 55, 59, 64];
+    const GS = GUITAR_TUNING;
 
     const formatScaleVoicings = (svs: ScaleVoicing[]) => {
       const uniqueScales: { name: string, chordLabel: string, notes: number[], roles: string[], formulas: string[] }[] = [];

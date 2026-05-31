@@ -1,4 +1,4 @@
-import { CH, PATTERNS, CHORD_PATTERN_MAP, spellInterval, NOTE_SHARP, NOTE_FLAT, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
+import { CH, PATTERNS, CHORD_PATTERN_MAP, spellInterval, NOTE_SHARP, NOTE_FLAT, SCALES, CHORD_SCALE_MAP, GUITAR_TUNING, GUITAR_TUNING_SEMITONES } from '@shared/theory/musicTheory';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { HARDCODED_SHAPES } from '@shared/guitar/hardcodedShapes';
 // NEW IMPORTS: Pull in the separated data dictionaries
@@ -14,8 +14,7 @@ export const SCALE_MASKS = [
   { name: 'Box 5 (G Shape)', rootStr: 0, m: { min: -3, max: 1 }, s: [[-3,1],[-3,1],[-3,1],[-3,1],[-3,1],[-3,1]] },
 ];
 
-// Guitar open string MIDI values: low E to high E
-export const GS = [40, 45, 50, 55, 59, 64];
+export const GS = GUITAR_TUNING;
 
 export interface VoicingFret {
   fret: number | null;
@@ -948,7 +947,7 @@ export function buildScaleVoicings(
 ): ScaleVoicing[] {
   const results: ScaleVoicing[] = [];
   const chordPCs = new Set(chordIvs.map(iv => (rootSemi + iv) % 12));
-  const TUNING = [0, 5, 10, 15, 19, 24]; // Standard tuning offsets from Low E
+  const TUNING = GUITAR_TUNING_SEMITONES;
 
   scaleIds.forEach(scaleId => {
     const scaleDef = scales[scaleId];

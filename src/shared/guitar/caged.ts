@@ -1,7 +1,7 @@
-import { SCALES, CHORD_SCALE_MAP, NOTE_FLAT, NOTE_SHARP, CH } from '@shared/theory/musicTheory';
+import { SCALES, CHORD_SCALE_MAP, NOTE_FLAT, NOTE_SHARP, CH, GUITAR_TUNING_SEMITONES } from '@shared/theory/musicTheory';
 import { ScaleVoicing } from '@shared/guitar/voicings';
 
-const TUNING = [0, 5, 10, 15, 19, 24]; // Standard tuning semitones from Low E
+const TUNING = GUITAR_TUNING_SEMITONES;
 
 // ─── 1. PASTE YOUR BUILDER EXPORT HERE ──────────────────────────────
 export const PARENT_SCALE_TEMPLATES: Record<string, Record<string, [number, number, string][]>> = {

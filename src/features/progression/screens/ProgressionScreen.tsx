@@ -10,7 +10,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { THEMES } from '@shared/ui/themes';
-import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, CHORD_PATTERN_MAP, PATTERNS } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, CHORD_PATTERN_MAP, PATTERNS, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { useAudio } from '@shared/audio/AudioContext';
 import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
 import { calculateOptimalVoiceLeading, buildHardcodedShapeVoicings } from '@shared/guitar';
@@ -541,7 +541,7 @@ export default function ProgressionScreen() {
     if (!chord) return;
     let notesToPlay = getChordNotes(chord.rootSemi, chord.chordType, octave);
     if (instrument === 'guitar') {
-      const GS = [40, 45, 50, 55, 59, 64]; 
+      const GS = GUITAR_TUNING;
       const audioDiagram = (showShapes && arp) ? diagramShapes[idx] : diagramVoicings[idx] as any;
       if (audioDiagram) {
         let extractedMidi: number[] = [];
