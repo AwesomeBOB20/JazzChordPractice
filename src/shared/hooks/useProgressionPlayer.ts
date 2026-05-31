@@ -3,7 +3,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { useAudio } from '@shared/audio/AudioContext';
-import { getChordNotes, getChordIntervals, getBassLineMidi } from '@shared/theory/musicTheory';
+import { getChordNotes, getChordIntervals, getBassLineMidi, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { ProgressionMeasure } from '@shared/audio/SoundfontPlayer';
 
 export function useProgressionPlayer(selectedCell: number | null, diagramVoicings: any[] = []) {
@@ -113,7 +113,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
   //   guitar  — { notes: {fret,stringIdx,...}[]    }  (diagramShapes - ScaleNote[])
   //   piano   — { notes: number[]                  }  (pianoVoicings / pianoShapes)
   const resolveMidiNotes = (chord: any, voicing: any, instrument: string, octave: number): number[] => {
-    const GS = [40, 45, 50, 55, 59, 64]; // guitar open-string MIDI values
+    const GS = GUITAR_TUNING;
     const validMidi = (n: any): n is number => typeof n === 'number' && !isNaN(n) && n >= 0 && n <= 127;
 
     if (voicing) {
