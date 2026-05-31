@@ -1,6 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, startTransition } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, Animated, Platform
+  ScrollView, Animated, Platform, InteractionManager
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -17,6 +17,11 @@ import { buildPianoVoicings } from '@shared/piano';
 import { useAudio } from '@shared/audio/AudioContext';
 import { ARP_SLOTS, buildArpPattern } from '@shared/audio/arpPattern';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
+import { cachedOpen, cachedBarre, cachedTriads, cachedShells, cachedDrops, cachedScales, cachedShapes, cachedPiano } from '@features/play/voicingCache';
+import { useStableCallback } from '@shared/utils/useStableCallback';
+
+// Shared empty array so memoized children don't see a new [] reference each render.
+const EMPTY_ARR: any[] = [];
 
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11];
 
@@ -57,7 +62,7 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab
         {TABS.map(tab => {
           const isActive = voicingTab === tab.key;
           return (
-            <TouchableOpacity key={tab.key} style={[styles.tabBtn, { paddingHorizontal: 16 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setVoicingTab(tab.key); }} activeOpacity={0.7}>
+            <TouchableOpacity key={tab.key} style={[styles.tabBtn, { paddingHorizontal: 16 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); startTransition(() => setVoicingTab(tab.key)); }} activeOpacity={0.7}>
               <Text style={[styles.modeBtnText, { color: isActive ? '#fff' : t.txt3 }]}>{tab.label}</Text>
               <View style={{ marginTop: 2, backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : t.bg, borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1, alignSelf: 'center' }}>
                 <Text style={{ fontSize: 9, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{tabCounts[tab.key]}</Text>
@@ -125,7 +130,7 @@ export default function PlayScreen() {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop } = useAudio();
   const { bpm, arp, setArp, playMode, setPlayMode, octave, theme, labelMode, instrument, setInstrument, sortMode, scaleOverlay } = useSettingsStore();
-  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, inputMode, selectedScaleId, setSelectedScaleId } = useChordStore();
+  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -324,6 +329,20 @@ export default function PlayScreen() {
     }
   };
 
+  const eligiblePairs = React.useMemo(() => {
+    const pairs: { r: number; ct: string }[] = [];
+    for (let r = 0; r < 12; r++) {
+      for (const ct of activeTypes) {
+        if (hasVoicingsForTabAndChord(voicingTab, instrument, r, ct)) {
+          pairs.push({ r, ct });
+        }
+      }
+    }
+    return pairs;
+    // namingMode intentionally excluded: voicing *existence* is naming-independent
+    // (fingerprint/formula keyed), so flat/sharp flips must not trigger a 12×N rebuild.
+  }, [voicingTab, instrument, activeTypes, octave, selectedScaleId]);
+
   const getEligibleTypesForTab = (tab: VoicingTabKey, instr: string, types: string[]): string[] => {
     const isPiano = instr === 'piano';
     const filtered = types.filter(t => {
@@ -357,21 +376,15 @@ export default function PlayScreen() {
   };
 
   const handleRandomNext = () => {
-    const { activeTypes, setChord, randomChord } = useChordStore.getState();
-    
-    if (activeTypes.length === 0) { 
-      userInteractedRef.current = true; 
-      randomChord(); 
-      return; 
-    }
+    const { setChord, randomChord } = useChordStore.getState();
 
-    const eligiblePairs: { r: number; ct: string }[] = [];
-    for (let r = 0; r < 12; r++) {
-      for (const ct of activeTypes) {
-        if (hasVoicingsForTabAndChord(voicingTab, instrument, r, ct)) {
-          eligiblePairs.push({ r, ct });
-        }
-      }
+    if (activeTypes.length === 0) {
+      userInteractedRef.current = true;
+      // Defer the heavy voicing-grid re-render so rapid taps stay responsive.
+      // The chord header and audio run off live state (see effect at ~213) so
+      // the label and sound still update instantly.
+      startTransition(() => randomChord());
+      return;
     }
 
     const filteredPairs = eligiblePairs.filter(pair => !(pair.r === rootSemi && pair.ct === chordType));
@@ -380,13 +393,13 @@ export default function PlayScreen() {
     if (finalPairs.length > 0) {
       const selected = finalPairs[Math.floor(Math.random() * finalPairs.length)];
       userInteractedRef.current = true;
-      setChord(selected.r, selected.ct);
+      startTransition(() => setChord(selected.r, selected.ct));
     } else {
       const eligibleTypes = getEligibleTypesForTab(voicingTab, instrument, activeTypes);
       const r = Math.floor(Math.random() * 12);
       const ct = eligibleTypes[Math.floor(Math.random() * eligibleTypes.length)];
       userInteractedRef.current = true;
-      setChord(r, ct);
+      startTransition(() => setChord(r, ct));
     }
   };
 
@@ -404,24 +417,81 @@ export default function PlayScreen() {
 
   React.useEffect(() => { handleStop(); setPianoVoicingIdx(0); }, [voicingTab, sortMode]);
 
-  const allGuitarGroups = React.useMemo(() => {
-    if (instrument === 'piano' || !currentChordDef) return { open: [], barre: [], triads: [], shells: [], drop2: [], drop3: [], drop2and4: [], quartal: [] };
+  // The grid only ever shows ONE tab, so build only that family per press
+  // instead of all six. Drops still come from a single buildDropVoicings call
+  // filtered by type, exactly as before. Cuts the display path from 6 builds → 1.
+  const displayGuitarGroups = React.useMemo<VoicingGroup[]>(() => {
+    if (instrument === 'piano' || !currentChordDef) return [];
     const isTriad = currentChordDef.iv.length === 3;
-    const allDrops = !isTriad ? buildDropVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode) : [];
+    switch (voicingTab) {
+      case 'open': return cachedOpen(chordType, rootSemi, rootNoteName, displayChordName);
+      case 'barre': return cachedBarre(chordType, rootSemi, rootNoteName, displayChordName);
+      case 'triads': return cachedTriads(chordType, currentChordDef, rootSemi, rootNoteName, namingMode);
+      case 'shells': return !isTriad ? cachedShells(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode) : [];
+      case 'drop2':
+      case 'drop3':
+      case 'drop2and4': {
+        if (isTriad) return [];
+        const allDrops = cachedDrops(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
+        return allDrops.filter(g => g.voicings[0]?.type === voicingTab);
+      }
+      default: return [];
+    }
+  }, [voicingTab, rootSemi, chordType, instrument, currentChordDef, namingMode, rootNoteName, displayChordName]);
+
+  // All six families, built ONLY to feed the tab badge counts. Counts key on
+  // fingerprint / formula bracket (never on note-name spelling), so we pass fixed
+  // sharp labels and exclude naming-derived deps — flat/sharp flips no longer
+  // trigger a full rebuild of these six builders.
+  const countGuitarGroups = React.useMemo(() => {
+    if (instrument === 'piano' || !currentChordDef) return { open: [], barre: [], triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] } as Record<string, VoicingGroup[]>;
+    const sharpRoot = NOTE_SHARP[rootSemi];
+    const sharpChordName = `${sharpRoot} ${currentChordDef.l}`;
+    const isTriad = currentChordDef.iv.length === 3;
+    const allDrops = !isTriad ? buildDropVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp') : [];
     return {
-      open: buildOpenVoicings(chordType, rootSemi, rootNoteName, displayChordName),
-      barre: buildBarreVoicings(chordType, rootSemi, rootNoteName, displayChordName),
-      triads: buildTriadVoicings(currentChordDef, rootSemi, rootNoteName, namingMode),
-      shells: !isTriad ? buildShellVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode) : [],
+      open: buildOpenVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
+      barre: buildBarreVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
+      shells: !isTriad ? buildShellVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp') : [],
       drop2: allDrops.filter(g => g.voicings[0]?.type === 'drop2'),
       drop3: allDrops.filter(g => g.voicings[0]?.type === 'drop3'),
       drop2and4: allDrops.filter(g => g.voicings[0]?.type === 'drop2and4'),
-    };
-  }, [rootSemi, chordType, instrument, currentChordDef, namingMode, rootNoteName, displayChordName, selectedScaleId]);
+    } as Record<string, VoicingGroup[]>;
+  }, [rootSemi, chordType, instrument, currentChordDef]);
+
+  // Pre-warm voicing caches after the chord settles. Uses InteractionManager so
+  // it never fires during rapid randomize spam — only when interactions are idle.
+  // Each family is spread across separate setTimeout(0) calls to avoid blocking
+  // the JS thread for the full combined build time.
+  const prewarmCancelRef = useRef<(() => void) | null>(null);
+  React.useEffect(() => {
+    prewarmCancelRef.current?.();
+    prewarmCancelRef.current = null;
+
+    if (instrument === 'piano' || !currentChordDef) return;
+
+    let cancelled = false;
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      cachedTriads(chordType, currentChordDef, rootSemi, rootNoteName, namingMode);
+      const t1 = setTimeout(() => {
+        if (cancelled || currentChordDef.iv.length <= 3) return;
+        cachedShells(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
+        setTimeout(() => {
+          if (cancelled || currentChordDef.iv.length <= 3) return;
+          cachedDrops(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
+        }, 0);
+      }, 0);
+      prewarmCancelRef.current = () => clearTimeout(t1);
+    });
+
+    prewarmCancelRef.current = () => { cancelled = true; handle.cancel(); };
+    return () => { cancelled = true; handle.cancel(); };
+  }, [rootSemi, chordType, namingMode, instrument, currentChordDef, rootNoteName, displayChordName]);
 
   const guitarGroups = React.useMemo(() => {
     if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') return [];
-    let rawGroups = (allGuitarGroups[voicingTab as keyof typeof allGuitarGroups] as VoicingGroup[]) ?? [];
+    let rawGroups = displayGuitarGroups;
     rawGroups = [...rawGroups].sort((a, b) => {
       const bassA = a.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
       const bassB = b.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
@@ -437,46 +507,44 @@ export default function PlayScreen() {
       const slashRegex = new RegExp(`\\s*\\/\\s*${rootChar}${acc}\\s*$`, 'i');
       const sortedVoicings = group.voicings.map(v => ({ ...v, chordLabel: v.chordLabel.replace(slashRegex, '').trim() }));
 
+      // Decorate-sort-undecorate: compute each voicing's complexity, fret stats,
+      // and label rank ONCE here instead of re-deriving them inside every O(N log N)
+      // comparator call (which previously allocated arrays per comparison).
+      const decorated = sortedVoicings.map((v: any) => {
+        const fretNums = v.frets.filter((f: any) => f.fret !== null).map((f: any) => f.fret as number);
+        const avg = fretNums.length ? fretNums.reduce((sum: number, f: number) => sum + f, 0) / fretNums.length : 0;
+        const min = fretNums.length ? Math.min(...fretNums) : 0;
+        const complexity = getComplexity(v.frets.map((f: any) => f.role as string));
+        let labelRank = 99;
+        const match = v.chordLabel.match(/^([A-G][#♯b♭]?)/);
+        if (match && currentChordDef) { const pc = noteNames.indexOf(match[1]); if (pc >= 0) { const roleIdx = currentChordDef.iv.findIndex(iv => iv % 12 === (pc - rootSemi + 12) % 12); if (roleIdx >= 0) labelRank = ROLE_ORDER[currentChordDef.r[roleIdx]] ?? 99; } }
+        const bassRank = ROLE_ORDER[v.bassNote] ?? 99;
+        return { v, avg, min, complexity, labelRank, bassRank, chordLabel: v.chordLabel };
+      });
+
       if (sortMode === 'voicings') {
-          sortedVoicings.sort((a: any, b: any) => {
-            const fretsA = a.frets.filter((f: any) => f.fret !== null).map((f: any) => f.fret as number);
-            const fretsB = b.frets.filter((f: any) => f.fret !== null).map((f: any) => f.fret as number);
-            const avgA = fretsA.length ? fretsA.reduce((sum: number, f: number) => sum + f, 0) / fretsA.length : 0;
-            const avgB = fretsB.length ? fretsB.reduce((sum: number, f: number) => sum + f, 0) / fretsB.length : 0;
-            if (Math.abs(avgA - avgB) > 0.1) return avgA - avgB;
-            return (fretsA.length ? Math.min(...fretsA) : 0) - (fretsB.length ? Math.min(...fretsB) : 0);
+          decorated.sort((a, b) => {
+            if (Math.abs(a.avg - b.avg) > 0.1) return a.avg - b.avg;
+            return a.min - b.min;
           });
       } else {
-          sortedVoicings.sort((a: any, b: any) => {
+          decorated.sort((a, b) => {
             if (a.chordLabel !== b.chordLabel) {
-              const compA = getComplexity(a.frets.map((f: any) => f.role as string));
-              const compB = getComplexity(b.frets.map((f: any) => f.role as string));
-              if (compA.size !== compB.size) return compA.size - compB.size;
-              if (compA.maxExt !== compB.maxExt) return compA.maxExt - compB.maxExt;
-              const matchA = a.chordLabel.match(/^([A-G][#♯b♭]?)/);
-              const matchB = b.chordLabel.match(/^([A-G][#♯b♭]?)/);
-              let rankA = 99, rankB = 99;
-              if (matchA && currentChordDef) { const pcA = noteNames.indexOf(matchA[1]); if (pcA >= 0) { const roleIdx = currentChordDef.iv.findIndex(iv => iv % 12 === (pcA - rootSemi + 12) % 12); if (roleIdx >= 0) rankA = ROLE_ORDER[currentChordDef.r[roleIdx]] ?? 99; } }
-              if (matchB && currentChordDef) { const pcB = noteNames.indexOf(matchB[1]); if (pcB >= 0) { const roleIdx = currentChordDef.iv.findIndex(iv => iv % 12 === (pcB - rootSemi + 12) % 12); if (roleIdx >= 0) rankB = ROLE_ORDER[currentChordDef.r[roleIdx]] ?? 99; } }
-              if (rankA !== rankB) return rankA - rankB;
+              if (a.complexity.size !== b.complexity.size) return a.complexity.size - b.complexity.size;
+              if (a.complexity.maxExt !== b.complexity.maxExt) return a.complexity.maxExt - b.complexity.maxExt;
+              if (a.labelRank !== b.labelRank) return a.labelRank - b.labelRank;
               return a.chordLabel.localeCompare(b.chordLabel);
             }
-            const invA = ROLE_ORDER[a.bassNote] ?? 99;
-            const invB = ROLE_ORDER[b.bassNote] ?? 99;
-            if (invA !== invB) return invA - invB;
-            const fretsA = a.frets.filter((f: any) => f.fret !== null).map((f: any) => f.fret as number);
-            const fretsB = b.frets.filter((f: any) => f.fret !== null).map((f: any) => f.fret as number);
-            const avgA = fretsA.length ? fretsA.reduce((sum: number, f: number) => sum + f, 0) / fretsA.length : 0;
-            const avgB = fretsB.length ? fretsB.reduce((sum: number, f: number) => sum + f, 0) / fretsB.length : 0;
-            if (Math.abs(avgA - avgB) > 0.1) return avgA - avgB;
-            return (fretsA.length ? Math.min(...fretsA) : 0) - (fretsB.length ? Math.min(...fretsB) : 0);
+            if (a.bassRank !== b.bassRank) return a.bassRank - b.bassRank;
+            if (Math.abs(a.avg - b.avg) > 0.1) return a.avg - b.avg;
+            return a.min - b.min;
           });
       }
       const seen = new Set<string>();
-      const uniqueVoicings = sortedVoicings.filter((v: any) => { if (seen.has(v.fingerprint)) return false; seen.add(v.fingerprint); return true; });
+      const uniqueVoicings = decorated.map(d => d.v).filter((v: any) => { if (seen.has(v.fingerprint)) return false; seen.add(v.fingerprint); return true; });
       return { ...group, voicings: uniqueVoicings };
     });
-  }, [allGuitarGroups, voicingTab, sortMode, currentChordDef, rootSemi, namingMode, rootNoteName]);
+  }, [displayGuitarGroups, voicingTab, sortMode, currentChordDef, rootSemi, namingMode, rootNoteName]);
 
   const scaleVoicings = React.useMemo(() => {
     if (!currentChordDef) return [];
@@ -484,7 +552,7 @@ export default function PlayScreen() {
     const isNeeded = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || scaleOverlay;
     if (!isNeeded) return [];
     const scaleIds = CHORD_SCALE_MAP[chordType] ?? [];
-    return buildScaleVoicings(scaleIds, SCALES, rootSemi, currentChordDef.iv, namingMode);
+    return cachedScales(chordType, scaleIds, SCALES, rootSemi, currentChordDef.iv, namingMode);
   }, [rootSemi, chordType, voicingTab, namingMode, scaleOverlay]);
 
   // NEW: Identify exactly which scale the user currently has selected globally
@@ -576,7 +644,7 @@ export default function PlayScreen() {
 
   const shapeVoicings = React.useMemo(() => {
     if (!currentChordDef || voicingTab !== 'shapes') return [];
-    let voicings = buildHardcodedShapeVoicings(chordType, rootSemi, namingMode);
+    let voicings = cachedShapes(chordType, rootSemi, namingMode);
     if (instrument === 'piano') {
       const uniqueShapes: any[] = [];
       const seen = new Set<string>();
@@ -661,20 +729,22 @@ export default function PlayScreen() {
       return [];
     }
 
-    const pV = buildPianoVoicings(rootSemi, chordType, octave, selectedScaleId, namingMode);
+    const pV = cachedPiano(rootSemi, chordType, octave, selectedScaleId, namingMode);
     let selectedGroup: any[] = [];
-    
+
     if (voicingTab === 'block') {
       const notes = getChordNotes(rootSemi, chordType, octave);
       const roles = notes.map(n => { const idx = currentChordDef.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? currentChordDef.r[idx] : ''; });
       const formulas = notes.map(n => { const idx = currentChordDef.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? currentChordDef.f[idx] : ''; });
       selectedGroup = [{ name: 'Root Position', chordLabel: formatChordSymbol(displayChordName), notes, roles, formulas }];
     }
-    else if (voicingTab === 'triads') selectedGroup = pV.triads;
-    else if (voicingTab === 'shells') selectedGroup = pV.shells;
-    else if (voicingTab === 'drop2') selectedGroup = pV.drop2 || [];
-    else if (voicingTab === 'drop3') selectedGroup = pV.drop3 || [];
-    else if (voicingTab === 'drop2and4') selectedGroup = pV.drop2and4 || [];
+    // NOTE: copy the cached arrays before sorting below — pV.* are shared cache
+    // references and must not be mutated in place.
+    else if (voicingTab === 'triads') selectedGroup = [...pV.triads];
+    else if (voicingTab === 'shells') selectedGroup = [...pV.shells];
+    else if (voicingTab === 'drop2') selectedGroup = [...(pV.drop2 || [])];
+    else if (voicingTab === 'drop3') selectedGroup = [...(pV.drop3 || [])];
+    else if (voicingTab === 'drop2and4') selectedGroup = [...(pV.drop2and4 || [])];
 
     if (selectedGroup.length > 0) {
       if (sortMode === 'voicings') {
@@ -748,11 +818,11 @@ export default function PlayScreen() {
     const isPiano = instrument === 'piano';
     const pV = buildPianoVoicings(rootSemi, chordType, octave, selectedScaleId, namingMode);
     return {
-      block: isPiano ? 1 : 0, open: isPiano ? 0 : countGuitar(allGuitarGroups.open), barre: isPiano ? 0 : countGuitar(allGuitarGroups.barre),
-      triads: isPiano ? pV.triads.length : findTriads(currentChordDef).length, shells: isPiano ? countPianoByFormulaSet(pV.shells) : countByFormulaSet(allGuitarGroups.shells),
-      drop2:  isPiano && pV.drop2 ? countPianoByFormulaSet(pV.drop2) : countByFormulaSet(allGuitarGroups.drop2),
-      drop3:  isPiano && pV.drop3 ? countPianoByFormulaSet(pV.drop3) : countByFormulaSet(allGuitarGroups.drop3),
-      drop2and4: isPiano && pV.drop2and4 ? countPianoByFormulaSet(pV.drop2and4) : countByFormulaSet(allGuitarGroups.drop2and4),
+      block: isPiano ? 1 : 0, open: isPiano ? 0 : countGuitar(countGuitarGroups.open), barre: isPiano ? 0 : countGuitar(countGuitarGroups.barre),
+      triads: isPiano ? pV.triads.length : findTriads(currentChordDef).length, shells: isPiano ? countPianoByFormulaSet(pV.shells) : countByFormulaSet(countGuitarGroups.shells),
+      drop2:  isPiano && pV.drop2 ? countPianoByFormulaSet(pV.drop2) : countByFormulaSet(countGuitarGroups.drop2),
+      drop3:  isPiano && pV.drop3 ? countPianoByFormulaSet(pV.drop3) : countByFormulaSet(countGuitarGroups.drop3),
+      drop2and4: isPiano && pV.drop2and4 ? countPianoByFormulaSet(pV.drop2and4) : countByFormulaSet(countGuitarGroups.drop2and4),
       spread: 0, rootless: 0, // Hardcoded to 0 to permanently disable
       intervals: getIntervalSubsets(currentChordDef.iv, currentChordDef.r, currentChordDef.f || []).length, scales: (CHORD_SCALE_MAP[chordType] ?? []).length,
       arps: getArpSubsets(currentChordDef.iv, currentChordDef.r, currentChordDef.f || []).length,
@@ -765,7 +835,6 @@ export default function PlayScreen() {
           'sus4': [{ shapeKey: 'sus4_shape', offset: 0 }],
           'sus2': [{ shapeKey: 'sus2_shape', offset: 0 }],
           'maj_b5': [{ shapeKey: 'maj_b5_shape', offset: 0 }],
-          'sus2_b5': [{ shapeKey: 'sus2_b5_shape', offset: 0 }],
           'maj7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
           'maj9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
           'maj11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 11 }],
@@ -811,7 +880,7 @@ export default function PlayScreen() {
         return (CHORD_STACKS[chordType] || [{ shapeKey: 'maj_shape', offset: 0 }]).length;
       })(),
     };
-  }, [allGuitarGroups, chordType, instrument, currentChordDef, octave, rootSemi, namingMode, selectedScaleId]);
+  }, [countGuitarGroups, chordType, instrument, currentChordDef, octave, rootSemi, namingMode, selectedScaleId]);
 
   const ALL_VOICING_TABS: { key: VoicingTabKey; label: string }[] = [ { key: 'block', label: 'Block' }, { key: 'open', label: 'Open' }, { key: 'barre', label: 'Barre' }, { key: 'triads', label: 'Triads' }, { key: 'shells', label: 'Shells' }, { key: 'drop2',  label: 'Drop 2' }, { key: 'drop3',  label: 'Drop 3' }, { key: 'drop2and4', label: 'Drop 2 & 4' }, { key: 'intervals', label: 'Intervals' }, { key: 'arps',   label: 'Arps' }, { key: 'shapes', label: 'Shapes' }, { key: 'scales', label: 'Scales' } ];
   const VOICING_TABS = ALL_VOICING_TABS.filter(tab => tabCounts[tab.key] > 0);
@@ -825,7 +894,7 @@ export default function PlayScreen() {
 
     if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') {
       let label = currentPv.name;
-      if (voicingTab === 'arps') label = `${rootNoteName} ${arpSubsets[safeArpSubsetIdx]?.label}`;
+      if (voicingTab === 'arps') { const raw = arpSubsets[safeArpSubsetIdx]?.label ?? ''; label = /^[A-G][#♯b♭]?\s/.test(raw) ? raw : `${rootNoteName} ${raw}`; }
       if (voicingTab === 'intervals') label = `${rootNoteName} ${intervalSubsets[safeIntervalSubsetIdx]?.label}`;
       setVariationLabel(label);
 
@@ -964,9 +1033,33 @@ export default function PlayScreen() {
   };
   const pianoSlashSuffix = getPianoSlash();
 
-  const combinedHeader = (
+  // Stable-identity handlers so the memoized FretboardView/PianoView don't
+  // re-render on every cascade pass (e.g. when setVariationLabel fires).
+  const handleGuitarNotePress = useStableCallback((midi: number) => onNotePress?.(midi, 80, true));
+  const handlePianoNotePress = useStableCallback((midi: number) => onNotePress?.(midi, 80, false));
+  const handleCardNotePress = useStableCallback((midi: number) => onNotePress?.(midi, 80, instrument === 'guitar'));
+  const handleFretboardNavigate = useStableCallback(() => handleManualNavigate());
+  const handleArpSubsetChange = useStableCallback((idx: number) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); });
+  const handleFretboardPlayVoicing = useStableCallback((midiNotes: number[], voicingName: string, activeRoles?: string[], activeIvs?: number[], spelledNames?: string[], activeFormula?: string[]) => {
+    if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') {
+      currentScaleMidi.current = midiNotes;
+      let label = voicingName;
+      if (voicingTab === 'arps') { const raw = arpSubsets[safeArpSubsetIdx]?.label ?? ''; label = /^[A-G][#♯b♭]?\s/.test(raw) ? raw : `${rootNoteName} ${raw}`; }
+      if (voicingTab === 'intervals') label = `${rootNoteName} ${intervalSubsets[safeIntervalSubsetIdx]?.label}`;
+      setVariationLabel(label);
+      if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
+    } else {
+      currentGuitarMidi.current = midiNotes;
+      const isDifferentChord = voicingName !== displayChordName;
+      setVariationLabel(isDifferentChord ? voicingName : undefined);
+      if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
+    }
+    if (pendingPlayRef.current) { pendingPlayRef.current = false; setTimeout(() => { playCurrentChordRef.current(); }, 50); }
+  });
+
+  const combinedHeader = React.useMemo(() => (
     <VoicingTabBar voicingTab={voicingTab} setVoicingTab={setVoicingTab} tabCounts={tabCounts} t={t} />
-  );
+  ), [voicingTab, tabCounts, t]);
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg }]}>
@@ -1005,7 +1098,7 @@ export default function PlayScreen() {
             userInteractedRef.current = true;
             cycleType('prev');
           }}
-          onNotePress={(midi) => onNotePress?.(midi, 80, instrument === 'guitar')}
+          onNotePress={handleCardNotePress}
           octave={octave} theme={t} activeIvs={displayIvs} activeRoles={displayRoles} activeFormula={displayFormula}
         />
 
@@ -1032,35 +1125,20 @@ export default function PlayScreen() {
                 return spellInterval(rootSemi, formula, namingMode === 'flat');
               })}
               roles={pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r} formulas={pianoVoicings[pianoVoicingIdx]?.formulas || currentChordDef.f} formulaByPC={formulaByPC}
-              onNotePress={(midi: number) => onNotePress?.(midi, 80, false)}
-              octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={[]} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
+              onNotePress={handlePianoNotePress}
+              octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
             />
           ) : (
             <FretboardView
               ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={voicingTab === 'triads' ? Math.max(0, guitarGroups.length - 1) : 0}
-              onNotePress={(midi) => onNotePress?.(midi, 80, true)} onNavigate={handleManualNavigate}
-              onPlayVoicing={(midiNotes: number[], voicingName: string, activeRoles?: string[], activeIvs?: number[], spelledNames?: string[], activeFormula?: string[]) => {
-                if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') {
-                  currentScaleMidi.current = midiNotes;
-                  let label = voicingName;
-                  if (voicingTab === 'arps') label = `${rootNoteName} ${arpSubsets[safeArpSubsetIdx]?.label}`;
-                  if (voicingTab === 'intervals') label = `${rootNoteName} ${intervalSubsets[safeIntervalSubsetIdx]?.label}`;
-                  setVariationLabel(label);
-                  if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
-                } else {
-                  currentGuitarMidi.current = midiNotes;
-                  const isDifferentChord = voicingName !== displayChordName;
-                  setVariationLabel(isDifferentChord ? voicingName : undefined);
-                  if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
-                }
-                if (pendingPlayRef.current) { pendingPlayRef.current = false; setTimeout(() => { playCurrentChordRef.current(); }, 50); }
-              }}
+              onNotePress={handleGuitarNotePress} onNavigate={handleFretboardNavigate}
+              onPlayVoicing={handleFretboardPlayVoicing}
               rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
-              scaleVoicings={scaleVoicings} scaleMode={voicingTab === 'scales'} arpMode={voicingTab === 'arps' || voicingTab === 'intervals'} arpVoicings={voicingTab === 'arps' ? arpVoicings : voicingTab === 'intervals' ? intervalVoicings : []} arpSubsets={voicingTab === 'intervals' ? intervalSubsets : arpSubsets} arpSubsetIdx={voicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
+              scaleVoicings={scaleVoicings} scaleMode={voicingTab === 'scales'} arpMode={voicingTab === 'arps' || voicingTab === 'intervals'} arpVoicings={voicingTab === 'arps' ? arpVoicings : voicingTab === 'intervals' ? intervalVoicings : EMPTY_ARR} arpSubsets={voicingTab === 'intervals' ? intervalSubsets : arpSubsets} arpSubsetIdx={voicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
               overlayNotes={guitarOverlayNotes} // Explicitly pass the full-neck array down
-              onArpSubsetChange={(idx) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); }}
+              onArpSubsetChange={handleArpSubsetChange}
               shapesMode={voicingTab === 'shapes'} shapeVoicings={shapeVoicings} formulaByPC={formulaByPC}
-              namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={[]} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
+              namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
               selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
             />
           )}

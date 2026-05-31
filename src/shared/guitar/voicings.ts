@@ -71,14 +71,6 @@ export const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; vari
     { name: 'E Shape Min9', rootSemi: 4, variation: 'Standard', frets: [0, 2, 0, 0, 0, 2], roles: ['root', '5th', 'b7', 'b3', '5th', '9th'] },
     { name: 'A Shape Min9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -2, 0, 0, 0], roles: [null, 'root', 'b3', 'b7', '9th', '5th'], fingers: [null, 2, 1, 3, 3, 3] },
   ],
-  'maj_b5': [
-    { name: 'D Shape (♭5)', rootSemi: 2, variation: 'Strings 4-3-2', frets: [null, null, 0, 1, 1, null], roles: [null, null, 'root', 'b5', '3rd', null] },
-    { name: 'G Shape (♭5)', rootSemi: 7, variation: 'Strings 4-3-2', frets: [null, null, 0, 0, 1, null], roles: [null, null, 'root', 'root', 'b5', null] },
-  ],
-  'sus2_b5': [
-    { name: 'D Shape sus2(♭5)', rootSemi: 2, variation: 'Strings 4-3-2', frets: [null, null, 0, 1, 0, null], roles: [null, null, 'root', 'b5', '2nd', null] },
-    { name: 'G Shape sus2(♭5)', rootSemi: 7, variation: 'Strings 4-3-2', frets: [null, null, 0, 0, 0, null], roles: [null, null, 'root', 'root', '2nd', null] },
-  ]
 };
 
 export const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; variation?: string; frets: (number | null)[]; roles: (string | null)[] }[]> = {
@@ -284,7 +276,6 @@ const TRIAD_TYPES: Record<string, { iv: number[]; roles: string[] }> = {
   sus4:   { iv: [0,5,7],  roles: ['root','4th','5th'] },
   sus2:   { iv: [0,2,7],  roles: ['root','2nd','5th'] },
   maj_b5: { iv: [0,4,6],  roles: ['root','3rd','b5'] },
-  sus2_b5:{ iv: [0,2,6],  roles: ['root','2nd','b5'] },
 };
 
 // String groups for triads — indices into GS array (0=low E, 5=high E)
@@ -444,7 +435,6 @@ export const TRIAD_FULL_NAMES: Record<string, string> = {
   sus4:    'Sus4',
   sus2:    'Sus2',
   maj_b5:  'Major ♭5',
-  sus2_b5: 'Sus2 ♭5',
 };
 
 function triadChordLabel(triadType: string, triadRootSemi: number, namingMode: 'sharp' | 'flat' = 'sharp', spelledRootName?: string): string {
@@ -1359,6 +1349,18 @@ export function buildDropVoicings(
   fullChordName: string = '',
   namingMode: 'sharp' | 'flat' = 'sharp'
 ): VoicingGroup[] {
+  // Rootless voicings: drop the root and voice the upper structure as another
+  // chord's shape. This ONLY works when the requested chord's upper structure
+  // genuinely IS the substitute chord. The entries below are verified correct
+  // by tests/guitar-drop-voicings.test.ts (every drawn note matches its label).
+  //
+  // REMOVED (2026-05-30): 11 substitutions that produced mislabeled / wrong
+  // notes — maj11, dom7s11, maj7s11, min69, add9, minAdd9, dom7s9, dom7b5s9,
+  // dom7s5b9, dom7s5s9, dimMaj7. Their borrowed source chord doesn't contain the
+  // chord's defining tones (e.g. maj7♯11 from a min7-of-the-3rd yields the 9th,
+  // not the ♯11), so no role map could label them correctly. These chords keep
+  // their correct ROOTED drop voicings; they just no longer emit a wrong
+  // rootless one. A learning app must never display a wrong note.
   const ROOTLESS_SUB_MAP: Record<string, { type: string, ivOffset: number, roleMap: string[], rootFormula: string }> = {
     // 9th chords — rootless = core 7th from 3rd or b3
     'maj9':     { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '9th'],     rootFormula: '3'  },
@@ -1366,11 +1368,8 @@ export function buildDropVoicings(
     'dom9':     { type: 'hdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '9th'],      rootFormula: '3'  },
     'minMaj9':  { type: 'maj7s5',   ivOffset: 3,  roleMap: ['b3', '5th', '7th', '9th'],      rootFormula: 'b3' },
     // 11th chords — rootless = core 7th from 5th
-    'maj11':    { type: 'maj7',     ivOffset: 7,  roleMap: ['5th', '7th', '9th', '11th'],    rootFormula: '5'  },
     'min11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
     'dom11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
-    'dom7s11':  { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', 'b7', '9th', '#11'],      rootFormula: '3'  },
-    'maj7s11':  { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '#11'],     rootFormula: '3'  },
     // 13th chords — rootless = core 7th from 3rd or b3
     'maj13':    { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '9th'],     rootFormula: '3'  },
     'min13':    { type: 'maj7',     ivOffset: 3,  roleMap: ['b3', '5th', 'b7', '9th'],       rootFormula: 'b3' },
@@ -1379,23 +1378,13 @@ export function buildDropVoicings(
     'dom13s9':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
     // 6/9 chords
     'maj69':    { type: 'dom7sus4', ivOffset: 9,  roleMap: ['6th', '9th', '3rd', '5th'],     rootFormula: '6'  },
-    'min69':    { type: 'min7',     ivOffset: 9,  roleMap: ['6th', '9th', 'b3', '5th'],      rootFormula: '6'  },
-    // Add9 chords — rootless = sus4 chord from 5th
-    'add9':     { type: 'dom7sus4', ivOffset: 7,  roleMap: ['5th', '3rd', '9th', 'root'],    rootFormula: '5'  },
-    'minAdd9':  { type: 'dom7sus4', ivOffset: 7,  roleMap: ['5th', 'b3', '9th', 'root'],     rootFormula: '5'  },
     // Altered / sus dominant chords
-    'dom7s9':   { type: 'dom7',     ivOffset: 3,  roleMap: ['#9', '5th', 'b7', '3rd'],       rootFormula: '#9' },
     'dom7b9':   { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
     'dom7alt':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
     'dom7b13':  { type: 'dom7b5',   ivOffset: 4,  roleMap: ['3rd', 'b13', 'b7', '9th'],      rootFormula: '3'  },
     'dom7b5b9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', 'b9', '3rd'],        rootFormula: 'b5' },
-    'dom7b5s9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', '#9', '3rd'],        rootFormula: 'b5' },
-    'dom7s5b9': { type: 'dom7',     ivOffset: 4,  roleMap: ['3rd', '#5', 'b7', 'b9'],        rootFormula: '3'  },
-    'dom7s5s9': { type: 'dom7',     ivOffset: 4,  roleMap: ['3rd', '#5', 'b7', '#9'],        rootFormula: '3'  },
     'dom9sus4':  { type: 'maj6',    ivOffset: 10, roleMap: ['b7', '9th', '4th', '5th'],      rootFormula: 'b7' },
     'dom13sus4': { type: 'maj7',    ivOffset: 10, roleMap: ['b7', '9th', '4th', '13th'],     rootFormula: 'b7' },
-    // Misc
-    'dimMaj7':  { type: 'maj7s5',   ivOffset: 3,  roleMap: ['b3', 'b5', '7th', 'root'],      rootFormula: 'b3' },
   };
 
   const fallbackMap: Record<string, string> = {
@@ -1539,7 +1528,6 @@ export function buildHardcodedShapeVoicings(
     'sus4': [{ shapeKey: 'sus4_shape', offset: 0 }],
     'sus2': [{ shapeKey: 'sus2_shape', offset: 0 }],
     'maj_b5': [{ shapeKey: 'maj_b5_shape', offset: 0 }],
-    'sus2_b5': [{ shapeKey: 'sus2_b5_shape', offset: 0 }],
     
     'maj7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
     'maj9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 4 }],
@@ -1659,7 +1647,7 @@ export function buildHardcodedShapeVoicings(
           if (shapeKey === 'dim_4_shape' && offset === 0 && interval === 9) return { role: 'bb7th', formula: 'bb7' };
 
           // Contextual override for b5 shapes to show 3rd for visualization
-          if ((shapeKey === 'maj_b5_shape' || shapeKey === 'sus2_b5_shape') && offset === 0 && interval === 4) return { role: '3rd', formula: '3' };
+          if (shapeKey === 'maj_b5_shape' && offset === 0 && interval === 4) return { role: '3rd', formula: '3' };
 
           const defaultRoles = ['root', 'b2', '2nd', 'b3', '3rd', '4th', '#4', '5th', 'b6', '6th', 'b7', '7th'];
           const defaultFormulas = ['R', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
