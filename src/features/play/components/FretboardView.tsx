@@ -346,6 +346,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
             const { stringIdx, fret, role, formula, noteName } = note;
             
             // CORRECT CLIPPING LOGIC
+            if (fret < 0) return null;
             if (fret === 0 && !isOpen) return null;
             if (fret > 0 && (fret <= startFret || fret > startFret + NUM_FRETS)) return null;
             
@@ -589,6 +590,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
             const { stringIdx, fret, role, formula } = note;
             
             // CORRECT CLIPPING LOGIC: Hide open strings if not at the nut, hide frets outside the drawn boxes
+            if (fret < 0) return null;
             if (fret === 0 && !isOpen) return null;
             if (fret > 0 && (fret <= startFret || fret > startFret + NUM_FRETS)) return null;
             

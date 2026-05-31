@@ -1,6 +1,6 @@
 import React, { useRef, useState, startTransition } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, Animated, Platform, InteractionManager
+  ScrollView, Animated, Platform
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -17,8 +17,6 @@ import { buildPianoVoicings } from '@shared/piano';
 import { useAudio } from '@shared/audio/AudioContext';
 import { ARP_SLOTS, buildArpPattern } from '@shared/audio/arpPattern';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
-import { cachedOpen, cachedBarre, cachedTriads, cachedShells, cachedDrops, cachedScales, cachedShapes, cachedPiano } from '@features/play/voicingCache';
-import { useStableCallback } from '@shared/utils/useStableCallback';
 
 // Shared empty array so memoized children don't see a new [] reference each render.
 const EMPTY_ARR: any[] = [];
@@ -424,15 +422,15 @@ export default function PlayScreen() {
     if (instrument === 'piano' || !currentChordDef) return [];
     const isTriad = currentChordDef.iv.length === 3;
     switch (voicingTab) {
-      case 'open': return cachedOpen(chordType, rootSemi, rootNoteName, displayChordName);
-      case 'barre': return cachedBarre(chordType, rootSemi, rootNoteName, displayChordName);
-      case 'triads': return cachedTriads(chordType, currentChordDef, rootSemi, rootNoteName, namingMode);
-      case 'shells': return !isTriad ? cachedShells(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode) : [];
+      case 'open': return buildOpenVoicings(chordType, rootSemi, rootNoteName, displayChordName);
+      case 'barre': return buildBarreVoicings(chordType, rootSemi, rootNoteName, displayChordName);
+      case 'triads': return buildTriadVoicings(currentChordDef, rootSemi, rootNoteName, namingMode);
+      case 'shells': return !isTriad ? buildShellVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode) : [];
       case 'drop2':
       case 'drop3':
       case 'drop2and4': {
         if (isTriad) return [];
-        const allDrops = cachedDrops(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
+        const allDrops = buildDropVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
         return allDrops.filter(g => g.voicings[0]?.type === voicingTab);
       }
       default: return [];
@@ -458,36 +456,6 @@ export default function PlayScreen() {
       drop2and4: allDrops.filter(g => g.voicings[0]?.type === 'drop2and4'),
     } as Record<string, VoicingGroup[]>;
   }, [rootSemi, chordType, instrument, currentChordDef]);
-
-  // Pre-warm voicing caches after the chord settles. Uses InteractionManager so
-  // it never fires during rapid randomize spam — only when interactions are idle.
-  // Each family is spread across separate setTimeout(0) calls to avoid blocking
-  // the JS thread for the full combined build time.
-  const prewarmCancelRef = useRef<(() => void) | null>(null);
-  React.useEffect(() => {
-    prewarmCancelRef.current?.();
-    prewarmCancelRef.current = null;
-
-    if (instrument === 'piano' || !currentChordDef) return;
-
-    let cancelled = false;
-    const handle = InteractionManager.runAfterInteractions(() => {
-      if (cancelled) return;
-      cachedTriads(chordType, currentChordDef, rootSemi, rootNoteName, namingMode);
-      const t1 = setTimeout(() => {
-        if (cancelled || currentChordDef.iv.length <= 3) return;
-        cachedShells(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
-        setTimeout(() => {
-          if (cancelled || currentChordDef.iv.length <= 3) return;
-          cachedDrops(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
-        }, 0);
-      }, 0);
-      prewarmCancelRef.current = () => clearTimeout(t1);
-    });
-
-    prewarmCancelRef.current = () => { cancelled = true; handle.cancel(); };
-    return () => { cancelled = true; handle.cancel(); };
-  }, [rootSemi, chordType, namingMode, instrument, currentChordDef, rootNoteName, displayChordName]);
 
   const guitarGroups = React.useMemo(() => {
     if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') return [];
@@ -552,7 +520,7 @@ export default function PlayScreen() {
     const isNeeded = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || scaleOverlay;
     if (!isNeeded) return [];
     const scaleIds = CHORD_SCALE_MAP[chordType] ?? [];
-    return cachedScales(chordType, scaleIds, SCALES, rootSemi, currentChordDef.iv, namingMode);
+    return buildScaleVoicings(scaleIds, SCALES, rootSemi, currentChordDef.iv, namingMode);
   }, [rootSemi, chordType, voicingTab, namingMode, scaleOverlay]);
 
   // NEW: Identify exactly which scale the user currently has selected globally
@@ -644,7 +612,7 @@ export default function PlayScreen() {
 
   const shapeVoicings = React.useMemo(() => {
     if (!currentChordDef || voicingTab !== 'shapes') return [];
-    let voicings = cachedShapes(chordType, rootSemi, namingMode);
+    let voicings = buildHardcodedShapeVoicings(chordType, rootSemi, namingMode);
     if (instrument === 'piano') {
       const uniqueShapes: any[] = [];
       const seen = new Set<string>();
@@ -729,7 +697,7 @@ export default function PlayScreen() {
       return [];
     }
 
-    const pV = cachedPiano(rootSemi, chordType, octave, selectedScaleId, namingMode);
+    const pV = buildPianoVoicings(rootSemi, chordType, octave, selectedScaleId, namingMode);
     let selectedGroup: any[] = [];
 
     if (voicingTab === 'block') {
@@ -1033,14 +1001,13 @@ export default function PlayScreen() {
   };
   const pianoSlashSuffix = getPianoSlash();
 
-  // Stable-identity handlers so the memoized FretboardView/PianoView don't
-  // re-render on every cascade pass (e.g. when setVariationLabel fires).
-  const handleGuitarNotePress = useStableCallback((midi: number) => onNotePress?.(midi, 80, true));
-  const handlePianoNotePress = useStableCallback((midi: number) => onNotePress?.(midi, 80, false));
-  const handleCardNotePress = useStableCallback((midi: number) => onNotePress?.(midi, 80, instrument === 'guitar'));
-  const handleFretboardNavigate = useStableCallback(() => handleManualNavigate());
-  const handleArpSubsetChange = useStableCallback((idx: number) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); });
-  const handleFretboardPlayVoicing = useStableCallback((midiNotes: number[], voicingName: string, activeRoles?: string[], activeIvs?: number[], spelledNames?: string[], activeFormula?: string[]) => {
+  // Note/navigation handlers passed down to the memoized FretboardView/PianoView.
+  const handleGuitarNotePress = (midi: number) => onNotePress?.(midi, 80, true);
+  const handlePianoNotePress = (midi: number) => onNotePress?.(midi, 80, false);
+  const handleCardNotePress = (midi: number) => onNotePress?.(midi, 80, instrument === 'guitar');
+  const handleFretboardNavigate = () => handleManualNavigate();
+  const handleArpSubsetChange = (idx: number) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); };
+  const handleFretboardPlayVoicing = (midiNotes: number[], voicingName: string, activeRoles?: string[], activeIvs?: number[], spelledNames?: string[], activeFormula?: string[]) => {
     if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') {
       currentScaleMidi.current = midiNotes;
       let label = voicingName;
@@ -1055,7 +1022,7 @@ export default function PlayScreen() {
       if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
     }
     if (pendingPlayRef.current) { pendingPlayRef.current = false; setTimeout(() => { playCurrentChordRef.current(); }, 50); }
-  });
+  };
 
   const combinedHeader = React.useMemo(() => (
     <VoicingTabBar voicingTab={voicingTab} setVoicingTab={setVoicingTab} tabCounts={tabCounts} t={t} />
