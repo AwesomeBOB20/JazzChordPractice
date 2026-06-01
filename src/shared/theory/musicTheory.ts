@@ -57,7 +57,6 @@ export const CH: Record<string, {l:string,s:string,iv:number[],r:string[],f:stri
   'sus4':     {l:'Sus4',       s:'sus4',   iv:[0,5,7],        r:['root','4th','5th'],                        f:['R','4','5']},
   'sus2':     {l:'Sus2',       s:'sus2',   iv:[0,2,7],        r:['root','2nd','5th'],                        f:['R','2','5']},
   'maj_b5':   {l:'Major ♭5',   s:'(♭5)',   iv:[0,4,6],        r:['root','3rd','b5th'],                       f:['R','3','b5']},
-  'sus2_b5':  {l:'Sus2 ♭5',    s:'sus2(♭5)', iv:[0,2,6],      r:['root','2nd','b5th'],                       f:['R','2','b5']},
   'maj7':     {l:'Maj 7',      s:'Δ7',     iv:[0,4,7,11],     r:['root','3rd','5th','7th'],                  f:['R','3','5','7']},
   'min7':     {l:'Min 7',      s:'m7',     iv:[0,3,7,10],     r:['root','b3rd','5th','b7th'],                 f:['R','b3','5','b7']},
   'dom7':     {l:'7',          s:'7',      iv:[0,4,7,10],     r:['root','3rd','5th','b7th'],                 f:['R','3','5','b7']},
@@ -102,7 +101,7 @@ export const CH: Record<string, {l:string,s:string,iv:number[],r:string[],f:stri
 };
 
 export const CHORD_CATEGORIES = [
-  { label: 'Triads', keys: ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'] },
+  { label: 'Triads', keys: ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5'] },
   { label: '6th Chords', keys: ['maj6', 'min6', 'maj69', 'min69'] },
   { label: '7th Chords', keys: ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'minMaj7', 'dimMaj7', 'dom7sus4'] },
   { label: 'Altered 7ths', keys: ['dom7b5', 'dom7s5', 'dom7b9', 'dom7s9', 'dom7alt', 'dom7b13', 'dom7b5b9', 'dom7b5s9', 'dom7s5b9', 'dom7s5s9'] },
@@ -216,7 +215,6 @@ export const PATTERNS: Record<string, { name: string; iv: number[]; roles: strin
   'harm_min': { name: 'Harm Min', iv: [0, 2, 3, 8], roles: ['R', '2', 'b3', '#5'] },
   'sus4':     { name: 'Sus 4',    iv: [0, 2, 5, 7], roles: ['R', '2', '4', '5'] },
   'sus2':     { name: 'Sus 2',    iv: [0, 2, 7, 9], roles: ['R', '2', '5', '6'] },
-  'sus2_b5':  { name: 'Sus 2 ♭5', iv: [0, 2, 6],    roles: ['R', '2', 'b5'] },
   'aug':      { name: 'Aug',      iv: [0, 2, 4, 8], roles: ['R', '2', '3', '#5'] }
 };
 
@@ -229,7 +227,6 @@ export const CHORD_PATTERN_MAP: Record<string, { pattern: string; offset: number
   'sus4': [{ pattern: 'sus4', offset: 0, label: 'Root Pattern (Sus4)' }],
   'sus2': [{ pattern: 'sus2', offset: 0, label: 'Root Pattern (Sus2)' }],
   'maj_b5': [{ pattern: 'maj_b5', offset: 0, label: 'Root Pattern (Maj ♭5)' }],
-  'sus2_b5': [{ pattern: 'sus2_b5', offset: 0, label: 'Root Pattern (Sus2 ♭5)' }],
 
   // Major Family
   'maj7': [{ pattern: 'maj', offset: 0, label: 'Root Pattern (Maj)' }, { pattern: 'min', offset: 4, label: 'from 3rd (Min)' }],

@@ -155,7 +155,7 @@ function buildOptions(
 
   // Pass 2 (Safe Distractor Generator): If we STILL don't have 4 options,
   // pad with distinct, unrelated core qualities that won't trick the user.
-  const SAFE_DISTRACTORS = ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'sus4', 'sus2', 'minMaj7', 'aug', 'dim', 'maj_b5', 'sus2_b5'];
+  const SAFE_DISTRACTORS = ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'sus4', 'sus2', 'minMaj7', 'aug', 'dim', 'maj_b5'];
   const filteredSafeDistractors = SAFE_DISTRACTORS.filter(t => pool.includes(t));
   attempts = 0;
   while (opts.length < 4 && attempts < 100) {
@@ -539,7 +539,7 @@ export default function QuizScreen() {
         }
 
         if (chosenVoicingTab === 'triads') {
-          const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'];
+          const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5'];
           tempPool = tempPool.filter(t => TRIAD_KEYS.includes(t));
 
           // Verify that triad voicings actually exist for each chord type
@@ -733,7 +733,7 @@ export default function QuizScreen() {
       if (category === 'chord') {
         let optsPool = finalPool.length >= 4 ? finalPool : basePool;
         if (finalVoicingTab === 'triads') {
-          const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'];
+          const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5'];
           optsPool = optsPool.filter(t => TRIAD_KEYS.includes(t));
           if (optsPool.length < 4) optsPool = TRIAD_KEYS;
         }
@@ -848,7 +848,7 @@ export default function QuizScreen() {
           finalVoicingTab = 'block';
           let optsPool = finalPool.length >= 4 ? finalPool : basePool;
           if (finalVoicingTab === 'triads') {
-            const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5', 'sus2_b5'];
+            const TRIAD_KEYS = ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5'];
             optsPool = optsPool.filter(t => TRIAD_KEYS.includes(t));
             if (optsPool.length < 4) optsPool = TRIAD_KEYS;
           }

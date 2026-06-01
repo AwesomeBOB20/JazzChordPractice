@@ -565,60 +565,63 @@ export function buildTriadVoicings(
 // LAYER 2: Shell voicings
 // ============================================================
 
-// Shell definitions per chord quality
-// Each shell is an array of role names to include
-// Shell definitions per chord quality
-// Each shell is an array of role names to include
-const SHELL_DEFS: Record<string, string[][]> = {
-  // 7th chords - Added rootless (3-5-7)
-  'maj7':     [['root','3rd','7th'], ['root','7th','3rd'], ['3rd','5th','7th'], ['5th','7th','3rd']],
-  'min7':     [['root','3rd','7th'], ['root','7th','3rd'], ['3rd','5th','7th'], ['5th','7th','3rd']],
-  'dom7':     [['root','3rd','7th'], ['root','7th','3rd'], ['3rd','5th','7th'], ['5th','7th','3rd']],
-  'hdim7':    [['root','3rd','7th'], ['root','7th','3rd'], ['3rd','5th','7th'], ['5th','7th','3rd']],
-  'fdim7':    [['root','3rd','7th'], ['root','7th','3rd']],
-  'minMaj7':  [['root','3rd','7th'], ['root','7th','3rd']],
-  'dom7sus4': [['root','4th','7th'], ['root','7th','4th'], ['4th','5th','7th']],
-  // 9th chords - Added rootless (3-7-9) and (3-5-9)
-  'maj9':     [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th'], ['3rd','5th','9th'], ['5th','9th','3rd']],
-  'min9':     [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th'], ['3rd','5th','9th'], ['5th','9th','3rd']],
-  'dom9':     [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th'], ['3rd','5th','9th'], ['5th','9th','3rd']],
-  // Altered 7ths
-  'dom7b9':   [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom7s9':   [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom7alt':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','b9th'], ['root','7th','b9th'], ['3rd','7th','b9th'], ['7th','3rd','#9th']],
-  'dom7b13':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  // 11th chords
-  'maj7s11':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','#11th'], ['3rd','7th','#11th'], ['7th','3rd','#11th']],
-  'dom7s11':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','#11th'], ['3rd','7th','#11th'], ['7th','3rd','#11th']],
-  'maj11':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th']],
-  'min11':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','7th','11th'], ['3rd','7th','11th']],
-  'dom11':    [['root','5th','7th'], ['root','7th','11th'], ['root','9th','11th'], ['5th','7th','11th'], ['7th','9th','11th']],
-  // 13th chords - Added rootless (3-7-13)
-  'maj13':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  'min13':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  'dom13':    [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  // 6th chords
-  'maj6':     [['root','3rd','6th'], ['root','6th','3rd'], ['3rd','5th','6th']],
-  'min6':     [['root','3rd','6th'], ['root','6th','3rd'], ['3rd','5th','6th']],
-  'maj69':    [['root','3rd','6th'], ['root','6th','3rd'], ['root','6th','9th'], ['root','3rd','9th'], ['3rd','6th','9th'], ['6th','3rd','9th']],
-  'min69':    [['root','3rd','6th'], ['root','6th','3rd'], ['root','6th','9th'], ['root','3rd','9th'], ['3rd','6th','9th'], ['6th','3rd','9th']],
-  // Newly Extracted Advanced Shells
-  'maj7s5':   [['root','3rd','7th'], ['root','7th','3rd']],
-  'dom9sus4': [['root','4th','9th'], ['root','7th','9th'], ['4th','7th','9th']],
-  'dom13sus4':[['root','4th','13th'], ['root','7th','13th'], ['4th','7th','13th']],
-  'minMaj9':  [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom13b9':  [['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  'dom13s9':  [['root','3rd','13th'], ['root','7th','13th'], ['3rd','7th','13th'], ['7th','3rd','13th']],
-  'dom7b5b9': [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom7b5s9': [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom7s5b9': [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-  'dom7s5s9': [['root','3rd','7th'], ['root','7th','3rd'], ['root','3rd','9th'], ['root','7th','9th'], ['3rd','7th','9th'], ['7th','3rd','9th']],
-};
+// Shell tone-set derivation — the single source of truth for which notes a
+// shell contains. Tone-sets are derived from the chord's own role list (CH) so
+// the displayed labels and the sounding pitches can never disagree.
+//
+// Rules:
+//  - guide tones = the 3rd-role (3rd/b3rd, or 4th/2nd for sus chords) and the
+//    7th-role (7th/b7th/bb7, or the 6th for 6th chords).
+//  - the perfect 5th (role exactly '5th') is NEVER included; altered fifths
+//    (b5th/#5th) count as ordinary color tones.
+//  - base shell  = root + both guide tones.
+//  - rootless shells = both guide tones + one color tone, one per color tone.
+//  - plain 7th/6th chords (no color tones) also get the bare 2-note guide-tone
+//    shell (3 + 7).
+//  - chords with no 7th-role and no 6th (pure triads, add9/minAdd9) get nothing.
+const SHELL_THIRD_ROLES = ['3rd', 'b3rd'];
+const SHELL_THIRD_SUBS = ['4th', '2nd']; // sus chords have no 3rd
+const SHELL_SEVENTH_ROLES = ['7th', 'b7th', 'bb7'];
 
-// Shell string groups — grouped by Bass String
-const SHELL_STRING_GROUPS = [
-  { label: 'A String Bass', stringNums: '543 & 532', bassIdx: 1, upperSets: [[2, 3], [3, 4]] },
-  { label: 'E String Bass', stringNums: '643 & 632', bassIdx: 0, upperSets: [[2, 3], [3, 4]] },
+export function deriveShellToneSets(
+  chordDef: { iv: number[]; r: string[]; f?: string[] }
+): string[][] {
+  const r = chordDef.r;
+
+  let third = r.find(role => SHELL_THIRD_ROLES.includes(role)) ?? null;
+  if (!third) third = SHELL_THIRD_SUBS.find(sub => r.includes(sub)) ?? null;
+
+  let seventh = r.find(role => SHELL_SEVENTH_ROLES.includes(role)) ?? null;
+  if (!seventh && r.includes('6th')) seventh = '6th';
+
+  // No usable upper guide tone (pure triads, add9/minAdd9) → no shells.
+  if (!third || !seventh) return [];
+
+  const colorTones = r.filter(role =>
+    role !== 'root' && role !== third && role !== seventh && role !== '5th'
+  );
+
+  const toneSets: string[][] = [
+    ['root', third, seventh],   // R37
+    ['root', seventh, third],   // R73
+  ];
+  for (const color of colorTones) {
+    toneSets.push([third, seventh, color]);   // 3-7-ext
+    toneSets.push([seventh, third, color]);   // 7-3-ext
+  }
+  return toneSets;
+}
+
+// String sets used to voice a shell, grouped by which string carries the bass
+// (the first index). 3-note sets skip an interior string (classic shell shapes);
+// 2-note sets use an adjacent pair.
+const SHELL_STRING_SETS_3: number[][] = [
+  [0, 1, 2],  // 654
+  [0, 2, 3],  // 643
+  [1, 2, 3],  // 543
+  [1, 3, 4],  // 532
+  [2, 3, 4],  // 432
+  [2, 4, 5],  // 421
 ];
 
 function roleToInterval(
@@ -797,6 +800,91 @@ export function getEffectiveChordLabel(
   return fullChordName || '';
 }
 
+// Place a shell tone-set on a string set at the lowest fretable, compact
+// (span ≤ 4) position. roles[0] is the bass and goes on the lowest string;
+// each upper voice picks the octave closest to the bass fret. Labels come
+// directly from the roles, so they always match the sounding pitch.
+// Returns null when no octave of the grip fits within a 4-fret hand span.
+function placeShellToneSet(
+  roles: string[],
+  strings: number[],
+  chordDef: { iv: number[]; r: string[]; f?: string[] },
+  rootSemi: number
+): { fretArr: VoicingFret[]; rolesUsed: string[]; formulasUsed: string[] } | null {
+  const pcs: number[] = [];
+  for (const role of roles) {
+    const iv = roleToInterval(role, chordDef);
+    if (iv === null) return null;
+    pcs.push((rootSemi + iv) % 12);
+  }
+
+  const bassStr = strings[0];
+  const bassBaseFret = (((pcs[0] - (GS[bassStr] % 12)) % 12) + 12) % 12; // 0..11
+
+  for (const octaveShift of [0, 12]) {
+    const bassFret = bassBaseFret + octaveShift;
+    if (bassFret > 22) continue;
+
+    // Each upper voice can sound its pitch at several octaves on the neck.
+    const candLists: number[][] = [];
+    for (let i = 1; i < roles.length; i++) {
+      const str = strings[i];
+      const base = (((pcs[i] - (GS[str] % 12)) % 12) + 12) % 12; // 0..11
+      const cands = [base - 12, base, base + 12, base + 24].filter(f => f >= 0 && f <= 22);
+      if (!cands.length) break;
+      candLists.push(cands);
+    }
+    if (candLists.length !== roles.length - 1) continue;
+
+    // Choose the upper-voice octaves that minimise the hand span (ignoring open
+    // strings, same rule as the rest of the app); ties prefer the lower position.
+    let best: number[] | null = null;
+    let bestSpan = Infinity;
+    let bestMax = Infinity;
+    const combo: number[] = [];
+    const search = (k: number) => {
+      if (k === candLists.length) {
+        const all = [bassFret, ...combo];
+        const fretted = all.filter(f => f > 0);
+        const hasOpen = all.some(f => f === 0);
+        // When open strings mix with fretted notes, measure from fret 0 to the
+        // highest fret so grips like [0, 0, 11] are rejected as unplayable.
+        const span = fretted.length === 0 ? 0
+          : hasOpen ? Math.max(...fretted)
+          : Math.max(...fretted) - Math.min(...fretted);
+        if (span > 4) return;
+        const maxF = Math.max(...all);
+        if (span < bestSpan || (span === bestSpan && maxF < bestMax)) {
+          best = combo.slice();
+          bestSpan = span;
+          bestMax = maxF;
+        }
+        return;
+      }
+      for (const f of candLists[k]) { combo.push(f); search(k + 1); combo.pop(); }
+    };
+    search(0);
+    if (best === null) continue;
+
+    const frets: number[] = [bassFret, ...best];
+
+    const fretArr: VoicingFret[] = Array(6).fill(null).map(() => ({ fret: null, role: null, finger: 0 }));
+    const rolesUsed: string[] = [];
+    const formulasUsed: string[] = [];
+    for (let i = 0; i < roles.length; i++) {
+      const role = roles[i];
+      const idx = chordDef.r.indexOf(role);
+      const rawFormula = (idx !== -1 && chordDef.f?.[idx] != null) ? chordDef.f[idx] : role;
+      const formula = rawFormula.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
+      rolesUsed.push(role);
+      formulasUsed.push(formula === 'root' ? '1' : formula);
+      fretArr[strings[i]] = { fret: frets[i], role, finger: 0 };
+    }
+    return { fretArr, rolesUsed, formulasUsed };
+  }
+  return null;
+}
+
 export function buildShellVoicings(
   chordType: string,
   chordDef: { iv: number[]; r: string[]; f?: string[] },
@@ -805,81 +893,47 @@ export function buildShellVoicings(
   fullChordName: string = '',
   namingMode: 'sharp' | 'flat' = 'sharp'
 ): VoicingGroup[] {
-  const fallbackMap: Record<string, string> = {
-    'maj69': 'maj6', 'maj7s11': 'maj7', 'maj7s5': 'maj7',
-    'min69': 'min6', 'minMaj7': 'min7',
-    'dom7sus4': 'dom7',
-    'dom7b5': 'dom7',
-  };
-  const effectiveType = fallbackMap[chordType] || chordType;
-  const shellDefs = (DROP_VOICINGS.shells as any)[chordType] || (DROP_VOICINGS.shells as any)[effectiveType];
-  if (!shellDefs) return [];
+  const toneSets = deriveShellToneSets(chordDef);
+  if (!toneSets.length) return [];
 
-  const groupMap = new Map<number, Voicing[]>();
+  // Group by which physical string the bass note sits on so that R37 and R73
+  // (plus rootless extensions) land in the same bucket regardless of whether
+  // they use the consecutive or skip-string variant of that string group.
+  const BASS_STR_LABEL: Record<number, string> = { 0: 'E Bass', 1: 'A Bass', 2: 'D Bass' };
+  const groupMap = new Map<string, Voicing[]>();
 
-  for (const shape of shellDefs) {
-    const bassNoteDef = shape.notes[0];
-    const bassStr = bassNoteDef[0];
-    const bassRefOffset = bassNoteDef[1];
-    const bassIntervalIdx = bassNoteDef[2];
+  for (const roles of toneSets) {
+    for (const strings of SHELL_STRING_SETS_3) {
+      const placed = placeShellToneSet(roles, strings, chordDef, rootSemi);
+      if (!placed) continue;
 
-    if (bassIntervalIdx >= chordDef.iv.length) continue;
+      const groupKey = BASS_STR_LABEL[strings[0]] ?? `String ${6 - strings[0]} Bass`;
+      const fp = makeFingerprint(placed.fretArr);
 
-    const targetPC = (rootSemi + chordDef.iv[bassIntervalIdx]) % 12;
-    const openPC = GS[bassStr] % 12;
-    let baseFret = (targetPC - openPC + 12) % 12;
+      const chordLabel = fullChordName
+        || getEffectiveChordLabel(chordType, placed.rolesUsed, rootSemi, rootNoteName, fullChordName, namingMode)
+        || formatShellLabel(roles);
 
-    // Stamp across available octaves
-    for (const octaveShift of [0, 12]) {
-        const actualBaseFret = baseFret + octaveShift;
-        const fretArr: VoicingFret[] = Array(6).fill(null).map(() => ({ fret: null, role: null, finger: 0 }));
-        let isValid = true;
-        const rolesUsed: string[] = [];
-        const formulasUsed: string[] = [];
+      const voicing: Voicing = {
+        name: placed.formulasUsed.join('-'),
+        chordLabel: String(chordLabel),
+        frets: assignFingers(placed.fretArr),
+        fingerprint: fp,
+        bassNote: roles[0],
+        type: 'shell',
+      };
 
-        for (const [strIdx, offset, intIdx, formulaOverride] of shape.notes) {
-          if (intIdx >= chordDef.iv.length && !formulaOverride) { isValid = false; break; }
-          const fret = actualBaseFret + (offset - bassRefOffset);
-          if (fret < 0 || fret > 22) { isValid = false; break; }
-          const role = typeof formulaOverride === 'string' ? formulaOverride : chordDef.r[intIdx];
-          const rawFormula = typeof formulaOverride === 'string' ? formulaOverride : (chordDef.f?.[intIdx] ?? role);
-          const formula = rawFormula.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
-          rolesUsed.push(role);
-          formulasUsed.push(formula === 'root' ? '1' : formula);
-          fretArr[strIdx] = { fret, role, finger: 0 };
-        }
-
-        if (isValid) {
-          const fp = makeFingerprint(fretArr);
-          const shellChordLabel = getEffectiveChordLabel(chordType, rolesUsed, rootSemi, rootNoteName, fullChordName, namingMode)
-            || fullChordName
-            || shape.label;
-
-          const finalName = formulasUsed.join('-');
-
-          const voicing: Voicing = {
-            name: finalName,
-          chordLabel: String(shellChordLabel),
-          frets: assignFingers(fretArr),
-          fingerprint: fp,
-          bassNote: chordDef.r[bassIntervalIdx],
-          type: 'shell',
-        };
-
-        if (!groupMap.has(bassStr)) groupMap.set(bassStr, []);
-        if (!groupMap.get(bassStr)!.some(v => v.fingerprint === fp)) {
-          groupMap.get(bassStr)!.push(voicing);
-          break; // Stop after finding the lowest valid octave version
-        }
+      if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
+      if (!groupMap.get(groupKey)!.some(v => v.fingerprint === fp)) {
+        groupMap.get(groupKey)!.push(voicing);
       }
     }
   }
 
   const groups: VoicingGroup[] = [];
-  if (groupMap.has(2)) groups.push({ label: 'D String Bass', stringNums: 'D-root', voicings: groupMap.get(2)! });
-  if (groupMap.has(1)) groups.push({ label: 'A String Bass', stringNums: 'A-root', voicings: groupMap.get(1)! });
-  if (groupMap.has(0)) groups.push({ label: 'E String Bass', stringNums: 'E-root', voicings: groupMap.get(0)! });
-
+  groupMap.forEach((voicings, label) => {
+    if (voicings.length > 0) groups.push({ label, stringNums: label, voicings });
+  });
   return sortVoicingGroups(groups);
 }
 
@@ -1370,8 +1424,10 @@ export function buildDropVoicings(
     // 11th chords — rootless = core 7th from 5th
     'min11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
     'dom11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
-    // 13th chords — rootless = core 7th from 3rd or b3
-    'maj13':    { type: 'min7',     ivOffset: 4,  roleMap: ['3rd', '5th', '7th', '9th'],     rootFormula: '3'  },
+    // 13th chords — rootless voices the 13th where a standard borrow covers it
+    // maj13: borrow dom7sus4 from 3rd → E A B D = [3rd, 13th, 7th, 9th] (includes the 13th)
+    'maj13':    { type: 'dom7sus4', ivOffset: 4,  roleMap: ['3rd', '13th', '7th', '9th'],    rootFormula: '3'  },
+    // min13/dom13: no standard borrow reaches [b3/3, b7, 9, 13] exactly → voice the 9th instead
     'min13':    { type: 'maj7',     ivOffset: 3,  roleMap: ['b3', '5th', 'b7', '9th'],       rootFormula: 'b3' },
     'dom13':    { type: 'hdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '9th'],      rootFormula: '3'  },
     'dom13b9':  { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
@@ -1380,6 +1436,8 @@ export function buildDropVoicings(
     'maj69':    { type: 'dom7sus4', ivOffset: 9,  roleMap: ['6th', '9th', '3rd', '5th'],     rootFormula: '6'  },
     // Altered / sus dominant chords
     'dom7b9':   { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
+    // dom7s9: borrow dimMaj7 from 3rd → E G Bb Eb = [3rd, 5th, b7, #9] (includes the #9)
+    'dom7s9':   { type: 'dimMaj7',  ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '#9'],       rootFormula: '3'  },
     'dom7alt':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
     'dom7b13':  { type: 'dom7b5',   ivOffset: 4,  roleMap: ['3rd', 'b13', 'b7', '9th'],      rootFormula: '3'  },
     'dom7b5b9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', 'b9', '3rd'],        rootFormula: 'b5' },
@@ -1396,11 +1454,14 @@ export function buildDropVoicings(
     'dom7s11': 'dom7', 'maj7s11': 'maj7',
     // 13th chords
     'maj13': 'maj7', 'min13': 'min7', 'dom13': 'dom7',
-    'dom13b9': 'dom7', 'dom13s9': 'dom7alt',
+    'dom13b9': 'dom7', 'dom13s9': 'dom7',
     // 6/9 and add9
     'maj69': 'maj6', 'min69': 'min6',
     'add9': 'maj7', 'minAdd9': 'min7',
-    // Altered dominants
+    // Altered dominants — all map to core shapes that exist in drop2+drop3+drop2and4
+    // dom7b9/dom7s9 drop2 shapes are pitch-identical to dom7 (voice R-3-5-b7)
+    // dom7alt drop2 shapes are pitch-identical to dom7s5 (both voice R-3-#5-b7)
+    'dom7b9': 'dom7', 'dom7s9': 'dom7', 'dom7alt': 'dom7s5',
     'dom7b13': 'dom7s5',
     'dom7b5b9': 'dom7b5', 'dom7b5s9': 'dom7b5',
     'dom7s5b9': 'dom7s5', 'dom7s5s9': 'dom7s5',

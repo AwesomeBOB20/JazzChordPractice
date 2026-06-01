@@ -178,14 +178,16 @@ export const DEFAULT_THEME = 'light';
 export const ROLE_COLORS_GLOBAL: Record<string, string> = {
   'root': '#D95D39', 'R': '#D95D39', '1': '#D95D39',
   '2nd': '#857AEE', '2': '#857AEE', 'b2': '#857AEE', '#2': '#857AEE',
-  '3rd': '#3D94ED', '3': '#3D94ED', 'b3': '#3D94ED',
+  '3rd': '#3D94ED', '3': '#3D94ED', 'b3': '#3D94ED', 'b3rd': '#3D94ED',
   '4th': '#20A67B', '4': '#20A67B', 'b4': '#20A67B', '#4': '#20A67B',
   '5th': '#5E9E26', '5': '#5E9E26', 'b5': '#5E9E26', '#5': '#5E9E26',
+  'b5th': '#5E9E26', '#5th': '#5E9E26',
   '6th': '#C9456B', '6': '#C9456B', 'b6': '#C9456B',
-  '7th': '#C97D22', '7': '#C97D22', 'b7': '#C97D22', 'bb7': '#C97D22',
+  '7th': '#C97D22', '7': '#C97D22', 'b7': '#C97D22', 'b7th': '#C97D22', 'bb7': '#C97D22',
   '9th': '#857AEE', '9': '#857AEE', 'b9': '#857AEE', '#9': '#857AEE',
-  '11th': '#20A67B', '11': '#20A67B', '#11': '#20A67B',
-  '13th': '#C9456B', '13': '#C9456B', 'b13': '#C9456B', '#13': '#C9456B',
+  'b9th': '#857AEE', '#9th': '#857AEE',
+  '11th': '#20A67B', '11': '#20A67B', '#11': '#20A67B', '#11th': '#20A67B',
+  '13th': '#C9456B', '13': '#C9456B', 'b13': '#C9456B', '#13': '#C9456B', 'b13th': '#C9456B',
 };
 
 export const getNoteBaseRole = (role: string): string => {
@@ -219,5 +221,7 @@ export const getNoteColor = (
   }
   
   if (!role) return currentTheme.mutedNote;
-  return ROLE_COLORS_GLOBAL[role] || currentTheme.mutedNote;
+  return ROLE_COLORS_GLOBAL[role]
+    || ROLE_COLORS_GLOBAL[role.replace(/(?:st|nd|rd|th)$/i, '')]
+    || currentTheme.mutedNote;
 };
