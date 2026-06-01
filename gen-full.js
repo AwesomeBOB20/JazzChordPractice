@@ -185,28 +185,10 @@ for (const [chordType, iv] of Object.entries(CH)) {
 }
 output += `  },\n`;
 
-// Generate shells
-output += `  shells: {\n`;
-for (const [chordType, iv] of Object.entries(CH)) {
-  if (iv.length < 3) continue;
-  output += `    '${chordType}': [\n`;
-  // For shells, use first 3 intervals (root, 3rd, 7th or similar)
-  const shellIv = iv.length >= 4 ? [iv[0], iv[1], iv[3]] : iv.slice(0, 3);
-  const inversions = generateInversions(shellIv);
-  
-  for (const stringSet of STRING_SETS.shells) {
-    for (let invIdx = 0; invIdx < inversions.length; invIdx++) {
-      const intIdxs = inversions[invIdx];
-      const offsets = computeOffsets(shellIv, stringSet.strings, intIdxs);
-      const noteEntries = stringSet.strings.map((strIdx, i) => 
-        `[${strIdx}, ${offsets[i]}, ${intIdxs[i]}]`
-      );
-      output += `      { label: 'Shell (${invNames[invIdx]}) ${stringSet.label}', notes: [${noteEntries.join(', ')}] },\n`;
-    }
-  }
-  output += `    ],\n`;
-}
-output += `  }\n`;
+// Shells are no longer generated here. They are derived at runtime in
+// src/shared/guitar/voicings.ts (deriveShellToneSets + placeShellToneSet)
+// from the chord's own role list, so labels always match the sounding pitch
+// and no perfect 5th is ever included.
 
 output += `};\n`;
 

@@ -48,7 +48,6 @@ export function formatChordSymbol(internalName: string): string {
     [/\bsus4\b/gi, 'sus4'],
     [/\bsus2\b/gi, 'sus2'],
     [/maj\s*\(?b5\)?|major\s*flat\s*5|maj_b5/gi, '(♭5)'],
-    [/sus2\s*\(?b5\)?|sus2\s*flat\s*5|sus2_b5/gi, 'sus2(♭5)'],
     [/\bmaj(or)?\b/gi, 'Maj'],
     [/\bmin(or)?\b/gi, 'Min'],
   ];
