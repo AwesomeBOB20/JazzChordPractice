@@ -19,6 +19,7 @@ export interface SoundfontPlayerRef {
   playMeasure: (midiNotes: number[], config: PlayMeasureConfig) => void;
   playTone: (midi: number, volume: number) => void;
   stopTone: () => void;
+  playHoldChord: (midiNotes: number[], volume: number) => void;
   playProgression: (sequence: ProgressionMeasure[], onChordChange: (seqIdx: number, chordIdx: number) => void, onEnd: () => void, loop?: boolean) => void;
   stopProgression: () => void;
   setProgressionLooping: (loop: boolean) => void;
@@ -110,6 +111,14 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     }
   };
 
+  // Like releaseAll but preserves nextMeasureTime so the audio clock stays locked
+  // across measure boundaries in a running progression.
+  const gentleRelease = (fadeMs: number = 60) => {
+    if (webViewRef.current) {
+      webViewRef.current.postMessage(JSON.stringify({ type: 'GENTLE_RELEASE', fadeMs }));
+    }
+  };
+
 
   useImperativeHandle(ref, () => ({
     stop: stopAll,
@@ -167,10 +176,31 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     },
 
     playTone: (midi, volume) => {
-      sendSchedule([{ instrument: 'piano', midi, volume: volume / 100, timeOffset: 0, durationMs: null }]);
+      if (!isEngineReady || !webViewRef.current) return;
+      // tunerMode=true → engine shifts +1 octave, preserving E-A-D-G-B-E order.
+      webViewRef.current.postMessage(JSON.stringify({ type: 'PLAY_TONE', midis: [midi], volume: volume / 100, tunerMode: true }));
     },
-    
-    stopTone: stopAll,
+
+    stopTone: () => {
+      if (!webViewRef.current) return;
+      webViewRef.current.postMessage(JSON.stringify({ type: 'STOP_TONE', fadeMs: 200 }));
+    },
+
+    playHoldChord: (midiNotes, volume) => {
+      if (!isEngineReady || !webViewRef.current) return;
+      const cleanNotes = midiNotes.filter(n => n !== null && !isNaN(n));
+      if (!cleanNotes.length) return;
+      // Stop any JS-scheduled sequence (progression/arp) WITHOUT firing STOP_ALL,
+      // which would also fade the held tone and collide with PLAY_TONE's own
+      // crossfade below (the source of the note-to-note click).
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current = [];
+      if (progSchedulerRef.current) clearTimeout(progSchedulerRef.current);
+      // Fade out any ringing strummed (sample) voices. RELEASE_ALL touches only
+      // activeSources, never the tone voices, so the crossfade stays click-free.
+      webViewRef.current.postMessage(JSON.stringify({ type: 'RELEASE_ALL', fadeMs: 60 }));
+      webViewRef.current.postMessage(JSON.stringify({ type: 'PLAY_TONE', midis: cleanNotes, volume: volume / 100 }));
+    },
 
     playArpLoop: (midiNotes, bpm, volume, guitar = false, arpSwing = false) => {
       stopAll();
@@ -218,7 +248,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       const events: any[] = [];
 
       // Release any previously sounding voices so the new chord doesn't ring on top of the old.
-      if (!config.skipTransitionFade) releaseAll(150);
+      if (!config.skipTransitionFade) gentleRelease(150);
 
       const beatSecs = 60 / config.bpm;
       const beats = config.beats || 4;
@@ -310,6 +340,12 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         let hasCustomScheduling = false;
         let chordStrikesSecs: number[] = [0];
 
+        // Center the strum on the beat: shift the whole stagger back by half its span so
+        // the middle string lands on the downbeat instead of the first string. Without this,
+        // the perceived attack (last string) arrives ~60ms late, which sounds behind the click.
+        const strumStepSecs = 0.004;
+        const strumPrerollSecs = measure.guitar ? (measure.midiNotes.length - 1) * strumStepSecs : 0;
+
         switch (measure.rhythm) {
             case 'swing': {
                 hasCustomScheduling = true;
@@ -318,21 +354,21 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
                     // Just play the current chord at beat 0, sustaining to end of its window.
                     const strikeDur = measureMs + 400;
                     measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
-                        events.push({ instrument, midi, volume: vol, timeOffset: guitarStaggerSecs, durationMs: strikeDur, releaseMs: 400 });
+                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
+                        events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, guitarStaggerSecs), durationMs: strikeDur, releaseMs: 400 });
                     });
                 } else {
                     // Non-split swing: play at 0 and 5/3 beats — both sustain to end of measure
                     const strike1Dur = measureMs + 400;
                     measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
-                        events.push({ instrument, midi, volume: vol, timeOffset: guitarStaggerSecs, durationMs: strike1Dur, releaseMs: 400 });
+                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
+                        events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, guitarStaggerSecs), durationMs: strike1Dur, releaseMs: 400 });
                     });
 
                     const strike2Offset = (5/3) * beatSecs;
                     const strike2Dur = (measureMs - strike2Offset * 1000) + 400;
                     measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
+                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
                         events.push({ instrument, midi, volume: vol, timeOffset: strike2Offset + guitarStaggerSecs, durationMs: strike2Dur, releaseMs: 400 });
                     });
                 }
@@ -375,10 +411,10 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
             }
             case 'straight':
             default: {
-                // For split (2-beat) measures only strike on beat 0 so chord 1
-                // sustains cleanly into chord 2 without a restrike at the handoff.
                 if (isSplit) {
-                    chordStrikesSecs = [0];
+                    // Two strikes per 2-beat split measure: beats 0 and 1.
+                    // Result across a full bar: chord1 chord1 chord2 chord2.
+                    chordStrikesSecs = [0, beatSecs];
                 } else {
                     chordStrikesSecs = [];
                     for (let i = 0; i < measure.beats; i++) {
@@ -400,8 +436,8 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
                 const remainingMs = (beatSecs * measure.beats - strikeTime) * 1000;
                 const strikeDurMs = remainingMs + 400;
                 measure.midiNotes.forEach((midi, i) => {
-                    const guitarStaggerSecs = measure.guitar ? i * 0.012 : 0;
-                    events.push({ instrument, midi, volume: vol, timeOffset: strikeTime + guitarStaggerSecs, durationMs: strikeDurMs, releaseMs: 400 });
+                    const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
+                    events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, strikeTime + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: 400 });
                 });
             });
         }
@@ -423,10 +459,13 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         const currentMeasureMs = (beatSecs * 1000) * measure.beats;
         sendSchedule(events, currentMeasureMs);
         
-        // Schedule the next check at absolute time: 100ms before next measure starts.
-        // This prevents timer jitter from compounding across measures.
+        // Schedule the next check at absolute time: 250ms before next measure starts.
+        // 100ms was too tight — the JS→WebView bridge can add 30–80ms of latency, and the
+        // audio engine's nextMeasureTime window is only 20ms wide. If the message arrived
+        // even slightly late, the engine fell back to now+20ms, creating a brief cutout at
+        // the bar 1→2 boundary. 250ms gives ~200ms of margin after bridge latency.
         const nextMeasureStartMs = measureStartMs + currentMeasureMs;
-        const nextCheckTargetMs = nextMeasureStartMs - 100;
+        const nextCheckTargetMs = nextMeasureStartMs - 250;
         const nextCheckDelay = Math.max(100, nextCheckTargetMs - Date.now());
 
         progSeqIdxRef.current++;

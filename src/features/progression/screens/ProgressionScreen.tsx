@@ -14,7 +14,6 @@ import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATE
 import { useAudio } from '@shared/audio/AudioContext';
 import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
 import { calculateOptimalVoiceLeading, buildHardcodedShapeVoicings } from '@shared/guitar';
-import { buildPianoVoicings } from '@shared/piano';
 
 // NOTICE: ProgressionSettings has been completely removed from this import list!
 import { ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
@@ -24,6 +23,40 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11];
+
+// Hybrid voicing for extension chords: root + guide tones (3rd/7th) + extensions, drop the
+// perfect 5th. Built from the ascending getChordNotes stack so upper extensions sit an octave+
+// above their clash partner (the "octave apart" avoid-note rule, satisfied by construction).
+// Returns null for non-extension chords so callers keep their existing behavior unchanged.
+function getExtensionVoicingNotes(chord: any, octave: number): number[] | null {
+  const ch = CH[chord.chordType];
+  if (!ch || ch.iv.length <= 4) return null;
+  const stack = getChordNotes(chord.rootSemi, chord.chordType, octave); // parallel to ch.iv / ch.r
+  const isThird = (r: string) => r === '3rd' || r === 'b3rd' || r === '4th' || r === '2nd';
+  const isSeventh = (r: string) => r === '7th' || r === 'b7th' || r === '6th';
+
+  // keep root + guide tones + extensions; drop only the PERFECT 5th (#5/b5 are colors, kept)
+  let notes = stack.filter((_n: number, i: number) => ch.r[i] !== '5th');
+
+  // legibility cap at 5: keep root + guide tones + the highest (defining) extensions
+  if (notes.length > 5) {
+    const guide = stack.filter((_n: number, i: number) => ch.r[i] === 'root' || isThird(ch.r[i]) || isSeventh(ch.r[i]));
+    const ext = notes.filter((n: number) => !guide.includes(n)).sort((a: number, b: number) => b - a).slice(0, 5 - guide.length);
+    notes = [...guide, ...ext];
+  }
+  notes.sort((a: number, b: number) => a - b);
+
+  // declash safety net: lift any tight m2 up an octave (turns it into a soft m9); if it still
+  // can't separate after a few passes, drop the higher (color) note — revert to the substitute.
+  for (let pass = 0; pass < 6; pass++) {
+    const i = notes.findIndex((n: number, k: number) => k < notes.length - 1 && notes[k + 1] - n === 1);
+    if (i === -1) break;
+    notes[i + 1] += 12;
+    notes.sort((a: number, b: number) => a - b);
+    if (pass === 5) notes.splice(notes.indexOf(Math.max(...notes)), 1);
+  }
+  return notes;
+}
 
 const ProgressionCell = React.memo(function ProgressionCell({ 
   group, gIdx, viewMode, showShapes, instrument, octave,
@@ -266,13 +299,16 @@ export default function ProgressionScreen() {
       const chord = progression[i];
       if (!chord) { result.push(null); continue; }
       
-      const intervals = getChordIntervals(chord.chordType).slice(0, 4);
-      let rawNotes = intervals.map((iv: number) => {
-        const pc = (chord.rootSemi + iv) % 12;
-        let midi = ((octave + 1) * 12) + pc;
-        if (midi < ((octave + 1) * 12) + chord.rootSemi) midi += 12;
-        return midi;
-      });
+      let rawNotes = getExtensionVoicingNotes(chord, octave);
+      if (!rawNotes) {
+        const intervals = getChordIntervals(chord.chordType).slice(0, 4);
+        rawNotes = intervals.map((iv: number) => {
+          const pc = (chord.rootSemi + iv) % 12;
+          let midi = ((octave + 1) * 12) + pc;
+          if (midi < ((octave + 1) * 12) + chord.rootSemi) midi += 12;
+          return midi;
+        });
+      }
 
       if (voiceLeading && lastVoicing) {
         const prevCenter = lastVoicing.reduce((a,b) => a+b, 0) / lastVoicing.length;
@@ -312,14 +348,18 @@ export default function ProgressionScreen() {
       const rootMidi = ((octave + 1) * 12) + chord.rootSemi;
       let baseNotes: number[] = [];
 
-      const shapeDef = CHORD_PATTERN_MAP[chord.chordType]?.[0];
-      const pattern = shapeDef ? PATTERNS[shapeDef.pattern] : null;
-
-      if (pattern) {
-        baseNotes = pattern.iv.map(iv => rootMidi + shapeDef.offset + iv);
+      const ext = getExtensionVoicingNotes(chord, octave);
+      if (ext) {
+        baseNotes = ext;
       } else {
-        const intervals = getChordIntervals(chord.chordType).slice(0, 4);
-        baseNotes = intervals.map(iv => rootMidi + iv);
+        const shapeDef = CHORD_PATTERN_MAP[chord.chordType]?.[0];
+        const pattern = shapeDef ? PATTERNS[shapeDef.pattern] : null;
+        if (pattern) {
+          baseNotes = pattern.iv.map(iv => rootMidi + shapeDef.offset + iv);
+        } else {
+          const intervals = getChordIntervals(chord.chordType).slice(0, 4);
+          baseNotes = intervals.map(iv => rootMidi + iv);
+        }
       }
 
       if (!voiceLeading) {
@@ -578,13 +618,18 @@ export default function ProgressionScreen() {
       if (activePianoVoicing && activePianoVoicing.notes) {
         notesToPlay = activePianoVoicing.notes;
       } else {
-        const intervals = getChordIntervals(chord.chordType).slice(0, 4);
-        notesToPlay = intervals.map((iv: number) => {
-          const pc = (chord.rootSemi + iv) % 12;
-          let midi = ((octave + 1) * 12) + pc;
-          if (midi < ((octave + 1) * 12) + chord.rootSemi) midi += 12;
-          return midi;
-        });
+        const ext = getExtensionVoicingNotes(chord, octave);
+        if (ext) {
+          notesToPlay = ext;
+        } else {
+          const intervals = getChordIntervals(chord.chordType).slice(0, 4);
+          notesToPlay = intervals.map((iv: number) => {
+            const pc = (chord.rootSemi + iv) % 12;
+            let midi = ((octave + 1) * 12) + pc;
+            if (midi < ((octave + 1) * 12) + chord.rootSemi) midi += 12;
+            return midi;
+          });
+        }
       }
     }
     onPlay(notesToPlay, { guitar: instrument === 'guitar' });
@@ -647,16 +692,16 @@ export default function ProgressionScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg }]}>
-      <View style={[styles.card, { 
-        backgroundColor: t.bg2, 
+      {!isPlayingSystem && <View style={[styles.card, {
+        backgroundColor: t.bg2,
         justifyContent: 'center',
         zIndex: 30,
-        paddingTop: 10,       
+        paddingTop: 10,
         paddingBottom: 10,
         borderBottomWidth: 1,
         borderBottomColor: t.border
       }]}>
-        {!isPlayingSystem && (
+        {(
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 44 }} style={{ height: 44 }}>
             <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={cycleViewMode}>
               <Ionicons name={viewMode === 'text' ? 'text-outline' : showShapes ? 'color-filter' : 'grid-outline'} size={14} color={viewMode === 'text' ? t.txt2 : showShapes ? t.accent : t.txt2} />
@@ -768,7 +813,7 @@ export default function ProgressionScreen() {
             </TouchableOpacity>
           </ScrollView>
         )}
-      </View>
+      </View>}
       <ScrollView ref={scrollRef} style={{ zIndex: 20, flex: 1, backgroundColor: t.bg2 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} removeClippedSubviews={true} bounces={false} overScrollMode="never">
         <View style={[styles.card, { backgroundColor: t.bg2, paddingTop: 0 }]}>
           
