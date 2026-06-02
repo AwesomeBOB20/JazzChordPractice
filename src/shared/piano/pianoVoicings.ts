@@ -3,7 +3,30 @@ import { findTriads, TRIAD_FULL_NAMES } from '@shared/guitar/voicings';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { UnifiedVoicing } from '@shared/types/models';
 
-export function buildPianoVoicings(rootSemi: number, chordType: string, octave: number = 4, selectedScaleId: string | null = null, namingMode: 'sharp' | 'flat' = 'sharp') {
+// Memoized like the guitar builders (see voicings.ts): PlayScreen's eligiblePairs
+// sweep and per-tab memos call this synchronously on every tab switch. Cached
+// results are SHARED references — callers copy (`[...pV.triads]`) before sorting.
+function memoizePiano<F extends (...args: any[]) => any>(
+  fn: F,
+  keyFn: (...args: Parameters<F>) => string
+): F {
+  const cache = new Map<string, ReturnType<F>>();
+  return ((...args: Parameters<F>): ReturnType<F> => {
+    const key = keyFn(...args);
+    if (cache.has(key)) return cache.get(key) as ReturnType<F>;
+    const result = fn(...args);
+    cache.set(key, result);
+    return result;
+  }) as F;
+}
+
+export const buildPianoVoicings = memoizePiano(
+  buildPianoVoicingsUncached,
+  (rootSemi, chordType, octave = 4, selectedScaleId = null, namingMode = 'sharp') =>
+    `${rootSemi}|${chordType}|${octave}|${selectedScaleId ?? ''}|${namingMode}`
+);
+
+function buildPianoVoicingsUncached(rootSemi: number, chordType: string, octave: number = 4, selectedScaleId: string | null = null, namingMode: 'sharp' | 'flat' = 'sharp') {
   const ch = CH[chordType];
   const emptyRes = { triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] };
   if (!ch) return emptyRes;

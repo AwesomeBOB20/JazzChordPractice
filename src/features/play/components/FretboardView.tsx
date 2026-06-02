@@ -80,87 +80,50 @@ const MARGIN_TOP = 40;
 const MARGIN_BOTTOM = 32;
 const DOT_R = 14;
 
-const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textColor, borderColor, openColor, label, isActive, flashAnim, onNotePress, isOpen, bg, isGhost, isRootProp, viewportShift }: any) {
-  const pos = React.useRef(new Animated.ValueXY({ x: cx, y: cy })).current;
-  const animState = React.useRef(new Animated.Value(0)).current;
-  const isFirst = React.useRef(true);
-  const lastViewport = React.useRef(viewportShift);
-  
-  // Track last known visuals for smooth exit animations
-  const lastVisuals = React.useRef({ cx, cy, color, textColor, borderColor, openColor, label, isOpen, bg, isRootProp });
-  if (isActive) lastVisuals.current = { cx, cy, color, textColor, borderColor, openColor, label, isOpen, bg, isRootProp };
-  const visual = isActive ? { cx, cy, color, textColor, borderColor, openColor, label, isOpen, bg, isRootProp } : lastVisuals.current;
-  
+// Static note: no per-note position/entrance Animated machinery. Earlier this
+// component created a per-note Animated.ValueXY + spring effect AND an
+// Animated.Value + timing effect for EVERY dot (~6 on a chord diagram, up to
+// ~60 on a scale/arp diagram + overlay). On a tab switch all of those fired at
+// once on the JS thread — that was the multi-second tab-switch lag (the cached
+// builders are no longer the bottleneck). Notes now position via absolute
+// left/top and appear instantly. The ONLY Animated value kept is flashAnim,
+// which drives the tap / playback flash pulse imperatively.
+const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textColor, borderColor, openColor, label, isActive, flashAnim, onNotePress, isOpen, bg, isGhost, isRootProp }: any) {
+  // Inactive notes (muted strings, out-of-window scale notes) simply don't render.
+  if (!isActive) return null;
+
   // iRealPro Style: Roots are squares, everything else is a circle
-  const isRoot = visual.isRootProp !== undefined ? visual.isRootProp : (visual.label === 'R' || visual.label === '1');
-
-  React.useEffect(() => {
-    if (isFirst.current) {
-      pos.setValue({ x: visual.cx, y: visual.cy });
-      isFirst.current = false;
-    } else {
-      // Gracefully slide the notes even when the viewport shifts. 
-      // Removing the hard snap creates a much smoother transition.
-      Animated.spring(pos, { 
-        toValue: { x: visual.cx, y: visual.cy }, 
-        friction: 8, 
-        tension: 65, // Lower tension = smoother glide, less jitter
-        useNativeDriver: true 
-      }).start();
-      lastViewport.current = viewportShift;
-    }
-  }, [visual.cx, visual.cy, viewportShift]);
-
-  React.useEffect(() => {
-    // Switching from spring to timing for entrance/exit animations
-    // stops the aggressive bouncing that looks like "glitching"
-    Animated.timing(animState, { 
-      toValue: isActive ? 1 : 0, 
-      duration: 200,
-      useNativeDriver: true 
-    }).start();
-  }, [isActive]);
+  const isRoot = isRootProp !== undefined ? isRootProp : (label === 'R' || label === '1');
 
   return (
-    <Animated.View 
-      pointerEvents={isActive ? 'auto' : 'none'} 
+    <Animated.View
       style={{
-        position: 'absolute', 
-        left: -DOT_R, 
-        top: -DOT_R, 
-        width: DOT_R * 2, 
+        position: 'absolute',
+        left: cx - DOT_R,
+        top: cy - DOT_R,
+        width: DOT_R * 2,
         height: DOT_R * 2,
-        borderRadius: isRoot && !visual.isOpen ? 4 : DOT_R, 
-        backgroundColor: visual.isOpen ? 'transparent' : visual.color,
-        borderWidth: visual.isOpen ? 2 : (visual.borderColor && visual.borderColor !== 'transparent' ? 1 : 0),
-        borderColor: visual.isOpen ? (visual.openColor || visual.color) : (visual.borderColor || 'transparent'),
-        // extrapolate: 'clamp' PREVENTS the opacity from exploding past 1.0 on overshoots
-        opacity: animState.interpolate({ 
-          inputRange: [0, 0.5, 1], 
-          outputRange: [0, isGhost ? 0.3 : 1, isGhost ? 0.3 : 1],
-          extrapolate: 'clamp'
-        }),
-        transform: [
-                { translateX: pos.x }, 
-                { translateY: pos.y }, 
-                { scale: animState }, 
-                { scale: flashAnim }
-              ],
-              shadowColor: visual.isOpen ? 'transparent' : '#000', 
-              shadowOffset: {width: 0, height: 2}, 
-              shadowOpacity: visual.isOpen ? 0 : 0.25, 
-              shadowRadius: visual.isOpen ? 0 : 3, 
-              elevation: visual.isOpen ? 0 : 4,
-            }}
-          >
-      <TouchableOpacity 
-        style={StyleSheet.absoluteFillObject} 
-        onPress={onNotePress} 
-        activeOpacity={0.8} 
+        borderRadius: isRoot && !isOpen ? 4 : DOT_R,
+        backgroundColor: isOpen ? 'transparent' : color,
+        borderWidth: isOpen ? 2 : (borderColor && borderColor !== 'transparent' ? 1 : 0),
+        borderColor: isOpen ? (openColor || color) : (borderColor || 'transparent'),
+        opacity: isGhost ? 0.3 : 1,
+        transform: [{ scale: flashAnim ?? 1 }],
+        shadowColor: isOpen ? 'transparent' : '#000',
+        shadowOffset: {width: 0, height: 2},
+        shadowOpacity: isOpen ? 0 : 0.25,
+        shadowRadius: isOpen ? 0 : 3,
+        elevation: isOpen ? 0 : 4,
+      }}
+    >
+      <TouchableOpacity
+        style={StyleSheet.absoluteFillObject}
+        onPress={onNotePress}
+        activeOpacity={0.8}
         hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
       >
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: visual.isOpen ? (visual.openColor || visual.color) : (visual.textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{visual.label}</Text>
+          <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
         </View>
       </TouchableOpacity>
     </Animated.View>
