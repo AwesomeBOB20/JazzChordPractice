@@ -16,6 +16,30 @@ export const SCALE_MASKS = [
 
 export const GS = GUITAR_TUNING;
 
+// ─── Builder memoization ─────────────────────────────────────────────────────
+// Every voicing builder below is a PURE function of its primitive arguments
+// (chord quality, root pitch-class, naming mode, octave). The fretboard geometry
+// it computes is deterministic, so results are cached in a module-level Map.
+// This turns PlayScreen's 12-root × N-type tab existence sweep and QuizScreen's
+// per-question pool filters from hundreds of heavy rebuilds into instant lookups.
+// IMPORTANT: cached results are SHARED references — every caller already copies
+// (via [...] / .map(...)) before sorting, so the cached arrays/objects are never
+// mutated in place. Do not introduce a caller that mutates a returned value.
+function memoizeBuilder<A extends any[], R>(
+  fn: (...args: A) => R,
+  keyFn: (...args: A) => string
+): (...args: A) => R {
+  const cache = new Map<string, R>();
+  return (...args: A): R => {
+    const k = keyFn(...args);
+    const hit = cache.get(k);
+    if (hit !== undefined) return hit;
+    const result = fn(...args);
+    cache.set(k, result);
+    return result;
+  };
+}
+
 export interface VoicingFret {
   fret: number | null;
   role: string | null;
@@ -176,7 +200,7 @@ export const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; varia
   ]
 };
 
-export function buildBarreVoicings(
+function buildBarreVoicingsUncached(
   chordType: string,
   rootSemi: number,
   rootNoteName: string = '',
@@ -243,7 +267,7 @@ export function buildBarreVoicings(
   return sortVoicingGroups(groups);
 }
 
-export function buildOpenVoicings(
+function buildOpenVoicingsUncached(
   chordType: string,
   rootSemi: number,
   rootNoteName: string = '',
@@ -408,7 +432,7 @@ function makeFingerprint(frets: VoicingFret[]): string {
 // findTriads — finds all triads embedded in a chord
 // e.g. Gmaj9 contains G maj, B min, D maj triads
 // ============================================================
-export function findTriads(
+function findTriadsUncached(
   chordDef: { iv: number[]; r: string[] }
 ): { triadType: string; rootInterval: number; rootRole: string; triadDef: { iv: number[]; roles: string[] }; parentRoles: string[] }[] {
   const pcs = new Set(chordDef.iv.map(iv => iv % 12));
@@ -520,7 +544,7 @@ function sortVoicingGroups(groups: VoicingGroup[]): VoicingGroup[] {
 // ============================================================
 // buildTriadVoicings — Layer 1 main export
 // ============================================================
-export function buildTriadVoicings(
+function buildTriadVoicingsUncached(
   chordDef: { iv: number[]; r: string[]; f?: string[] },
   rootSemi: number,
   rootNoteName: string = '',
@@ -918,7 +942,7 @@ function placeShellToneSet(
   return null;
 }
 
-export function buildShellVoicings(
+function buildShellVoicingsUncached(
   chordType: string,
   chordDef: { iv: number[]; r: string[]; f?: string[] },
   rootSemi: number,
@@ -1015,7 +1039,7 @@ export interface ScaleVoicing {
   maxFret: number;
 }
 
-export function buildScaleVoicings(
+function buildScaleVoicingsUncached(
   scaleIds: string[],
   scales: Record<string, { name: string; iv: number[]; r: string[]; f: string[] }>,
   rootSemi: number,
@@ -1428,7 +1452,7 @@ function findSpan4(
   return candidates[0].v;
 }
 
-export function buildDropVoicings(
+function buildDropVoicingsUncached(
   chordType: string,
   chordDef: { iv: number[]; r: string[]; f?: string[] },
   rootSemi: number,
@@ -1627,7 +1651,7 @@ export function buildDropVoicings(
  * Bridge function to make HARDCODED_SHAPES work with the current UI.
  * This maps the nested array format to the ScaleVoicing interface.
  */
-export function buildHardcodedShapeVoicings(
+function buildHardcodedShapeVoicingsUncached(
   chordType: string,
   rootSemi: number,
   namingMode: 'sharp' | 'flat' = 'sharp',
@@ -1885,3 +1909,54 @@ export function filterVoicingsByInversion(
   // Match both "1st Inversion" (triads) and "1st Inv" (drop voicings)
   return voicings.filter(v => v.name.includes(`${inversion} Inversion`) || v.name.includes(`${inversion} Inv`));
 }
+// ─── Cached public exports ───────────────────────────────────────────────────
+// Thin memoized wrappers around the deterministic *Uncached builders above.
+// Keys cover every argument that affects output (chord quality, root, naming,
+// octave-independent geometry, and the label strings the caller passes in).
+// See memoizeBuilder for the immutability contract.
+export const buildBarreVoicings = memoizeBuilder(
+  buildBarreVoicingsUncached,
+  (chordType, rootSemi, rootNoteName = '', fullChordName = '') =>
+    `${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}`
+);
+
+export const buildOpenVoicings = memoizeBuilder(
+  buildOpenVoicingsUncached,
+  (chordType, rootSemi, rootNoteName = '', fullChordName = '') =>
+    `${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}`
+);
+
+export const findTriads = memoizeBuilder(
+  findTriadsUncached,
+  (chordDef) => `${chordDef.iv.join(',')}|${chordDef.r.join(',')}`
+);
+
+export const buildTriadVoicings = memoizeBuilder(
+  buildTriadVoicingsUncached,
+  (chordDef, rootSemi, rootNoteName = '', namingMode = 'sharp') =>
+    `${chordDef.iv.join(',')}|${chordDef.r.join(',')}|${(chordDef.f ?? []).join(',')}|${rootSemi}|${rootNoteName}|${namingMode}`
+);
+
+export const buildShellVoicings = memoizeBuilder(
+  buildShellVoicingsUncached,
+  (chordType, _chordDef, rootSemi, rootNoteName = '', fullChordName = '', namingMode = 'sharp') =>
+    `${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}|${namingMode}`
+);
+
+export const buildScaleVoicings = memoizeBuilder(
+  buildScaleVoicingsUncached,
+  (scaleIds, _scales, rootSemi, chordIvs, namingMode = 'sharp') =>
+    `${scaleIds.join(',')}|${rootSemi}|${chordIvs.join(',')}|${namingMode}`
+);
+
+export const buildDropVoicings = memoizeBuilder(
+  buildDropVoicingsUncached,
+  (chordType, _chordDef, rootSemi, rootNoteName = '', fullChordName = '', namingMode = 'sharp') =>
+    `${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}|${namingMode}`
+);
+
+export const buildHardcodedShapeVoicings = memoizeBuilder(
+  buildHardcodedShapeVoicingsUncached,
+  (chordType, rootSemi, namingMode = 'sharp', baseOnly = false) =>
+    `${chordType}|${rootSemi}|${namingMode}|${baseOnly}`
+);

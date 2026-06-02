@@ -3,7 +3,7 @@ import { findTriads, TRIAD_FULL_NAMES } from '@shared/guitar/voicings';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { UnifiedVoicing } from '@shared/types/models';
 
-export function buildPianoVoicings(rootSemi: number, chordType: string, octave: number = 4, selectedScaleId: string | null = null, namingMode: 'sharp' | 'flat' = 'sharp') {
+function buildPianoVoicingsUncached(rootSemi: number, chordType: string, octave: number = 4, selectedScaleId: string | null = null, namingMode: 'sharp' | 'flat' = 'sharp') {
   const ch = CH[chordType];
   const emptyRes = { triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] };
   if (!ch) return emptyRes;
@@ -234,3 +234,28 @@ export function applyInversion(
 
   return inverted.sort((a, b) => a - b);
 }
+// ─── Builder memoization ─────────────────────────────────────────────────────
+// buildPianoVoicings is a pure function of its primitive arguments. QuizScreen
+// and PlayScreen call it once per chord type during pool/count sweeps, so caching
+// turns those repeat calls into instant lookups. Callers copy (via [...]) before
+// sorting, so the cached arrays are never mutated in place.
+function memoizePiano<A extends any[], R>(
+  fn: (...args: A) => R,
+  keyFn: (...args: A) => string
+): (...args: A) => R {
+  const cache = new Map<string, R>();
+  return (...args: A): R => {
+    const k = keyFn(...args);
+    const hit = cache.get(k);
+    if (hit !== undefined) return hit;
+    const result = fn(...args);
+    cache.set(k, result);
+    return result;
+  };
+}
+
+export const buildPianoVoicings = memoizePiano(
+  buildPianoVoicingsUncached,
+  (rootSemi, chordType, octave = 4, selectedScaleId = null, namingMode = 'sharp') =>
+    `${rootSemi}|${chordType}|${octave}|${selectedScaleId ?? ''}|${namingMode}`
+);
