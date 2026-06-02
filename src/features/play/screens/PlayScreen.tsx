@@ -309,10 +309,7 @@ export default function PlayScreen() {
         case 'open': return countGuitar(buildOpenVoicings(ct, r, rootName, chordName)) > 0;
         case 'barre': return countGuitar(buildBarreVoicings(ct, r, rootName, chordName)) > 0;
         case 'triads': return countGuitar(buildTriadVoicings(ch, r, rootName, namingMode)) > 0;
-        case 'shells': {
-          const isTriad = ch.iv.length === 3;
-          return !isTriad && countGuitar(buildShellVoicings(ct, ch, r, rootName, chordName, namingMode)) > 0;
-        }
+        case 'shells': return countGuitar(buildShellVoicings(ct, ch, r, rootName, chordName, namingMode)) > 0;
         case 'drop2':
         case 'drop3':
         case 'drop2and4': {
@@ -368,7 +365,7 @@ export default function PlayScreen() {
           if (isPiano) {
             return ch.iv.length >= 4 && ch.iv.some(iv => iv === 9 || iv === 10 || iv === 11);
           }
-          return ch.iv.length > 3;
+          return ch.iv.length >= 3; // triads now get shells too (full triad on the 6 shell string sets)
         }
         case 'drop2':
         case 'drop3':
@@ -434,12 +431,11 @@ export default function PlayScreen() {
   // filtered by type, exactly as before. Cuts the display path from 6 builds → 1.
   const displayGuitarGroups = React.useMemo<VoicingGroup[]>(() => {
     if (instrument === 'piano' || !currentChordDef) return [];
-    const isTriad = currentChordDef.iv.length === 3;
     switch (voicingTab) {
       case 'open': return buildOpenVoicings(chordType, rootSemi, rootNoteName, displayChordName);
       case 'barre': return buildBarreVoicings(chordType, rootSemi, rootNoteName, displayChordName);
       case 'triads': return buildTriadVoicings(currentChordDef, rootSemi, rootNoteName, namingMode);
-      case 'shells': return !isTriad ? buildShellVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode) : [];
+      case 'shells': return buildShellVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
       case 'drop2':
       case 'drop3':
       case 'drop2and4': {
@@ -458,12 +454,11 @@ export default function PlayScreen() {
     if (instrument === 'piano' || !currentChordDef) return { open: [], barre: [], triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] } as Record<string, VoicingGroup[]>;
     const sharpRoot = NOTE_SHARP[rootSemi];
     const sharpChordName = `${sharpRoot} ${currentChordDef.l}`;
-    const isTriad = currentChordDef.iv.length === 3;
     const allDrops = buildDropVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp'); // triads now have drop voicings too
     return {
       open: buildOpenVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
       barre: buildBarreVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
-      shells: !isTriad ? buildShellVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp') : [],
+      shells: buildShellVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp'),
       drop2: allDrops.filter(g => g.voicings[0]?.type === 'drop2'),
       drop3: allDrops.filter(g => g.voicings[0]?.type === 'drop3'),
       drop2and4: allDrops.filter(g => g.voicings[0]?.type === 'drop2and4'),

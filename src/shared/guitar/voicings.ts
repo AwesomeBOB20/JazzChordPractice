@@ -679,6 +679,206 @@ function buildTriadVoicingsUncached(
   return sortVoicingGroups(groups);
 }
 
+// ============================================================
+// Triad shell & drop voicings (pure triads only)
+// ============================================================
+// A triad has just three tones, so these are generated algorithmically (not
+// hand-authored) and every candidate runs through findSpan/findSpan4's octave
+// search, so the printed grips are always playable within the span cap.
+
+type TriadInfo = {
+  rootInterval: number; rootRole: string; triadType: string;
+  triadDef: { iv: number[] }; parentRoles: string[];
+};
+
+function triadGroupChordLabel(
+  triad: TriadInfo, rootSemi: number, rootNoteName: string,
+  fullChordName: string, namingMode: 'sharp' | 'flat',
+  chordDef: { r: string[]; f?: string[] }
+): string {
+  const triadRootSemi = (rootSemi + triad.rootInterval) % 12;
+  const formulaIdx = chordDef.r.indexOf(triad.rootRole);
+  const formulaForTriadRoot = chordDef.f ? chordDef.f[formulaIdx] : triad.rootRole;
+  const spelledRoot = spellInterval(rootSemi, formulaForTriadRoot, namingMode === 'flat');
+  return (triad.rootRole === 'root' && rootNoteName)
+    ? (fullChordName || `${rootNoteName} ${TRIAD_FULL_NAMES[triad.triadType] ?? triad.triadType}`)
+    : triadChordLabel(triad.triadType, triadRootSemi, namingMode, spelledRoot);
+}
+
+const triadRoleToFormula = (role: string, chordDef: { r: string[]; f?: string[] }) => {
+  const idx = chordDef.r.indexOf(role);
+  const raw = (idx !== -1 && chordDef.f?.[idx] != null) ? chordDef.f[idx] : role;
+  const f = raw.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
+  return f === 'root' ? '1' : f;
+};
+
+const TRIAD_INV_NAME = ['Root Pos', '1st Inv', '2nd Inv'];
+
+// One playable grip per inversion (the bass tone sits on the lowest string of the
+// set). On 4-string sets one tone is doubled; the doubled tone AND the octave
+// layout are chosen to MINIMISE the hand span, so grips stay compact instead of
+// being forced into a fixed (often unplayably wide) shape.
+function placeTriadInversionGrips(
+  triad: TriadInfo, triadRootSemi: number, strings: number[], maxSpan: number,
+  chordDef: { r: string[]; f?: string[] }
+): { fretArr: VoicingFret[]; bassRole: string; bassToneIdx: number; finalName: string }[] {
+  const nStr = strings.length;
+  const out: { fretArr: VoicingFret[]; bassRole: string; bassToneIdx: number; finalName: string }[] = [];
+
+  for (let bassTone = 0; bassTone < 3; bassTone++) {
+    // string→tone assignments: lowest string carries the inversion bass; the rest
+    // are free as long as all three tones appear (4-string sets double one tone).
+    const assigns: number[][] = [];
+    const enumerate = (idx: number, cur: number[]) => {
+      if (idx === nStr) { if (new Set(cur).size === 3) assigns.push(cur.slice()); return; }
+      for (let t = 0; t < 3; t++) { cur.push(t); enumerate(idx + 1, cur); cur.pop(); }
+    };
+    enumerate(1, [bassTone]);
+
+    let best: { placed: { fret: number; role: string; stringIdx: number }[]; asg: number[]; span: number } | null = null;
+    for (const asg of assigns) {
+      const inputs = strings.map((strIdx, i) => {
+        const toneIdx = asg[i];
+        const pc = (triadRootSemi + triad.triadDef.iv[toneIdx]) % 12;
+        const openPC = GS[strIdx] % 12;
+        return { fret: (((pc - openPC) % 12) + 12) % 12, role: triad.parentRoles[toneIdx], stringIdx: strIdx };
+      });
+      const placed = nStr === 4 ? findSpan4(inputs, false, maxSpan) : findSpan(inputs, false, maxSpan);
+      if (!placed) continue;
+      const nz = placed.filter(f => f.fret > 0).map(f => f.fret);
+      const span = nz.length ? Math.max(...nz) - Math.min(...nz) : 0;
+      if (!best || span < best.span) best = { placed, asg, span };
+    }
+    if (!best) continue;
+
+    const fretArr: VoicingFret[] = Array(6).fill(null).map(() => ({ fret: null, role: null, finger: 0 }));
+    best.placed.forEach(f => { fretArr[f.stringIdx] = { fret: f.fret, role: f.role, finger: 0 }; });
+    out.push({
+      fretArr,
+      bassRole: triad.parentRoles[bassTone],
+      bassToneIdx: bassTone,
+      finalName: best.asg.map(t => triadRoleToFormula(triad.parentRoles[t], chordDef)).join('-'),
+    });
+  }
+  return out;
+}
+
+// Shells for triads: skip-string sets ONLY (643 / 532 / 421); the adjacent sets
+// (654/543/432) are ordinary close triads already covered by the Triads tab.
+// Each set shows the most-compact grip per inversion.
+function buildTriadShellVoicings(
+  chordType: string, chordDef: { iv: number[]; r: string[]; f?: string[] },
+  rootSemi: number, rootNoteName: string = '', fullChordName: string = '',
+  namingMode: 'sharp' | 'flat' = 'sharp'
+): VoicingGroup[] {
+  if (chordDef.iv.length !== 3) return [];
+  const BASS_LABEL: Record<number, string> = { 0: 'E Bass', 1: 'A Bass', 2: 'D Bass' };
+  const groupMap = new Map<string, Voicing[]>();
+
+  for (const triad of findTriads(chordDef)) {
+    const triadRootSemi = (rootSemi + triad.rootInterval) % 12;
+    const chordLabel = triadGroupChordLabel(triad, rootSemi, rootNoteName, fullChordName, namingMode, chordDef);
+    for (const strings of SHELL_STRING_SETS_TRIAD) {
+      for (const grip of placeTriadInversionGrips(triad, triadRootSemi, strings, 5, chordDef)) {
+        const fp = makeFingerprint(grip.fretArr);
+        const groupLabel = BASS_LABEL[strings[0]] ?? `String ${6 - strings[0]} Bass`;
+        if (!groupMap.has(groupLabel)) groupMap.set(groupLabel, []);
+        if (groupMap.get(groupLabel)!.some(v => v.fingerprint === fp)) continue;
+        groupMap.get(groupLabel)!.push({
+          name: grip.finalName,
+          chordLabel: String(chordLabel),
+          frets: assignFingers(grip.fretArr),
+          fingerprint: fp,
+          bassNote: grip.bassRole,
+          type: 'shell',
+        });
+      }
+    }
+  }
+
+  const groups: VoicingGroup[] = [];
+  groupMap.forEach((voicings, label) => { if (voicings.length > 0) groups.push({ label, stringNums: label, voicings }); });
+  return sortVoicingGroups(groups);
+}
+
+// Drop voicings for triads:
+//   • Drop 3   → 6-4-3-2 / 5-3-2-1, doubling the inversion's bass across the skip (X X Y Z),
+//     which is naturally compact (span ≤5).
+//   • Drop 2&4 → 6-5-3-2 / 5-4-2-1, the most-compact grip per inversion. Forcing the bass
+//     doubled on top spans 6+ frets (unplayable), so the doubled tone floats for playability.
+function buildTriadDropVoicings(
+  chordDef: { iv: number[]; r: string[]; f?: string[] },
+  rootSemi: number, rootNoteName: string = '', fullChordName: string = '',
+  namingMode: 'sharp' | 'flat' = 'sharp'
+): VoicingGroup[] {
+  if (chordDef.iv.length !== 3) return [];
+  const groupMap = new Map<string, Voicing[]>();
+  const bassLabel = (s: number) => s === 0 ? 'E Bass' : s === 1 ? 'A Bass' : 'D Bass';
+
+  const inversions = [
+    { name: 'Root Pos', order: [0, 1, 2] },
+    { name: '1st Inv',  order: [1, 2, 0] },
+    { name: '2nd Inv',  order: [2, 0, 1] },
+  ];
+
+  for (const triad of findTriads(chordDef)) {
+    const triadRootSemi = (rootSemi + triad.rootInterval) % 12;
+    const chordLabel = triadGroupChordLabel(triad, rootSemi, rootNoteName, fullChordName, namingMode, chordDef);
+
+    // Drop 3 — double the inversion's bass across the skip (X X Y Z).
+    for (const inv of inversions) {
+      const voiceTones = [inv.order[0], inv.order[0], inv.order[1], inv.order[2]];
+      for (const strings of [[0, 2, 3, 4], [1, 3, 4, 5]]) {
+        const inputs = strings.map((strIdx, i) => {
+          const toneIdx = voiceTones[i];
+          const pc = (triadRootSemi + triad.triadDef.iv[toneIdx]) % 12;
+          const openPC = GS[strIdx] % 12;
+          return { fret: (((pc - openPC) % 12) + 12) % 12, role: triad.parentRoles[toneIdx], stringIdx: strIdx };
+        });
+        const best = findSpan4(inputs, false, 5);
+        if (!best) continue;
+        const fretArr: VoicingFret[] = Array(6).fill(null).map(() => ({ fret: null, role: null, finger: 0 }));
+        best.forEach(f => { fretArr[f.stringIdx] = { fret: f.fret, role: f.role, finger: 0 }; });
+        const fp = makeFingerprint(fretArr);
+        const groupLabel = `Drop 3 (${bassLabel(strings[0])})`;
+        if (!groupMap.has(groupLabel)) groupMap.set(groupLabel, []);
+        if (groupMap.get(groupLabel)!.some(v => v.fingerprint === fp)) continue;
+        const finalName = voiceTones.map(t => triadRoleToFormula(triad.parentRoles[t], chordDef)).join('-');
+        groupMap.get(groupLabel)!.push({
+          name: `Drop 3 (${inv.name}) [${finalName}]`,
+          chordLabel: String(chordLabel),
+          frets: assignFingers(fretArr),
+          fingerprint: fp,
+          bassNote: triad.parentRoles[voiceTones[0]],
+          type: 'drop3',
+        });
+      }
+    }
+
+    // Drop 2&4 — most-compact grip per inversion on the 2+skip+2 sets.
+    for (const strings of [[0, 1, 3, 4], [1, 2, 4, 5]]) {
+      for (const grip of placeTriadInversionGrips(triad, triadRootSemi, strings, 5, chordDef)) {
+        const fp = makeFingerprint(grip.fretArr);
+        const groupLabel = `Drop 2 & 4 (${bassLabel(strings[0])})`;
+        if (!groupMap.has(groupLabel)) groupMap.set(groupLabel, []);
+        if (groupMap.get(groupLabel)!.some(v => v.fingerprint === fp)) continue;
+        groupMap.get(groupLabel)!.push({
+          name: `Drop 2 & 4 (${TRIAD_INV_NAME[grip.bassToneIdx]}) [${grip.finalName}]`,
+          chordLabel: String(chordLabel),
+          frets: assignFingers(grip.fretArr),
+          fingerprint: fp,
+          bassNote: grip.bassRole,
+          type: 'drop2and4',
+        });
+      }
+    }
+  }
+
+  const groups: VoicingGroup[] = [];
+  groupMap.forEach((voicings, label) => { if (voicings.length > 0) groups.push({ label, stringNums: label, voicings }); });
+  return sortVoicingGroups(groups);
+}
+
 
 
 // ============================================================
@@ -741,6 +941,15 @@ const SHELL_STRING_SETS_3: number[][] = [
   [1, 2, 3],  // 543
   [1, 3, 4],  // 532
   [2, 3, 4],  // 432
+  [2, 4, 5],  // 421
+];
+
+// Triad shells use ONLY the skip-string sets. The adjacent sets (654/543/432)
+// are just ordinary close triads (already covered by the Triads tab), so a triad
+// "shell" is the skip-string voicing — one chord tone per string with a gap.
+const SHELL_STRING_SETS_TRIAD: number[][] = [
+  [0, 2, 3],  // 643
+  [1, 3, 4],  // 532
   [2, 4, 5],  // 421
 ];
 
@@ -1013,6 +1222,12 @@ function buildShellVoicingsUncached(
   fullChordName: string = '',
   namingMode: 'sharp' | 'flat' = 'sharp'
 ): VoicingGroup[] {
+  // Triads get dedicated skip-string voicings (643/532/421), one most-compact grip
+  // per inversion — see buildTriadShellVoicings.
+  if (chordDef.iv.length === 3) {
+    return buildTriadShellVoicings(chordType, chordDef, rootSemi, rootNoteName, fullChordName, namingMode);
+  }
+
   const toneSets = deriveShellToneSets(chordDef);
   if (!toneSets.length) return [];
 
@@ -1618,8 +1833,13 @@ function buildDropVoicingsUncached(
 
   const groupMap = new Map<string, Voicing[]>();
   const dropCategories = ['drop2', 'drop3', 'drop2and4'] as const;
+  // Pure triads: drop-3 and drop-2&4 are generated algorithmically below (the
+  // hand-authored triad entries are oversized / superseded). Only drop-2 still
+  // comes from the data dictionary for triads.
+  const isTriad = chordDef.iv.length === 3;
 
   for (const dropType of dropCategories) {
+    if (isTriad && dropType !== 'drop2') continue;
     for (const pass of passes) {
       const dropDefs = (DROP_VOICINGS[dropType] as any)[pass.effectiveType];
       if (!dropDefs) continue;
@@ -1705,6 +1925,7 @@ function buildDropVoicingsUncached(
 
   const groups: VoicingGroup[] = [];
   groupMap.forEach((voicings, label) => { if (voicings.length > 0) groups.push({ label, stringNums: label, voicings }); });
+  if (isTriad) groups.push(...buildTriadDropVoicings(chordDef, rootSemi, rootNoteName, fullChordName, namingMode));
   return sortVoicingGroups(groups);
 }
 
