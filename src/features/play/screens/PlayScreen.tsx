@@ -329,7 +329,19 @@ export default function PlayScreen() {
     }
   };
 
-  const eligiblePairs = React.useMemo(() => {
+  // Only the shuffle button (handleRandomNext) needs the eligible-pair list.
+  // Computing it as a useMemo forced a 12×N voicing sweep on EVERY tab switch —
+  // that was the cold first-visit lag, doing display-irrelevant work on the hot
+  // path. Now it's computed lazily on first shuffle and cached per
+  // (tab, instrument, types, octave, scale), so switching tabs never triggers it.
+  // namingMode intentionally excluded from the key: voicing *existence* is
+  // naming-independent (fingerprint/formula keyed), so flat/sharp flips reuse it.
+  const eligiblePairsCache = useRef(new Map<string, { r: number; ct: string }[]>());
+  const getEligiblePairs = (): { r: number; ct: string }[] => {
+    const cacheKey = `${voicingTab}|${instrument}|${activeTypes.join(',')}|${octave}|${selectedScaleId ?? ''}`;
+    const cache = eligiblePairsCache.current;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
     const pairs: { r: number; ct: string }[] = [];
     for (let r = 0; r < 12; r++) {
       for (const ct of activeTypes) {
@@ -338,10 +350,9 @@ export default function PlayScreen() {
         }
       }
     }
+    cache.set(cacheKey, pairs);
     return pairs;
-    // namingMode intentionally excluded: voicing *existence* is naming-independent
-    // (fingerprint/formula keyed), so flat/sharp flips must not trigger a 12×N rebuild.
-  }, [voicingTab, instrument, activeTypes, octave, selectedScaleId]);
+  };
 
   const getEligibleTypesForTab = (tab: VoicingTabKey, instr: string, types: string[]): string[] => {
     const isPiano = instr === 'piano';
@@ -387,6 +398,7 @@ export default function PlayScreen() {
       return;
     }
 
+    const eligiblePairs = getEligiblePairs();
     const filteredPairs = eligiblePairs.filter(pair => !(pair.r === rootSemi && pair.ct === chordType));
     const finalPairs = filteredPairs.length > 0 ? filteredPairs : eligiblePairs;
 

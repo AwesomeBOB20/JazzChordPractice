@@ -16,6 +16,93 @@ export const SCALE_MASKS = [
 
 export const GS = GUITAR_TUNING;
 
+// ─── Builder memoization ─────────────────────────────────────────────────────
+// The voicing builders below are pure functions of their args, but they're hot:
+// PlayScreen's eligiblePairs sweep (12 roots × N active types) and the per-tab
+// displayGuitarGroups / countGuitarGroups memos call them synchronously on the
+// JS thread every tab switch — uncached, that is multiple seconds on Hermes.
+// Wrapping each builder in a module-level cache makes the first build per
+// (chord, tab, naming) cold and every repeat an instant lookup.
+//
+// IMPORTANT: cached results are SHARED references. Callers must copy
+// (`[...]` / `.map` / `.filter`) before sorting or mutating — they already do.
+// Never add a caller that mutates a returned array/voicing object in place.
+function memoizeBuilder<F extends (...args: any[]) => any>(
+  fn: F,
+  keyFn: (...args: Parameters<F>) => string
+): F {
+  const cache = new Map<string, ReturnType<F>>();
+  return ((...args: Parameters<F>): ReturnType<F> => {
+    const key = keyFn(...args);
+    if (cache.has(key)) return cache.get(key) as ReturnType<F>;
+    const result = fn(...args);
+    cache.set(key, result);
+    return result;
+  }) as F;
+}
+
+const chordDefKey = (cd: { iv: number[]; r: string[]; f?: string[] }) =>
+  `${cd.iv.join(',')}|${cd.r.join(',')}|${(cd.f ?? []).join(',')}`;
+
+export const buildOpenVoicings = memoizeBuilder(
+  buildOpenVoicingsUncached,
+  (chordType, rootSemi, rootNoteName = '', fullChordName = '') =>
+    `O|${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}`
+);
+export const buildBarreVoicings = memoizeBuilder(
+  buildBarreVoicingsUncached,
+  (chordType, rootSemi, rootNoteName = '', fullChordName = '') =>
+    `B|${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}`
+);
+export const buildTriadVoicings = memoizeBuilder(
+  buildTriadVoicingsUncached,
+  (chordDef, rootSemi, rootNoteName = '', namingMode = 'sharp') =>
+    `T|${chordDefKey(chordDef)}|${rootSemi}|${rootNoteName}|${namingMode}`
+);
+export const buildShellVoicings = memoizeBuilder(
+  buildShellVoicingsUncached,
+  (chordType, _chordDef, rootSemi, rootNoteName = '', fullChordName = '', namingMode = 'sharp') =>
+    `S|${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}|${namingMode}`
+);
+export const buildDropVoicings = memoizeBuilder(
+  buildDropVoicingsUncached,
+  (chordType, _chordDef, rootSemi, rootNoteName = '', fullChordName = '', namingMode = 'sharp') =>
+    `D|${chordType}|${rootSemi}|${rootNoteName}|${fullChordName}|${namingMode}`
+);
+export const buildHardcodedShapeVoicings = memoizeBuilder(
+  buildHardcodedShapeVoicingsUncached,
+  (chordType, rootSemi, namingMode = 'sharp', baseOnly = false) =>
+    `H|${chordType}|${rootSemi}|${namingMode}|${baseOnly ? 1 : 0}`
+);
+export const buildScaleVoicings = memoizeBuilder(
+  buildScaleVoicingsUncached,
+  (scaleIds, _scales, rootSemi, chordIvs, namingMode = 'sharp') =>
+    `SC|${scaleIds.join(',')}|${rootSemi}|${chordIvs.join(',')}|${namingMode}`
+);
+// buildArpVoicings takes a (cached, stable-reference) scale-voicing array as its
+// first arg, so it can't use the string-key memoizer. A WeakMap keyed on that
+// array — with an inner string key for the remaining primitive args — caches arp
+// subsets so navigating arp subsets back and forth is instant and doesn't leak
+// (entries are GC'd when the parent scale array is dropped).
+const _arpCache = new WeakMap<object, Map<string, ScaleVoicing[]>>();
+export function buildArpVoicings(
+  parentScaleVoicings: ScaleVoicing[],
+  rootSemi: number,
+  chordIvs: number[],
+  chordRoles: string[],
+  chordFormula: string[],
+  chordName: string = 'Arpeggio'
+): ScaleVoicing[] {
+  let inner = _arpCache.get(parentScaleVoicings);
+  if (!inner) { inner = new Map(); _arpCache.set(parentScaleVoicings, inner); }
+  const key = `${rootSemi}|${chordIvs.join(',')}|${chordName}`;
+  const hit = inner.get(key);
+  if (hit) return hit;
+  const result = buildArpVoicingsUncached(parentScaleVoicings, rootSemi, chordIvs, chordRoles, chordFormula, chordName);
+  inner.set(key, result);
+  return result;
+}
+
 export interface VoicingFret {
   fret: number | null;
   role: string | null;
@@ -176,7 +263,7 @@ export const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; varia
   ]
 };
 
-export function buildBarreVoicings(
+function buildBarreVoicingsUncached(
   chordType: string,
   rootSemi: number,
   rootNoteName: string = '',
@@ -243,7 +330,7 @@ export function buildBarreVoicings(
   return sortVoicingGroups(groups);
 }
 
-export function buildOpenVoicings(
+function buildOpenVoicingsUncached(
   chordType: string,
   rootSemi: number,
   rootNoteName: string = '',
@@ -520,7 +607,7 @@ function sortVoicingGroups(groups: VoicingGroup[]): VoicingGroup[] {
 // ============================================================
 // buildTriadVoicings — Layer 1 main export
 // ============================================================
-export function buildTriadVoicings(
+function buildTriadVoicingsUncached(
   chordDef: { iv: number[]; r: string[]; f?: string[] },
   rootSemi: number,
   rootNoteName: string = '',
@@ -918,7 +1005,7 @@ function placeShellToneSet(
   return null;
 }
 
-export function buildShellVoicings(
+function buildShellVoicingsUncached(
   chordType: string,
   chordDef: { iv: number[]; r: string[]; f?: string[] },
   rootSemi: number,
@@ -1015,7 +1102,7 @@ export interface ScaleVoicing {
   maxFret: number;
 }
 
-export function buildScaleVoicings(
+function buildScaleVoicingsUncached(
   scaleIds: string[],
   scales: Record<string, { name: string; iv: number[]; r: string[]; f: string[] }>,
   rootSemi: number,
@@ -1291,7 +1378,7 @@ export function proximitySort(voicings: Voicing[]): Voicing[] {
   return res;
 }
 
-export function buildArpVoicings(
+function buildArpVoicingsUncached(
   parentScaleVoicings: ScaleVoicing[],
   rootSemi: number,
   chordIvs: number[],
@@ -1428,7 +1515,7 @@ function findSpan4(
   return candidates[0].v;
 }
 
-export function buildDropVoicings(
+function buildDropVoicingsUncached(
   chordType: string,
   chordDef: { iv: number[]; r: string[]; f?: string[] },
   rootSemi: number,
@@ -1627,7 +1714,7 @@ export function buildDropVoicings(
  * Bridge function to make HARDCODED_SHAPES work with the current UI.
  * This maps the nested array format to the ScaleVoicing interface.
  */
-export function buildHardcodedShapeVoicings(
+function buildHardcodedShapeVoicingsUncached(
   chordType: string,
   rootSemi: number,
   namingMode: 'sharp' | 'flat' = 'sharp',
