@@ -200,6 +200,67 @@ function buildCategoryOptions(
   return opts;
 }
 
+// Pitch-class-set signature for a chord type at a given root (octave-independent).
+function chordPcSig(type: string, root: number): string | null {
+  const ch = CH[type];
+  if (!ch) return null;
+  return [...new Set(ch.iv.map(iv => (((root + iv) % 12) + 12) % 12))]
+    .sort((a, b) => a - b)
+    .join(',');
+}
+
+// Given the built options and the primary correct index, return EVERY index that
+// is genuinely a correct answer.
+//
+// For chords (the "any containing chord" rule): an option is correct when its
+// chord tones contain every pitch class actually displayed. So a shown D m7
+// (D F A C) also accepts m9 / m11 / m13, etc. — any chord those notes fit into.
+// (Falls back to exact pitch-class-set equivalence if the displayed notes are
+// unavailable.)
+//
+// For the category modes (scale/arp/interval/shape) two options are equivalent
+// when they share an identical key or label.
+function expandCorrectIdxs(
+  opts: { root: number; type: string; label: string }[],
+  baseIdxs: number[],
+  category: 'chord' | 'scale' | 'arp' | 'interval' | 'shape',
+  shownPcs?: number[]
+): number[] {
+  const result = new Set(baseIdxs.filter(i => i >= 0 && i < opts.length));
+  if (result.size === 0) return baseIdxs;
+
+  if (category === 'chord') {
+    const shown = (shownPcs && shownPcs.length)
+      ? [...new Set(shownPcs.map(pc => (((pc % 12) + 12) % 12)))]
+      : null;
+    if (shown) {
+      opts.forEach((o, i) => {
+        const ch = CH[o.type];
+        if (!ch) return;
+        const optPcs = new Set(ch.iv.map(iv => (((o.root + iv) % 12) + 12) % 12));
+        if (shown.every(pc => optPcs.has(pc))) result.add(i);
+      });
+    } else {
+      for (const ci of [...result]) {
+        const target = opts[ci] && chordPcSig(opts[ci].type, opts[ci].root);
+        if (!target) continue;
+        opts.forEach((o, i) => {
+          if (chordPcSig(o.type, o.root) === target) result.add(i);
+        });
+      }
+    }
+  } else {
+    for (const ci of [...result]) {
+      const correct = opts[ci];
+      if (!correct) continue;
+      opts.forEach((o, i) => {
+        if (i !== ci && (o.type === correct.type || o.label === correct.label)) result.add(i);
+      });
+    }
+  }
+  return [...result].sort((a, b) => a - b);
+}
+
 export default function QuizScreen() {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, stopAudio: onStop, playSingleNote: onNotePress } = useAudio();
@@ -882,6 +943,26 @@ export default function QuizScreen() {
         }
       }
 
+      // Pitch classes actually shown for this question — used to mark every
+      // option whose chord contains all of them as a valid answer.
+      let shownPcs: number[] = [];
+      if (category === 'chord') {
+        if (instrument === 'guitar' && finalGuitarVoicing?.frets) {
+          finalGuitarVoicing.frets.forEach((fr, str) => {
+            if (fr.fret !== null) shownPcs.push((GS_MIDI[str] + fr.fret) % 12);
+          });
+        } else if (finalPianoVoicing?.notes) {
+          shownPcs = finalPianoVoicing.notes.map(n => n % 12);
+        }
+        if (shownPcs.length === 0) {
+          shownPcs = getChordNotes(finalRoot, finalType, octave).map(n => n % 12);
+        }
+      }
+
+      // Mark every option that is genuinely correct (handles cases where two
+      // choices name the same chord / scale / arp / interval / shape).
+      cIdxs = expandCorrectIdxs(opts, cIdxs, category, shownPcs);
+
       setQuestionVoicingTab(finalVoicingTab);
       setGuitarVoicing(finalGuitarVoicing);
       setPianoVoicing(finalPianoVoicing);
@@ -1107,14 +1188,15 @@ export default function QuizScreen() {
             <View style={styles.cardRight}>
               <View style={styles.optionsGrid}>
                 {options.map((opt, idx) => {
-                  const isChosen = chosenIdx === idx;
                   const isCorrectOpt = correctIdxs.includes(idx);
                   let bg = t.bg3;
                   let border = t.border;
                   let textColor = t.txt1;
                   if (revealed) {
+                    // Once revealed, every option is colored: green if it's a
+                    // correct answer, red otherwise (chosen or not).
                     if (isCorrectOpt) { bg = CORRECT_COLOR; border = CORRECT_COLOR; textColor = '#fff'; }
-                    else if (isChosen) { bg = WRONG_COLOR; border = WRONG_COLOR; textColor = '#fff'; }
+                    else { bg = WRONG_COLOR; border = WRONG_COLOR; textColor = '#fff'; }
                   }
                   return (
                     <Animated.View key={idx} style={revealed && isCorrectOpt ? { transform: [{ scale: correctScaleAnim }] } : undefined}>
@@ -1125,8 +1207,25 @@ export default function QuizScreen() {
                           handleAnswer(idx);
                         } else if (quizCategory === 'chord') {
                           stopSeqFlash();
-                          const vcs = getPianoVoicingsForTab(questionVoicingTab, opt.type, questionRoot, namingMode);
-                          const optionNotes = vcs.length > 0 ? vcs[0].notes : getChordNotes(questionRoot, opt.type, octave);
+                          let optionNotes: number[] = [];
+                          if (opt.type === questionType && opt.root === questionRoot) {
+                            // Tapping the question's own chord: replay exactly what's shown.
+                            optionNotes = activeMidiNotes;
+                          } else if (activeQuizInstrument === 'guitar') {
+                            // Build in the real guitar register (frets -> MIDI), matching how
+                            // the question is voiced — not the piano builder seeded with the
+                            // low guitar-octave setting, which sounded an octave too low.
+                            const gv = getGuitarVoicingsForTab(questionVoicingTab, opt.type, questionRoot, namingMode);
+                            const fretted = gv.find(v => v.frets && v.frets.length > 0);
+                            if (fretted) {
+                              fretted.frets.forEach((fr, str) => { if (fr.fret !== null) optionNotes.push(GS_MIDI[str] + fr.fret); });
+                              optionNotes.sort((a, b) => a - b);
+                            }
+                            if (optionNotes.length === 0) optionNotes = getChordNotes(questionRoot, opt.type, 3, 'guitar');
+                          } else {
+                            const vcs = getPianoVoicingsForTab(questionVoicingTab, opt.type, questionRoot, namingMode);
+                            optionNotes = vcs.length > 0 ? vcs[0].notes : getChordNotes(questionRoot, opt.type, octave);
+                          }
                           onPlay(optionNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
                           if (arp) fireSeqFlash(optionNotes);
                           else { pianoRef.current?.flashAll(optionNotes); fretboardRef.current?.flashAll(optionNotes); }

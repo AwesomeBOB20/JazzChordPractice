@@ -294,25 +294,28 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
     };
   }
 
-  // Anchor to the nut if the box plays any open string, so low frets aren't skipped.
+  // Anchor to the nut only for a genuine open-position box (low fretted notes). A box
+  // shifted up the neck still shows its open strings above the nut, but its fretted
+  // notes are windowed with a starting-fret label instead of a long empty neck.
   const hasOpenString = notes.some((n: any) => n.fret === 0);
-  const isOpen = minFret <= 1 || hasOpenString;
-  const startFret = isOpen ? 0 : minFret - 1;
+  const isOpenPosition = minFret <= 1;
+  const showOpenStrings = isOpenPosition || hasOpenString;
+  const startFret = isOpenPosition ? 0 : minFret - 1;
   const NUM_FRETS = Math.max(5, maxFret - startFret + 1);
   const numDisplayStrings = 6;
   const fretNum = startFret + 1;
   const fretSuffix = fretNum === 1 ? 'st' : fretNum === 2 ? 'nd' : fretNum === 3 ? 'rd' : 'th';
-  const fretLabel = isOpen ? '' : `${fretNum}${fretSuffix}`;
+  const fretLabel = isOpenPosition ? '' : `${fretNum}${fretSuffix}`;
   const SVG_W = MARGIN_LEFT + STR_SPACING * (numDisplayStrings - 1) + MARGIN_LEFT;
   const SVG_H = MARGIN_TOP + FRET_SPACING * NUM_FRETS + MARGIN_BOTTOM;
 
   return (
     <View style={{ alignItems: 'center' }}>
-      <FretboardMiniMap minFret={isOpen ? 1 : minFret} maxFret={maxFret} theme={theme} />
+      <FretboardMiniMap minFret={isOpenPosition ? 1 : minFret} maxFret={maxFret} theme={theme} />
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
-          {isOpen && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * (numDisplayStrings - 1) + 1.75} height={5} fill={theme.txt1} /> )}
-        {!isOpen && ( <SvgText x={MARGIN_LEFT - 20} y={MARGIN_TOP + FRET_SPACING * 0.6} fontSize={14} fill={theme.txt2} textAnchor="end" fontWeight="700">{fretLabel}</SvgText> )}
+          {isOpenPosition && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * (numDisplayStrings - 1) + 1.75} height={5} fill={theme.txt1} /> )}
+        {!isOpenPosition && ( <SvgText x={MARGIN_LEFT - 20} y={MARGIN_TOP + FRET_SPACING * 0.6} fontSize={14} fill={theme.txt2} textAnchor="end" fontWeight="700">{fretLabel}</SvgText> )}
         {Array.from({ length: NUM_FRETS + 1 }).map((_, fi) => ( <Line key={`fret-${fi}`} x1={MARGIN_LEFT} y1={MARGIN_TOP + fi * FRET_SPACING} x2={MARGIN_LEFT + STR_SPACING * (numDisplayStrings - 1)} y2={MARGIN_TOP + fi * FRET_SPACING} stroke={theme.border} strokeWidth={1} /> ))}
         {[0,1,2,3,4,5].map((strIdx, displayPos) => {
           const x = MARGIN_LEFT + displayPos * STR_SPACING;
@@ -349,7 +352,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
             
             // CORRECT CLIPPING LOGIC
             if (fret < 0) return null;
-            if (fret === 0 && !isOpen) return null;
+            if (fret === 0 && !showOpenStrings) return null;
             if (fret > 0 && (fret <= startFret || fret > startFret + NUM_FRETS)) return null;
             
             const isOccupied = notes.some((n: any) => n.stringIdx === stringIdx && n.fret === fret);
@@ -503,14 +506,18 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
   if (voicing.capo && voicing.capo > 0) activeFretNums.push(voicing.capo);
   const minFret = (voicing.type === 'open' || activeFretNums.length === 0) ? 1 : Math.min(...activeFretNums);
   const maxFret = activeFretNums.length ? Math.max(...activeFretNums) : 5;
-  // If the chord actually plays any open string, it's an open-position grip — anchor
-  // the window to the nut so the low frets (1, 2, …) show instead of being skipped.
+  // Anchor the grid to the nut only for a genuine open-position grip (the fretted
+  // notes sit at/near the nut). An open shape pushed up the neck — e.g. by the
+  // octave setting — has open strings AND high fretted notes; in that case window
+  // the fretted notes and label the starting fret, while still drawing the open
+  // strings above the nut, rather than a full-length neck with a huge empty gap.
   const hasOpenString = voicing.frets.some((f: any) => f.fret === 0);
-  const isOpen = minFret <= 1 || hasOpenString;
-  const startFret = isOpen ? 0 : minFret - 1;
+  const isOpenPosition = minFret <= 1;
+  const showOpenStrings = isOpenPosition || hasOpenString;
+  const startFret = isOpenPosition ? 0 : minFret - 1;
   const fretNum = startFret + 1;
   const fretSuffix = fretNum === 1 ? 'st' : fretNum === 2 ? 'nd' : fretNum === 3 ? 'rd' : 'th';
-  const fretLabel = isOpen ? '' : `${fretNum}${fretSuffix}`;
+  const fretLabel = isOpenPosition ? '' : `${fretNum}${fretSuffix}`;
   const NUM_FRETS = Math.max(5, maxFret - startFret + 1);
   const SVG_W = MARGIN_LEFT + STR_SPACING * 5 + MARGIN_LEFT;
   const SVG_H = MARGIN_TOP + FRET_SPACING * NUM_FRETS + MARGIN_BOTTOM;
@@ -542,7 +549,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
 
   return (
     <View style={{ alignItems: 'center' }}>
-      <FretboardMiniMap minFret={isOpen ? 1 : minFret} maxFret={maxFret} theme={theme} />
+      <FretboardMiniMap minFret={isOpenPosition ? 1 : minFret} maxFret={maxFret} theme={theme} />
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
           {displayStrings.map((strIdx, displayPos) => {
@@ -552,14 +559,14 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           const color = colorMode === 'roles' ? (fretObj.role ? (ROLE_COLORS_GLOBAL[normRoleTop] ?? theme.accent) : theme.accent) : theme.accent;
           return (
             <React.Fragment key={`top-${strIdx}`}>
-              {fretObj.fret === null ? ( <SvgText x={cx} y={MARGIN_TOP - 13} fontSize={16} fill={theme.txt3} textAnchor="middle" fontWeight="700">×</SvgText> ) : 
-               fretObj.fret === 0 ? null : 
+              {fretObj.fret === null ? ( <SvgText x={cx} y={MARGIN_TOP - 13} fontSize={16} fill={theme.txt3} textAnchor="middle" fontWeight="700">×</SvgText> ) :
+               fretObj.fret === 0 ? null :
                ( <SvgText x={cx} y={MARGIN_TOP - 15} fontSize={13} fill={theme.txt2} textAnchor="middle" fontWeight="600">{STRING_LABELS[strIdx]}</SvgText> )}
             </React.Fragment>
           );
         })}
-        {isOpen && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * 5 + 1.75} height={5} fill={theme.txt1} /> )}
-        {!isOpen && ( <SvgText x={MARGIN_LEFT - 20} y={MARGIN_TOP + FRET_SPACING * 0.6} fontSize={14} fill={theme.txt2} textAnchor="end" fontWeight="700">{fretLabel}</SvgText> )}
+        {isOpenPosition && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * 5 + 1.75} height={5} fill={theme.txt1} /> )}
+        {!isOpenPosition && ( <SvgText x={MARGIN_LEFT - 20} y={MARGIN_TOP + FRET_SPACING * 0.6} fontSize={14} fill={theme.txt2} textAnchor="end" fontWeight="700">{fretLabel}</SvgText> )}
         {Array.from({ length: NUM_FRETS + 1 }).map((_, fi) => ( <Line key={`fret-${fi}`} x1={MARGIN_LEFT} y1={MARGIN_TOP + fi * FRET_SPACING} x2={MARGIN_LEFT + STR_SPACING * 5} y2={MARGIN_TOP + fi * FRET_SPACING} stroke={theme.border} strokeWidth={1} /> ))}
         {displayStrings.map((strIdx, displayPos) => {
           const x = MARGIN_LEFT + displayPos * STR_SPACING;
@@ -594,9 +601,9 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           }).map((note: any) => {
             const { stringIdx, fret, role, formula } = note;
             
-            // CORRECT CLIPPING LOGIC: Hide open strings if not at the nut, hide frets outside the drawn boxes
+            // CORRECT CLIPPING LOGIC: Hide open strings if not shown, hide frets outside the drawn boxes
             if (fret < 0) return null;
-            if (fret === 0 && !isOpen) return null;
+            if (fret === 0 && !showOpenStrings) return null;
             if (fret > 0 && (fret <= startFret || fret > startFret + NUM_FRETS)) return null;
             
             const isOccupied = voicing.frets[stringIdx]?.fret === fret;
