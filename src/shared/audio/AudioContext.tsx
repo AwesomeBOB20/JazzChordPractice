@@ -26,6 +26,7 @@ interface AudioContextType {
   stopAudio: () => void;
   playTone: (midi: number, volume: number) => void;
   stopTone: () => void;
+  playHoldChord: (midiNotes: number[], volume: number) => void;
   playArpLoop: (midiNotes: number[], guitar?: boolean) => void;
   playProgression: (sequence: ProgressionMeasure[], onChordChange: (seqIdx: number, chordIdx: number) => void, onEnd: () => void, loop?: boolean) => void;
   stopProgression: () => void;
@@ -72,6 +73,10 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     playerRef.current?.stopTone();
   }, []);
 
+  const playHoldChord = useCallback((midiNotes: number[], volume: number) => {
+    playerRef.current?.playHoldChord(midiNotes, volume);
+  }, []);
+
   const playArpLoop = useCallback((midiNotes: number[], guitar?: boolean) => {
     const { bpm, arpSwing } = useSettingsStore.getState();
     playerRef.current?.playArpLoop(midiNotes, bpm, 80, guitar ?? false, arpSwing);
@@ -95,7 +100,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AudioContext.Provider value={{ playChord, playSingleNote, stopAudio, playTone, stopTone, playArpLoop, playProgression, stopProgression, setProgressionLooping }}>
+    <AudioContext.Provider value={{ playChord, playSingleNote, stopAudio, playTone, stopTone, playHoldChord, playArpLoop, playProgression, stopProgression, setProgressionLooping }}>
       <SoundfontPlayer ref={playerRef as any} />
       {children}
     </AudioContext.Provider>

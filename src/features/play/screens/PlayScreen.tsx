@@ -126,7 +126,7 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
 
 export default function PlayScreen() {
   const insets = useSafeAreaInsets();
-  const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop } = useAudio();
+  const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
   const { bpm, arp, setArp, playMode, setPlayMode, octave, theme, labelMode, instrument, setInstrument, sortMode, scaleOverlay } = useSettingsStore();
   const { rootSemi, chordType, namingMode, shiftRoot, cycleType, inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
@@ -193,9 +193,10 @@ export default function PlayScreen() {
         const currentArp = isScaleOrArp ? true : arp;
         const isHold = playMode === 'hold' && !currentArp;
         const isArpHold = playMode === 'hold' && currentArp;
-        if (isArpHold) { onArpLoop?.(notesToPlay, true); fireSeqFlash(notesToPlay, true); setIsPlaying(true); } 
-        else { onPlay(notesToPlay, { guitar: true, forceArp: currentArp, scale: voicingTab === 'scales', hold: isHold });
-          if (currentArp) fireSeqFlash(notesToPlay); else { fretboardRef.current?.flashAll(notesToPlay); if (isHold) setIsPlaying(true); }
+        if (isArpHold) { onArpLoop?.(notesToPlay, true); fireSeqFlash(notesToPlay, true); setIsPlaying(true); }
+        else if (isHold) { onHoldChord(notesToPlay, 80); fretboardRef.current?.flashAll(notesToPlay); setIsPlaying(true); }
+        else { onPlay(notesToPlay, { guitar: true, forceArp: currentArp, scale: voicingTab === 'scales' });
+          if (currentArp) fireSeqFlash(notesToPlay); else fretboardRef.current?.flashAll(notesToPlay);
         }
       }
     } else {
@@ -204,9 +205,10 @@ export default function PlayScreen() {
         const currentArp = isScaleOrArp ? true : arp;
         const isHold = playMode === 'hold' && !currentArp;
         const isArpHold = playMode === 'hold' && currentArp;
-        if (isArpHold) { onArpLoop?.(pianoNotes, false); fireSeqFlash(pianoNotes, true); setIsPlaying(true); } 
-        else { onPlay(pianoNotes, { guitar: false, forceArp: currentArp, scale: voicingTab === 'scales', hold: isHold });
-          if (currentArp) fireSeqFlash(pianoNotes); else { pianoRef.current?.flashAll(pianoNotes); if (isHold) setIsPlaying(true); }
+        if (isArpHold) { onArpLoop?.(pianoNotes, false); fireSeqFlash(pianoNotes, true); setIsPlaying(true); }
+        else if (isHold) { onHoldChord(pianoNotes, 80); pianoRef.current?.flashAll(pianoNotes); setIsPlaying(true); }
+        else { onPlay(pianoNotes, { guitar: false, forceArp: currentArp, scale: voicingTab === 'scales' });
+          if (currentArp) fireSeqFlash(pianoNotes); else pianoRef.current?.flashAll(pianoNotes);
         }
       }
     }
@@ -252,9 +254,10 @@ export default function PlayScreen() {
         const currentArp = isScaleOrArp ? true : arp;
         const isHold = playMode === 'hold' && !currentArp;
         const isArpHold = playMode === 'hold' && currentArp;
-        if (isArpHold) { onArpLoop?.(notesToPlay, true); fireSeqFlash(notesToPlay, true); setIsPlaying(true); } 
-        else { onPlay(notesToPlay, { guitar: true, forceArp: currentArp, scale: voicingTab === 'scales', hold: isHold });
-          if (currentArp) fireSeqFlash(notesToPlay); else { fretboardRef.current?.flashAll(notesToPlay); if (isHold) setIsPlaying(true); }
+        if (isArpHold) { onArpLoop?.(notesToPlay, true); fireSeqFlash(notesToPlay, true); setIsPlaying(true); }
+        else if (isHold) { onHoldChord(notesToPlay, 80); fretboardRef.current?.flashAll(notesToPlay); setIsPlaying(true); }
+        else { onPlay(notesToPlay, { guitar: true, forceArp: currentArp, scale: voicingTab === 'scales' });
+          if (currentArp) fireSeqFlash(notesToPlay); else fretboardRef.current?.flashAll(notesToPlay);
         }
       }
     } else {
@@ -263,9 +266,10 @@ export default function PlayScreen() {
         const currentArp = isScaleOrArp ? true : arp;
         const isHold = playMode === 'hold' && !currentArp;
         const isArpHold = playMode === 'hold' && currentArp;
-        if (isArpHold) { onArpLoop?.(pianoNotes, false); fireSeqFlash(pianoNotes, true); setIsPlaying(true); } 
-        else { onPlay(pianoNotes, { guitar: false, forceArp: currentArp, scale: voicingTab === 'scales', hold: isHold });
-          if (currentArp) fireSeqFlash(pianoNotes); else { pianoRef.current?.flashAll(pianoNotes); if (isHold) setIsPlaying(true); }
+        if (isArpHold) { onArpLoop?.(pianoNotes, false); fireSeqFlash(pianoNotes, true); setIsPlaying(true); }
+        else if (isHold) { onHoldChord(pianoNotes, 80); pianoRef.current?.flashAll(pianoNotes); setIsPlaying(true); }
+        else { onPlay(pianoNotes, { guitar: false, forceArp: currentArp, scale: voicingTab === 'scales' });
+          if (currentArp) fireSeqFlash(pianoNotes); else pianoRef.current?.flashAll(pianoNotes);
         }
       }
     }
@@ -1002,8 +1006,25 @@ export default function PlayScreen() {
   const pianoSlashSuffix = getPianoSlash();
 
   // Note/navigation handlers passed down to the memoized FretboardView/PianoView.
-  const handleGuitarNotePress = (midi: number) => onNotePress?.(midi, 80, true);
-  const handlePianoNotePress = (midi: number) => onNotePress?.(midi, 80, false);
+  const handleGuitarNotePress = (midi: number) => {
+    if (playMode === 'hold' && !arp) {
+      // Block-hold mode: stop any running chord/animation and sustain just this note.
+      stopSeqFlash();
+      onHoldChord([midi], 80);
+      setIsPlaying(true);
+    } else {
+      onNotePress?.(midi, 80, true);
+    }
+  };
+  const handlePianoNotePress = (midi: number) => {
+    if (playMode === 'hold' && !arp) {
+      stopSeqFlash();
+      onHoldChord([midi], 80);
+      setIsPlaying(true);
+    } else {
+      onNotePress?.(midi, 80, false);
+    }
+  };
   const handleCardNotePress = (midi: number) => onNotePress?.(midi, 80, instrument === 'guitar');
   const handleFretboardNavigate = () => handleManualNavigate();
   const handleArpSubsetChange = (idx: number) => { if (voicingTab === 'intervals') setIntervalSubsetIdx(idx); else setArpSubsetIdx(idx); };

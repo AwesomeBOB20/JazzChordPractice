@@ -18,7 +18,7 @@ import TunerScreen from '@features/tuner/screens/TunerScreen';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
 import { THEMES } from '@shared/ui/themes';
-import { AudioProvider } from '@shared/audio/AudioContext';
+import { AudioProvider, useAudio } from '@shared/audio/AudioContext';
 import * as SystemUI from 'expo-system-ui';
 import * as NavigationBar from 'expo-navigation-bar';
 import { ErrorBoundary } from '@shared/ui/ErrorBoundary';
@@ -227,13 +227,20 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
   const t = THEMES[theme];
   const isLight = LIGHT_THEMES.has(theme);
 
+  const { stopAudio } = useAudio();
+
   // 1. Memoize the listener object so it doesn't destroy navigation performance
   const tabListeners = React.useMemo(() => ({
     tabPress: () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setIsSettingsOpen(false);
-    }
-  }), [setIsSettingsOpen]);
+    },
+    // Cut off any sounding audio (incl. the sustained Hold tone) when leaving a tab.
+    // We hook the navigation 'blur' EVENT rather than an in-screen effect because
+    // freezeOnBlur (below) suspends the departing screen's React effects, so its own
+    // isFocused-based stop never commits — the tone would keep ringing.
+    blur: () => { stopAudio(); },
+  }), [setIsSettingsOpen, stopAudio]);
 
   React.useEffect(() => {
     if (Platform.OS === 'android') {
