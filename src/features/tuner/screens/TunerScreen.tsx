@@ -31,6 +31,14 @@ const TAU_CENTER_MS = 150;  // chart center slide time-constant
 const WINDOW_MS = 4000;     // visible history window for the polyline
 const HISTORY_CAP = 240;    // max points kept in history ring
 
+// Glitch rejection: a frame-to-frame jump larger than this (semitones) is treated
+// as suspect (octave error / transient) and must be confirmed by the next sample
+// before it's accepted. Continuous moves (slides, vibrato) pass straight through.
+const JUMP_GATE_SEMITONES = 1.5;
+// Polyline segment break: if two kept samples are farther apart in time than this,
+// the detector dropped out — start a new line segment instead of connecting them.
+const GAP_BREAK_MS = 220;
+
 // UI Constants
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRAPH_WIDTH = SCREEN_WIDTH;
@@ -78,6 +86,10 @@ export default function TunerScreen() {
   const lastSampleAtRef = useRef<number>(0);
   const historyRef = useRef<{ t: number; noteFloat: number }[]>([]);
 
+  // Glitch-gate state: last accepted sample + a held candidate awaiting confirmation.
+  const lastAcceptedNoteFloatRef = useRef<number | null>(null);
+  const pendingJumpRef = useRef<number | null>(null);
+
   // Consumer side (driven by the rAF loop)
   const smoothedNoteFloatRef = useRef<number | null>(null);
   const centerNoteFloatRef = useRef<number | null>(null);
@@ -98,6 +110,26 @@ export default function TunerScreen() {
 
       if (pitchHz && pitchHz > 60 && pitchHz < 1500) {
         const noteFloat = 12 * Math.log2(pitchHz / referenceFrequency) + 69;
+
+        // --- Glitch gate ---
+        // Small, continuous moves pass straight through (responsive). A large
+        // single-frame jump is held as a candidate and only accepted once the
+        // NEXT sample confirms it lives in the same new region — so a lone
+        // octave-error spike is dropped, but a real note leap registers after
+        // one frame. Prevents the near-vertical streaks on the trace.
+        const lastAccepted = lastAcceptedNoteFloatRef.current;
+        if (lastAccepted !== null && Math.abs(noteFloat - lastAccepted) > JUMP_GATE_SEMITONES) {
+          const pending = pendingJumpRef.current;
+          if (pending === null || Math.abs(noteFloat - pending) > JUMP_GATE_SEMITONES) {
+            // First suspect sample (or a candidate that didn't repeat): hold, don't plot.
+            pendingJumpRef.current = noteFloat;
+            return;
+          }
+          // Confirmed by a second nearby sample → genuine leap, let it through.
+        }
+        pendingJumpRef.current = null;
+        lastAcceptedNoteFloatRef.current = noteFloat;
+
         latestNoteFloatRef.current = noteFloat;
         lastSampleAtRef.current = now;
 
@@ -185,6 +217,8 @@ export default function TunerScreen() {
       smoothedNoteFloatRef.current = null;
       centerNoteFloatRef.current = null;
       latestNoteFloatRef.current = null;
+      lastAcceptedNoteFloatRef.current = null;
+      pendingJumpRef.current = null;
       historyRef.current = [];
     } else {
       const { status } = await Audio.requestPermissionsAsync();
@@ -347,29 +381,41 @@ export default function TunerScreen() {
               {isRecording && historyRef.current.length > 1 && (() => {
                 const nowMs = Date.now();
                 const halfW = GRAPH_AREA_WIDTH / 2;
+                const h = flexHeight || 300;
                 const hist = historyRef.current;
+                // Split into segments wherever the detector dropped out, so a
+                // silence-then-resume isn't drawn as one connecting line.
+                const segments: string[] = [];
                 let pts = '';
+                let prevT: number | null = null;
                 for (let i = 0; i < hist.length; i++) {
                   const p = hist[i];
                   const age = nowMs - p.t;
                   if (age > WINDOW_MS) continue;
+                  if (prevT !== null && p.t - prevT > GAP_BREAK_MS) {
+                    if (pts) segments.push(pts);
+                    pts = '';
+                  }
                   const x = GRAPH_CENTER_X - (age / WINDOW_MS) * halfW;
-                  const yOffset = ((p.noteFloat - displayCenter) / VISIBLE_SEMITONE_RANGE) * (flexHeight || 300);
-                  const y = (flexHeight || 300) / 2 - yOffset;
+                  const yOffset = ((p.noteFloat - displayCenter) / VISIBLE_SEMITONE_RANGE) * h;
+                  const y = h / 2 - yOffset;
                   pts += (pts ? ' ' : '') + x + ',' + y;
+                  prevT = p.t;
                 }
-                if (!pts) return null;
-                return (
+                if (pts) segments.push(pts);
+                if (!segments.length) return null;
+                return segments.map((seg, idx) => (
                   <Polyline
+                    key={idx}
                     clipPath="url(#chartClip)"
-                    points={pts}
+                    points={seg}
                     fill="none"
                     stroke={tuneColor}
                     strokeWidth={2.5}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
-                );
+                ));
               })()}
 
               {/* Vertical Center Indicator line */}
