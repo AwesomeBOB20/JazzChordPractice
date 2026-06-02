@@ -214,29 +214,29 @@ export default function ChordCard({
           <View style={{ height: 4 }} pointerEvents="none" />
           
           {subLabelRoot || subLabelType || subLabel || needsFallbackSubLabel ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }} pointerEvents="none">
-              
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'nowrap', maxWidth: '100%' }} pointerEvents="none">
+
               {(subLabelRoot || subLabelType) ? (
                 <>
-                  {subLabelRoot ? <Text style={[styles.subLabel, { color: txt1, marginRight: 2 }]}>{formatChordSymbol(subLabelRoot)}</Text> : null}
-                  {subLabelType ? <Text style={[styles.subLabel, { color: accent, marginRight: 4 }]}>{formatChordSymbol(subLabelType)}</Text> : null}
+                  {subLabelRoot ? <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginRight: 2, flexShrink: 1 }]}>{formatChordSymbol(subLabelRoot)}</Text> : null}
+                  {subLabelType ? <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: accent, marginRight: 4, flexShrink: 1 }]}>{formatChordSymbol(subLabelType)}</Text> : null}
                   {isSlash && !subLabelTypeHasSlash ? (
-                    <Text style={[styles.subLabel, { color: txt1, marginLeft: 4 }]}>/ {bassName}</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginLeft: 4, flexShrink: 1 }]}>/ {bassName}</Text>
                   ) : null}
                 </>
               ) : null}
-              
+
               {subLabel && !subLabelRoot && !subLabelType ? (
-                <Text style={[styles.subLabel, { color: txt2, marginRight: 4 }]}>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt2, marginRight: 4, flexShrink: 1 }]}>
                   {formatChordSymbol(subLabel).replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}
                 </Text>
               ) : null}
-              
+
               {needsFallbackSubLabel ? (
                 <>
-                  <Text style={[styles.subLabel, { color: txt1, marginRight: 2 }]}>{rootName}</Text>
-                  <Text style={[styles.subLabel, { color: accent }]}>{formatChordSymbol(mainSuffix)}</Text>
-                  <Text style={[styles.subLabel, { color: txt1, marginLeft: 4 }]}>/ {bassName}</Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginRight: 2, flexShrink: 1 }]}>{rootName}</Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: accent, flexShrink: 1 }]}>{formatChordSymbol(mainSuffix)}</Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginLeft: 4, flexShrink: 1 }]}>/ {bassName}</Text>
                 </>
               ) : null}
 
