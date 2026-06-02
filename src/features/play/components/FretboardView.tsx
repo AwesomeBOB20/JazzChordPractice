@@ -294,8 +294,10 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
     };
   }
 
-  const startFret = minFret <= 1 ? 0 : minFret - 1;
-  const isOpen = minFret <= 1;
+  // Anchor to the nut if the box plays any open string, so low frets aren't skipped.
+  const hasOpenString = notes.some((n: any) => n.fret === 0);
+  const isOpen = minFret <= 1 || hasOpenString;
+  const startFret = isOpen ? 0 : minFret - 1;
   const NUM_FRETS = Math.max(5, maxFret - startFret + 1);
   const numDisplayStrings = 6;
   const fretNum = startFret + 1;
@@ -306,7 +308,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
 
   return (
     <View style={{ alignItems: 'center' }}>
-      <FretboardMiniMap minFret={minFret} maxFret={maxFret} theme={theme} />
+      <FretboardMiniMap minFret={isOpen ? 1 : minFret} maxFret={maxFret} theme={theme} />
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
           {isOpen && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * (numDisplayStrings - 1) + 1.75} height={5} fill={theme.txt1} /> )}
@@ -501,8 +503,11 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
   if (voicing.capo && voicing.capo > 0) activeFretNums.push(voicing.capo);
   const minFret = (voicing.type === 'open' || activeFretNums.length === 0) ? 1 : Math.min(...activeFretNums);
   const maxFret = activeFretNums.length ? Math.max(...activeFretNums) : 5;
-  const startFret = minFret <= 1 ? 0 : minFret - 1;
-  const isOpen = minFret <= 1;
+  // If the chord actually plays any open string, it's an open-position grip — anchor
+  // the window to the nut so the low frets (1, 2, …) show instead of being skipped.
+  const hasOpenString = voicing.frets.some((f: any) => f.fret === 0);
+  const isOpen = minFret <= 1 || hasOpenString;
+  const startFret = isOpen ? 0 : minFret - 1;
   const fretNum = startFret + 1;
   const fretSuffix = fretNum === 1 ? 'st' : fretNum === 2 ? 'nd' : fretNum === 3 ? 'rd' : 'th';
   const fretLabel = isOpen ? '' : `${fretNum}${fretSuffix}`;
@@ -537,7 +542,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
 
   return (
     <View style={{ alignItems: 'center' }}>
-      <FretboardMiniMap minFret={minFret} maxFret={maxFret} theme={theme} />
+      <FretboardMiniMap minFret={isOpen ? 1 : minFret} maxFret={maxFret} theme={theme} />
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
           {displayStrings.map((strIdx, displayPos) => {
@@ -1052,21 +1057,31 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
     const baseName = formatVoicingName(currentVoicing?.chordLabel || chordName);
     const isChordLike = /(?:^|\s)[A-G][b♭#♯]?(?:\s|$|m|M|maj|min|dim|aug|sus|alt|\d)/.test(specificName);
     const topFretLabel = isChordLike ? specificName : baseName;
-    
+
     // Prevent double slashes in the paginator UI
     if (/\/\s*[A-G]/i.test(topFretLabel)) return '';
 
     const activeFrets = currentVoicing.frets.map((f: any, i: number) => ({...f, strIdx: i})).filter((f: any) => f.fret !== null);
     if (!activeFrets.length) return '';
-    const bassMidi = GS_MIDI[activeFrets[0].strIdx] + activeFrets[0].fret;
-    if (bassMidi % 12 !== rootSemi % 12) {
-      const bassPc = bassMidi % 12;
-      const bassRole = activeFrets[0].role;
-      const formula = formulaByPC[bassPc] || (bassRole ? (ROLE_SHORT[bassRole] || bassRole) : '');
-      const spelledBass = formula ? spellInterval(rootSemi, formula, namingMode === 'flat') : (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[bassPc];
-      return ` / ${spelledBass}`;
-    }
-    return '';
+    const bassPc = (GS_MIDI[activeFrets[0].strIdx] + activeFrets[0].fret) % 12;
+
+    // Slash relative to the chord ACTUALLY being labelled — an embedded triad or a
+    // rootless drop shape can have a root different from the global rootSemi. Only a
+    // genuine inversion (bass ≠ that root) gets a "/ bass"; root position shows none.
+    // (Fixes "C#dim/C#": bass = the chord's own root, so no slash.)
+    const NAME_PC: Record<string, number> = { 'C':0,'C♯':1,'C#':1,'D♭':1,'Db':1,'D':2,'D♯':3,'D#':3,'E♭':3,'Eb':3,'E':4,'F':5,'F♯':6,'F#':6,'G♭':6,'Gb':6,'G':7,'G♯':8,'G#':8,'A♭':8,'Ab':8,'A':9,'A♯':10,'A#':10,'B♭':10,'Bb':10,'B':11 };
+    const rootTok = (topFretLabel.trim().match(/^([A-G][#♯b♭]?)/) || [])[1];
+    const displayedRootPc = (rootTok != null && NAME_PC[rootTok] != null) ? NAME_PC[rootTok] : rootSemi % 12;
+    if (bassPc === displayedRootPc) return '';
+
+    // Spell the bass by its INTERVAL/formula, never by raw pitch class — e.g. the ♯5
+    // of A7♯5♭9 must read E♯, not F. (formulaByPC carries the chord-correct degree.)
+    const bassRole = activeFrets[0].role;
+    const bassFormula = formulaByPC[bassPc] || (bassRole ? (ROLE_SHORT[bassRole] || bassRole) : '');
+    const spelledBass = bassFormula
+      ? spellInterval(rootSemi, bassFormula, namingMode === 'flat')
+      : (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[bassPc];
+    return ` / ${spelledBass}`;
   };
   const slashSuffix = getFretboardSlash();
 
@@ -1074,7 +1089,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
   const baseName = formatVoicingName(currentVoicing?.chordLabel || chordName);
 
   const isTriad = currentVoicing?.type === 'triad';
-  const bottomMainText = isTriad
+  // Drops & triads read better as chord name + bass (e.g. "Cadd9 / D") than as an
+  // inversion ordinal ("3rd Inversion") — the inversion is already implied by the bass.
+  const isChordNameVoicing = isTriad || currentVoicing?.type === 'drop2' || currentVoicing?.type === 'drop3' || currentVoicing?.type === 'drop2and4';
+  const bottomMainText = isChordNameVoicing
     ? `${baseName}${slashSuffix}`
     : (specificName || baseName);
 
@@ -1188,7 +1206,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           {shapesMode ? formatVoicingName(currentShapeVoicing?.scaleName) : 
            arpMode ? formatVoicingName(arpSubsets[arpSubsetIdx]?.label) : 
            scaleMode ? formatVoicingName(currentScaleVoicing?.scaleName) : 
-           `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${isTriad ? '' : slashSuffix}`}
+           `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${isChordNameVoicing ? '' : slashSuffix}`}
         </Text>
         <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>
           {shapesMode ? `${Math.max(0, uniqueShapeScaleIds.indexOf(activeShapeScaleId)) + 1}/${Math.max(1, uniqueShapeScaleIds.length)}` : 

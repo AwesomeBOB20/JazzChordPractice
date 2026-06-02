@@ -316,8 +316,6 @@ export default function PlayScreen() {
         case 'drop2':
         case 'drop3':
         case 'drop2and4': {
-          const isTriad = ch.iv.length === 3;
-          if (isTriad) return false;
           const allDrops = buildDropVoicings(ct, ch, r, rootName, chordName, namingMode);
           const dropGroups = allDrops.filter(g => g.voicings[0]?.type === tab);
           return countGuitar(dropGroups) > 0;
@@ -365,7 +363,7 @@ export default function PlayScreen() {
         case 'drop3':
         case 'drop2and4': {
           if (isPiano) return ch.iv.length >= 4;
-          return ch.iv.length > 3;
+          return ch.iv.length >= 3; // triads included — they get drop voicings too (doubled note on 4-string shapes)
         }
         case 'scales': return (CHORD_SCALE_MAP[t] ?? []).length > 0;
         case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
@@ -433,7 +431,6 @@ export default function PlayScreen() {
       case 'drop2':
       case 'drop3':
       case 'drop2and4': {
-        if (isTriad) return [];
         const allDrops = buildDropVoicings(chordType, currentChordDef, rootSemi, rootNoteName, displayChordName, namingMode);
         return allDrops.filter(g => g.voicings[0]?.type === voicingTab);
       }
@@ -450,7 +447,7 @@ export default function PlayScreen() {
     const sharpRoot = NOTE_SHARP[rootSemi];
     const sharpChordName = `${sharpRoot} ${currentChordDef.l}`;
     const isTriad = currentChordDef.iv.length === 3;
-    const allDrops = !isTriad ? buildDropVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp') : [];
+    const allDrops = buildDropVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp'); // triads now have drop voicings too
     return {
       open: buildOpenVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
       barre: buildBarreVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
@@ -908,11 +905,16 @@ export default function PlayScreen() {
   let subType: string | undefined = undefined;
 
   if (variationLabel) {
+    // Voicing labels are always "Root<space>symbol" (e.g. "D♭ 7", "E ø7"), so a
+    // deterministic split on the first space is robust — no fragile alternation.
     const formattedVar = formatChordSymbol(variationLabel);
-    const match = formattedVar.match(/^([A-G][#♯b♭]?)(?:\s+(.*)|(m|maj|min|dim|aug|sus|alt|add|\d|ø|°|Δ|\+|-.*|))$/i);
+    const match = formattedVar.match(/^([A-G][#♯b♭]?)\s+(.*)$/);
     if (match) {
       subRoot = match[1];
-      subType = (match[2] || match[3] || '').trim();
+      subType = match[2].trim();
+    } else if (/^[A-G][#♯b♭]?$/.test(formattedVar)) {
+      subRoot = formattedVar;
+      subType = '';
     } else {
       subType = formattedVar;
     }

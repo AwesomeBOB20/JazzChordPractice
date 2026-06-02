@@ -138,8 +138,41 @@ export const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; varia
   'sus2': [
     { rootSemi: 0, name: 'C Shape (sus2)', variation: 'Standard', frets: [null, 3, 0, 0, 3, 3], roles: [null, 'root', '2nd', '5th', '2nd', '5th'] },
     { rootSemi: 2, name: 'D Shape (sus2)', variation: 'Standard', frets: [null, null, 0, 2, 3, 0], roles: [null, null, 'root', '5th', 'root', '2nd'] },
-    { rootSemi: 7, name: 'G Shape (sus2)', variation: 'Standard', frets: [3, 0, 0, 0, 3, 3], roles: ['root', '2nd', '5th', 'root', '2nd', '5th'] },
+    { rootSemi: 7, name: 'G Shape (sus2)', variation: 'Standard', frets: [3, 0, 0, 0, 3, 3], roles: ['root', '2nd', '5th', 'root', '5th', 'root'] },
     { rootSemi: 9, name: 'A Shape (sus2)', variation: 'Standard', frets: [null, 0, 2, 2, 0, 0], roles: [null, 'root', '5th', 'root', '2nd', '5th'] },
+  ],
+  // Common open-position extension chords (interval-verified against standard tuning).
+  // Each only renders when the selected root matches rootSemi (open chords can't transpose).
+  'add9': [
+    { rootSemi: 0, name: 'C Shape (add9)', variation: 'Standard', frets: [null, 3, 2, 0, 3, 0], roles: [null, 'root', '3rd', '5th', '9th', '3rd'] },
+    { rootSemi: 9, name: 'A Shape (add9)', variation: 'Standard', frets: [null, 0, 2, 4, 2, 0], roles: [null, 'root', '5th', '9th', '3rd', '5th'] },
+    { rootSemi: 4, name: 'E Shape (add9)', variation: 'Standard', frets: [0, 2, 2, 1, 0, 2], roles: ['root', '5th', 'root', '3rd', '5th', '9th'] },
+    { rootSemi: 7, name: 'G Shape (add9)', variation: 'Standard', frets: [3, 2, 0, 2, 0, 3], roles: ['root', '3rd', '5th', '9th', '3rd', 'root'] },
+  ],
+  'minAdd9': [
+    { rootSemi: 4, name: 'E Shape (m add9)', variation: 'Standard', frets: [0, 2, 2, 0, 0, 2], roles: ['root', '5th', 'root', 'b3', '5th', '9th'] },
+    { rootSemi: 9, name: 'A Shape (m add9)', variation: 'Standard', frets: [null, 0, 2, 4, 1, 0], roles: [null, 'root', '5th', '9th', 'b3', '5th'] },
+  ],
+  'dom9': [
+    { rootSemi: 4, name: 'E Shape (9)', variation: 'Standard', frets: [0, 2, 0, 1, 0, 2], roles: ['root', '5th', 'b7', '3rd', '5th', '9th'] },
+    { rootSemi: 0, name: 'C Shape (9)', variation: 'Standard', frets: [null, 3, 2, 3, 3, 0], roles: [null, 'root', '3rd', 'b7', '9th', '3rd'] },
+  ],
+  'maj9': [
+    { rootSemi: 9, name: 'A Shape (maj9)', variation: 'Standard', frets: [null, 0, 2, 1, 0, 0], roles: [null, 'root', '5th', '7th', '9th', '5th'] },
+    { rootSemi: 4, name: 'E Shape (maj9)', variation: 'Standard', frets: [0, 2, 1, 1, 0, 2], roles: ['root', '5th', '7th', '3rd', '5th', '9th'] },
+  ],
+  'min9': [
+    { rootSemi: 4, name: 'E Shape (m9)', variation: 'Standard', frets: [0, 2, 0, 0, 0, 2], roles: ['root', '5th', 'b7', 'b3', '5th', '9th'] },
+  ],
+  'maj69': [
+    { rootSemi: 0, name: 'C Shape (6/9)', variation: 'Standard', frets: [null, 3, 2, 2, 3, 3], roles: [null, 'root', '3rd', '6th', '9th', '5th'] },
+    { rootSemi: 9, name: 'A Shape (6/9)', variation: 'Standard', frets: [null, 0, 2, 4, 2, 2], roles: [null, 'root', '5th', '9th', '3rd', '6th'] },
+  ],
+  'dom7sus4': [
+    { rootSemi: 9, name: 'A Shape (7sus4)', variation: 'Standard', frets: [null, 0, 2, 0, 3, 0], roles: [null, 'root', '5th', 'b7', '4th', '5th'] },
+    { rootSemi: 2, name: 'D Shape (7sus4)', variation: 'Standard', frets: [null, null, 0, 2, 1, 3], roles: [null, null, 'root', '5th', 'b7', '4th'] },
+    { rootSemi: 4, name: 'E Shape (7sus4)', variation: 'Standard', frets: [0, 2, 0, 2, 0, 0], roles: ['root', '5th', 'b7', '4th', '5th', 'root'] },
+    { rootSemi: 7, name: 'G Shape (7sus4)', variation: 'Standard', frets: [3, 3, 0, 0, 1, 1], roles: ['root', '4th', '5th', 'root', '4th', 'b7'] },
   ]
 };
 
@@ -691,15 +724,15 @@ export function identifyChord(
   if (pcSet.size === 3 && expectedRootSemi !== undefined) {
     const expectedRootPC = expectedRootSemi % 12;
     const SHELL_PATTERNS = [
-      { label: 'Major 7', iv: [0, 4, 11] }, // R 3 7
-      { label: 'Minor 7', iv: [0, 3, 10] }, // R b3 b7
+      { label: 'Δ7',      iv: [0, 4, 11] }, // R 3 7
+      { label: 'm7',      iv: [0, 3, 10] }, // R b3 b7
       { label: '7',       iv: [0, 4, 10] }, // R 3 b7
       { label: '6',       iv: [0, 4, 9] },  // R 3 6
-      { label: 'Minor 6', iv: [0, 3, 9] },  // R b3 6
-      { label: 'm7b5',    iv: [0, 6, 10] }, // R b5 b7
+      { label: 'm6',      iv: [0, 3, 9] },  // R b3 6
+      { label: 'ø7',      iv: [0, 6, 10] }, // R b5 b7
       { label: '7sus4',   iv: [0, 5, 10] }, // R 4 b7
-      { label: 'Major ♭5', iv: [0, 4, 6] },  // R 3 b5
-      { label: 'Sus2 ♭5',  iv: [0, 2, 6] },  // R 2 b5
+      { label: '(♭5)',    iv: [0, 4, 6] },  // R 3 b5
+      { label: 'sus2(♭5)', iv: [0, 2, 6] },  // R 2 b5
     ];
     for (const pattern of SHELL_PATTERNS) {
       const transposed = new Set(pattern.iv.map(iv => (iv + expectedRootPC) % 12));
@@ -725,7 +758,7 @@ export function identifyChord(
       const transposed = new Set(uniqueChordPCs.map(pc => (pc + root) % 12));
       if ([...transposed].every(pc => pcSet.has(pc))) {
         const name = spelledRootMap && spelledRootMap[root] ? spelledRootMap[root] : names[root];
-        const label = def.l;
+        const label = def.s;  // short Berklee symbol (Δ7/ø7/…) — keeps the "Root symbol" shape consumers depend on
         if (typeof name === 'string' && typeof label === 'string') {
           matches.push({ type, complexity: def.iv.length, root, name, label });
         }
@@ -744,15 +777,15 @@ export function identifyChord(
   // Pass 2: Common 3-note shell subsets (rootless or 5th-less voicings)
   if (pcSet.size === 3) {
     const SHELL_PATTERNS = [
-      { label: 'Major 7', iv: [0, 4, 11] }, // R 3 7
-      { label: 'Minor 7', iv: [0, 3, 10] }, // R b3 b7
+      { label: 'Δ7',      iv: [0, 4, 11] }, // R 3 7
+      { label: 'm7',      iv: [0, 3, 10] }, // R b3 b7
       { label: '7',       iv: [0, 4, 10] }, // R 3 b7
       { label: '6',       iv: [0, 4, 9] },  // R 3 6
-      { label: 'Minor 6', iv: [0, 3, 9] },  // R b3 6
-      { label: 'm7b5',    iv: [0, 6, 10] }, // R b5 b7
+      { label: 'm6',      iv: [0, 3, 9] },  // R b3 6
+      { label: 'ø7',      iv: [0, 6, 10] }, // R b5 b7
       { label: '7sus4',   iv: [0, 5, 10] }, // R 4 b7
-      { label: 'Major ♭5', iv: [0, 4, 6] },  // R 3 b5
-      { label: 'Sus2 ♭5',  iv: [0, 2, 6] },  // R 2 b5
+      { label: '(♭5)',    iv: [0, 4, 6] },  // R 3 b5
+      { label: 'sus2(♭5)', iv: [0, 2, 6] },  // R 2 b5
     ];
 
     for (const pattern of SHELL_PATTERNS) {
@@ -1424,6 +1457,9 @@ export function buildDropVoicings(
     // 11th chords — rootless = core 7th from 5th
     'min11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
     'dom11':    { type: 'min7',     ivOffset: 7,  roleMap: ['5th', 'b7', '9th', '11th'],     rootFormula: '5'  },
+    // maj11 rootless = dom7 on the 5th (5-7-9-11; e.g. Cmaj11 → G7). Keeps the 9 & 11,
+    // drops the root and the 3rd (which clashes a ♭9 against the 11th).
+    'maj11':    { type: 'dom7',     ivOffset: 7,  roleMap: ['5th', '7th', '9th', '11th'],    rootFormula: '5'  },
     // 13th chords — rootless voices the 13th where a standard borrow covers it
     // maj13: borrow dom7sus4 from 3rd → E A B D = [3rd, 13th, 7th, 9th] (includes the 13th)
     'maj13':    { type: 'dom7sus4', ivOffset: 4,  roleMap: ['3rd', '13th', '7th', '9th'],    rootFormula: '3'  },
@@ -1441,6 +1477,9 @@ export function buildDropVoicings(
     'dom7alt':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
     'dom7b13':  { type: 'dom7b5',   ivOffset: 4,  roleMap: ['3rd', 'b13', 'b7', '9th'],      rootFormula: '3'  },
     'dom7b5b9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', 'b9', '3rd'],        rootFormula: 'b5' },
+    // 7♯5♭9 rootless upper structure = a min6 built on the ♭9 (e.g. C7♯5♭9 → D♭m6).
+    // min6 [root,b3,5,6] on the ♭9 spells exactly [♭9, 3rd, ♯5, ♭7] — every note correct.
+    'dom7s5b9': { type: 'min6',     ivOffset: 1,  roleMap: ['b9', '3rd', '#5', 'b7'],        rootFormula: 'b9' },
     'dom9sus4':  { type: 'maj6',    ivOffset: 10, roleMap: ['b7', '9th', '4th', '5th'],      rootFormula: 'b7' },
     'dom13sus4': { type: 'maj7',    ivOffset: 10, roleMap: ['b7', '9th', '4th', '13th'],     rootFormula: 'b7' },
   };
@@ -1455,9 +1494,11 @@ export function buildDropVoicings(
     // 13th chords
     'maj13': 'maj7', 'min13': 'min7', 'dom13': 'dom7',
     'dom13b9': 'dom7', 'dom13s9': 'dom7',
-    // 6/9 and add9
+    // 6/9 — drop the (un-drawable) 9th; every shown note (R-3-5-6) is still a real chord tone
     'maj69': 'maj6', 'min69': 'min6',
-    'add9': 'maj7', 'minAdd9': 'min7',
+    // add9 / minAdd9 are 4-note chords (R-3-5-9) with their OWN correct drop shapes in
+    // DROP_VOICINGS. They must NOT fall back to maj7/min7 — that would draw a 7th the chord
+    // doesn't contain and omit the defining 9th. (No fallback entry → uses 'add9'/'minAdd9'.)
     // Altered dominants — all map to core shapes that exist in drop2+drop3+drop2and4
     // dom7b9/dom7s9 drop2 shapes are pitch-identical to dom7 (voice R-3-5-b7)
     // dom7alt drop2 shapes are pitch-identical to dom7s5 (both voice R-3-#5-b7)
@@ -1467,13 +1508,23 @@ export function buildDropVoicings(
     'dom7s5b9': 'dom7s5', 'dom7s5s9': 'dom7s5',
     // Sus chords
     'dom9sus4': 'dom7sus4', 'dom13sus4': 'dom7sus4',
-    // Misc
-    'dimMaj7': 'minMaj7',
+    // dimMaj7 is NOT here: it has its own correct R-b3-b5-7 grids in DROP_VOICINGS.
+    // Mapping it to minMaj7 drew a natural 5th instead of the ♭5 (wrong note) and
+    // shadowed those grids — same class of bug as the old add9→maj7 fallback.
   };
 
   const passes = [
     { effectiveType: fallbackMap[chordType] || chordType, effectiveRootSemi: rootSemi, isRootless: false, roleMap: null as string[] | null, rootFormula: '' }
   ];
+
+  // Self pass: a chord routed to a smaller base shape via fallbackMap can ALSO carry
+  // its own authored grids (e.g. an extension voicing that includes a tone the base
+  // omits). Those grids index the chord's full iv, so they're labelled by its own
+  // roles — no synthetic chord type or rootless borrow needed. Only fires for chords
+  // that are both fallback-mapped AND have a DROP_VOICINGS entry under their own key.
+  if (fallbackMap[chordType] && fallbackMap[chordType] !== chordType) {
+    passes.push({ effectiveType: chordType, effectiveRootSemi: rootSemi, isRootless: false, roleMap: null as string[] | null, rootFormula: '' });
+  }
 
   const sub = ROOTLESS_SUB_MAP[chordType];
   if (sub) passes.push({ effectiveType: sub.type, effectiveRootSemi: (rootSemi + sub.ivOffset) % 12, isRootless: true, roleMap: sub.roleMap, rootFormula: sub.rootFormula });
@@ -1533,7 +1584,9 @@ export function buildDropVoicings(
               const subRootName = spellInterval(rootSemi, pass.rootFormula, namingMode === 'flat');
               const subDef = CH[pass.effectiveType];
               const subTypeName = subDef ? subDef.l : pass.effectiveType;
-              chordLabelText = `${subRootName} ${subTypeName} (as ${fullChordName || rootNoteName || chordType})`;
+              // Show the shape's OWN compact chord (e.g. "D♭ 7"); the card title
+              // already names the parent, so the old "(as <parent>)" suffix was redundant.
+              chordLabelText = `${subRootName} ${subDef?.s ?? subTypeName}`;
             } else {
               chordLabelText = getEffectiveChordLabel(chordType, rolesUsed, rootSemi, rootNoteName, fullChordName, namingMode) || fullChordName || shape.label;
             }
