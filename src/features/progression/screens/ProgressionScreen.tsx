@@ -442,7 +442,11 @@ export default function ProgressionScreen() {
   }, [progression, namingMode, diagramVoicings, voiceLeading, guitarNeckZone]);
 
   const activeDiagrams = showShapes ? diagramShapes : diagramVoicings;
-  const audioVoicings = instrument === 'piano' ? (showShapes ? pianoShapes : pianoVoicings) : (showShapes ? diagramShapes : diagramVoicings);
+  // Shapes feed playback ONLY in arpeggio mode. In block mode (even while viewing
+  // Shapes), play the chord-mode voicing so we hear the chord, not a smash of every
+  // note in the shape diagram. Mirrors playSelectedCellAudio's (showShapes && arp) gate.
+  const useShapesForAudio = showShapes && arp;
+  const audioVoicings = instrument === 'piano' ? (useShapesForAudio ? pianoShapes : pianoVoicings) : (useShapesForAudio ? diagramShapes : diagramVoicings);
   const { playingIdx, isPlayingSystem, isLooping, toggleLooping, handlePlayProgression, stopPlayback } = useProgressionPlayer(selectedCell, audioVoicings);
 
   const isFocused = useIsFocused();
@@ -937,7 +941,7 @@ export default function ProgressionScreen() {
                   );
               };
 
-              const cellHeight = viewMode === 'diagram' ? 130 : 60;
+              const cellHeight = viewMode === 'diagram' ? 148 : 66;
 
               if (group.type === 'single') {
                 const { idx, chord } = group;
@@ -993,7 +997,7 @@ export default function ProgressionScreen() {
                 return (
                   <View key={`split-${leftIdx}`} style={[
                     styles.cell, 
-                    { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 0, flexDirection: 'row' }, 
+                    { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 2, flexDirection: 'row' },
                     (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 }
                   ]}>
                      
@@ -1248,7 +1252,7 @@ const styles = StyleSheet.create({
   card: { paddingTop: 16, paddingBottom: 0 },
   sectionLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 14, paddingHorizontal: 16 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 0 },
-  cell: { width: '25%', height: 60, borderRightWidth: 1, borderBottomWidth: 1, alignItems: 'center', justifyContent: 'center', padding: 2, position: 'relative' },
+  cell: { width: '25%', height: 60, borderRightWidth: 1, borderBottomWidth: 1, alignItems: 'center', justifyContent: 'center', padding: 4, position: 'relative', overflow: 'hidden' },
   measureNum: { position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: '700' },
   repeatSign: { position: 'absolute', bottom: 2, fontSize: 18, fontWeight: '900', lineHeight: 20 },
   cellRoot: { fontSize: 22, fontWeight: '800', lineHeight: 26 },

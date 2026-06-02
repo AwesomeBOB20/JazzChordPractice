@@ -39,6 +39,9 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
   const progLoopOffsetRef = useRef(0);
   const progMeasureOffsetsRef = useRef<number[]>([]);
   const bossaMeasureCounterRef = useRef(0);
+  // Highlight callback for the running progression. Fired from the WebView's
+  // audio-clock-anchored MEASURE_DOWNBEAT message so the highlight lands on the beat.
+  const progOnChordChangeRef = useRef<((seqIdx: number, chordIdx: number) => void) | null>(null);
 
   // Configure OS Audio Session on mount
   useEffect(() => {
@@ -67,13 +70,27 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         setIsEngineReady(true);
       } else if (data.type === 'LOG') {
         console.log("[WebView Engine]:", data.message);
+      } else if (data.type === 'MEASURE_DOWNBEAT') {
+        // The engine sent this measure's downbeat as an absolute wall-clock target, well
+        // ahead of the beat. Schedule our own timer to that target (minus a small render
+        // lead) so the highlight border lands on the beat — locked to the audio clock,
+        // free of bridge latency, and with no cumulative drift over the song.
+        if (progOnChordChangeRef.current && typeof data.targetWallMs === 'number') {
+          const RENDER_LEAD_MS = 62; // compensate the setState -> re-render -> paint delay (~4 frames)
+          const delay = Math.max(0, data.targetWallMs - Date.now() - RENDER_LEAD_MS);
+          const tid = setTimeout(() => {
+            timersRef.current = timersRef.current.filter(t => t !== tid);
+            progOnChordChangeRef.current?.(data.seqIdx, data.chordIdx);
+          }, delay);
+          timersRef.current.push(tid);
+        }
       }
     } catch (e) {
       console.warn("WebView Message Error:", e);
     }
   };
 
-  const sendSchedule = (events: any[], durationMs?: number) => {
+  const sendSchedule = (events: any[], durationMs?: number, downbeat?: { seqIdx: number; chordIdx: number }) => {
     if (!isEngineReady || !webViewRef.current) {
         console.warn("Dropped audio: Engine not ready yet");
         return;
@@ -87,7 +104,8 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     webViewRef.current.postMessage(JSON.stringify({
       type: 'PLAY_SCHEDULE',
       events: events,
-      durationMs: durationMs
+      durationMs: durationMs,
+      downbeat: downbeat
     }));
   };
 
@@ -95,7 +113,8 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
     if (progSchedulerRef.current) clearTimeout(progSchedulerRef.current);
-    
+    progOnChordChangeRef.current = null; // stop any in-flight MEASURE_DOWNBEAT from updating the highlight
+
     if (webViewRef.current) {
       webViewRef.current.postMessage(JSON.stringify({ type: 'STOP_ALL' }));
     }
@@ -279,6 +298,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       progSeqIdxRef.current = 0;
       progIsLoopingRef.current = loop;
       bossaMeasureCounterRef.current = 0;
+      progOnChordChangeRef.current = onChordChange; // fired from the WebView's audio-clock downbeat message
 
       // Pre-compute cumulative start offsets for each measure.
       // This enables absolute-time scheduling so timer jitter never compounds.
@@ -312,17 +332,12 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         const currentIdx = progSeqIdxRef.current;
         const currentChordIdx = measure.chordIdx;
 
-        // Compute absolute start time of this measure's audio.
-        // runNextMeasure fires ~100 ms before the measure starts, so the
-        // UI delay lines the highlight up with the first audible beat.
+        // Wall-clock start of this measure's audio. Used ONLY to pace the look-ahead
+        // scheduler below — NOT to drive the highlight. The highlight is fired from the
+        // WebView's audio clock via MEASURE_DOWNBEAT (passed as the downbeat meta on the
+        // schedule call), which stays locked to the audio and never drifts over the song.
         const measureStartMs = progBaseTimeRef.current + progLoopOffsetRef.current + progMeasureOffsetsRef.current[currentIdx];
-        const uiDelay = Math.max(0, measureStartMs - Date.now());
-        const uiTimer = setTimeout(() => {
-          onChordChange(currentIdx, currentChordIdx);
-          timersRef.current = timersRef.current.filter(t => t !== uiTimer);
-        }, uiDelay);
-        timersRef.current.push(uiTimer);
-        
+
         const instrument = measure.guitar ? 'guitar' : 'piano';
         const vol = Math.min(1.5, (measure.volume / 100) * 1.5);
         const beatSecs = 60 / measure.bpm; 
@@ -346,6 +361,24 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         const strumStepSecs = 0.004;
         const strumPrerollSecs = measure.guitar ? (measure.midiNotes.length - 1) * strumStepSecs : 0;
 
+        // Arpeggio mode fills the bar with eighth notes that cycle through the chord/
+        // shape notes (a 5-note chord in 4/4 → notes 1 2 3 4 5 1 2 3). The eighth-note
+        // count tracks the time signature (beats × 2): 8 per 4-beat bar, 6 per 3, 4 per
+        // a 2-beat split. Notes roll low→high, echoing the play screen's hold-arp feel.
+        const isArpMeasure = measure.arp && measure.midiNotes.some(n => n != null && !isNaN(n));
+        if (isArpMeasure) {
+            const arpNotes = measure.midiNotes.filter(n => n != null && !isNaN(n)).slice().sort((a, b) => a - b);
+            const slots = measure.beats * 2;              // eighth notes per measure
+            const slotMs = beatSecs * 500;                // half-beat ring (ms)
+            const arpReleaseMs = 140;                     // gentle crossfade tail
+            for (let i = 0; i < slots; i++) {
+                const midi = arpNotes[i % arpNotes.length];
+                const beatIndex = Math.floor(i / 2);
+                const isOffbeat = i % 2 === 1;
+                const offsetSecs = beatIndex * beatSecs + (isOffbeat ? beatSecs * (measure.arpSwing ? 0.66 : 0.5) : 0);
+                events.push({ instrument, midi, volume: vol, timeOffset: offsetSecs, durationMs: slotMs + arpReleaseMs, releaseMs: arpReleaseMs });
+            }
+        } else
         switch (measure.rhythm) {
             case 'swing': {
                 hasCustomScheduling = true;
@@ -425,7 +458,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
             }
         }
 
-        if (!hasCustomScheduling) {
+        if (!isArpMeasure && !hasCustomScheduling) {
             // Clamp: remove any strikes that fall at or beyond the measure window
             chordStrikesSecs = chordStrikesSecs.filter(t => t < beatSecs * measure.beats);
 
@@ -457,7 +490,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         }
 
         const currentMeasureMs = (beatSecs * 1000) * measure.beats;
-        sendSchedule(events, currentMeasureMs);
+        sendSchedule(events, currentMeasureMs, { seqIdx: currentIdx, chordIdx: currentChordIdx });
         
         // Schedule the next check at absolute time: 250ms before next measure starts.
         // 100ms was too tight — the JS→WebView bridge can add 30–80ms of latency, and the

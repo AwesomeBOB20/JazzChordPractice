@@ -11,7 +11,7 @@ interface Props {
   isMasked?: boolean;
 }
 
-export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Props) {
+function MiniChordDiagram({ voicing, shape, theme, isMasked }: Props) {
   const colorMode = useSettingsStore((s: any) => s.colorMode);
   const selectiveRoles = useSettingsStore((s: any) => s.selectiveRoles);
 
@@ -51,7 +51,7 @@ export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Pr
     // Changed marginTop from 4 to 0 (You can even use -4 here if you want it super tight!)
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 2, marginTop: -4 }}>
       {startF > 0 && (
-        <Text style={{ color: theme.txt2, fontSize: 9, fontWeight: '800', marginTop: topY - 2 }}>
+        <Text style={{ color: theme.txt2, fontSize: 9, fontWeight: '800', marginTop: topY - 2, transform: [{ translateX: -3 }] }}>
           {startF + 1}
         </Text>
       )}
@@ -131,3 +131,9 @@ export default function MiniChordDiagram({ voicing, shape, theme, isMasked }: Pr
     </View>
   );
 }
+
+// Memoized: the progression grid re-renders on every measure highlight change, but a
+// diagram's inputs (voicing/shape come from memoized arrays, theme is stable) don't
+// change then — so this SVG bails out instead of re-rendering for every cell, keeping
+// the highlight border switch fast enough to land on the downbeat.
+export default React.memo(MiniChordDiagram);

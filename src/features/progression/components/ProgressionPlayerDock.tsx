@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from '
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
-import { THEMES } from '@shared/ui/themes';
+import { THEMES, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
 import * as Haptics from 'expo-haptics';
 
 // ── Block row mixer control ────────────────────────────────────────────────
@@ -77,11 +77,17 @@ export default function ProgressionPlayerDock({
 
   const [showMixer, setShowMixer] = useState(false);
 
+  // Each rhythm gets one of the app's scale-degree interval colors, so cycling the
+  // pill walks through root → 2nd → 3rd → 4th → 5th of the note-role palette.
   const RHYTHMS = [
-    { key: 'straight', label: 'Straight' }, { key: 'swing', label: 'Swing' },
-    { key: 'bossanova', label: 'Bossa' },
-    { key: 'twostep', label: 'Two-Step' }, { key: 'reggae', label: 'Reggae' }
+    { key: 'straight',  label: 'Straight', color: ROLE_COLORS_GLOBAL['root'] }, // orange-red
+    { key: 'swing',     label: 'Swing',    color: ROLE_COLORS_GLOBAL['2'] },    // purple
+    { key: 'bossanova', label: 'Bossa',    color: ROLE_COLORS_GLOBAL['3'] },    // blue
+    { key: 'twostep',   label: 'Two-Step', color: ROLE_COLORS_GLOBAL['4'] },    // teal
+    { key: 'reggae',    label: 'Reggae',   color: ROLE_COLORS_GLOBAL['5'] },    // green
   ];
+  const activeRhythm = RHYTHMS.find(r => r.key === rhythm) || RHYTHMS[0];
+  const rhythmColor = activeRhythm.color;
 
   return (
     <View style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border, borderTopWidth: 1 }]}>
@@ -109,11 +115,11 @@ export default function ProgressionPlayerDock({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               const curIdx = RHYTHMS.findIndex(r => r.key === rhythm);
               setRhythm(RHYTHMS[(curIdx + 1) % RHYTHMS.length].key as any);
-            }} style={[styles.enginePill, { backgroundColor: rhythm !== 'straight' ? t.accent : t.bg2, borderColor: rhythm !== 'straight' ? t.accent : t.border }]}>
-              {/* Swapped to MaterialCommunityIcons 'drum' */}
-              <MaterialCommunityIcons name="pulse" size={16} color={rhythm !== 'straight' ? '#fff' : t.txt2} />
-              <Text style={[styles.enginePillTxt, { color: rhythm !== 'straight' ? '#fff' : t.txt2 }]}>
-                {RHYTHMS.find(r => r.key === rhythm)?.label || 'Straight'}
+            }} style={[styles.enginePill, { backgroundColor: rhythmColor, borderColor: rhythmColor }]}>
+              {/* Each rhythm shows its own scale-degree interval color */}
+              <MaterialCommunityIcons name="pulse" size={16} color={'#fff'} />
+              <Text style={[styles.enginePillTxt, { color: '#fff' }]}>
+                {activeRhythm.label}
               </Text>
             </TouchableOpacity>
 
@@ -121,6 +127,7 @@ export default function ProgressionPlayerDock({
             <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowMixer(s => !s); }} style={[styles.enginePill, { backgroundColor: showMixer ? t.accent : t.bg2, borderColor: showMixer ? t.accent : t.border }]}>
               <Ionicons name="options-outline" size={16} color={showMixer ? '#fff' : t.txt2} />
               <Text style={[styles.enginePillTxt, { color: showMixer ? '#fff' : t.txt2 }]}>Mix</Text>
+              <Ionicons name={showMixer ? 'chevron-up' : 'chevron-down'} size={14} color={showMixer ? '#fff' : t.txt2} />
             </TouchableOpacity>
           </ScrollView>
         </View>
