@@ -174,6 +174,22 @@ export const getAudioEngineHtml = (assets: any) => `
               startTime = now + 0.02;
             }
             nextMeasureTime = startTime + (data.durationMs / 1000);
+
+            // Report this measure's downbeat to RN as an ABSOLUTE wall-clock target so the
+            // visual highlight lines up with the audio. We convert the audio-clock startTime
+            // to wall-clock (Date.now is the same system clock here and in RN) and send it
+            // immediately — ~250ms ahead of the beat. RN then schedules its OWN timer to this
+            // exact target, keeping the WebView->RN bridge latency out of the firing path and
+            // preventing any drift from the audio over the course of the song.
+            if (data.downbeat) {
+              const targetWallMs = Date.now() + (startTime - audioCtx.currentTime) * 1000;
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'MEASURE_DOWNBEAT',
+                seqIdx: data.downbeat.seqIdx,
+                chordIdx: data.downbeat.chordIdx,
+                targetWallMs: targetWallMs
+              }));
+            }
           } else {
             nextMeasureTime = 0;
           }

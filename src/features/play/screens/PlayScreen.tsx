@@ -1118,7 +1118,7 @@ export default function PlayScreen() {
             />
           ) : (
             <FretboardView
-              ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={voicingTab === 'triads' ? Math.max(0, guitarGroups.length - 1) : 0}
+              ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={0}
               onNotePress={handleGuitarNotePress} onNavigate={handleFretboardNavigate}
               onPlayVoicing={handleFretboardPlayVoicing}
               rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
