@@ -465,7 +465,8 @@ export default function QuizScreen() {
       const seen = new Set<string>();
 
       activeSvs.forEach(sv => {
-        const nameToUse = tab === 'scales' ? sv.scaleName : sv.boxName;
+        const shapeQualityName = sv.scaleName.split(' ').slice(1).join(' ');
+        const nameToUse = tab === 'scales' ? sv.scaleName : shapeQualityName;
         if (!seen.has(nameToUse)) {
           seen.add(nameToUse);
           const pcMap = new Map<number, { role: string, formula: string }>();
@@ -491,7 +492,7 @@ export default function QuizScreen() {
               roles: pianoNotes.map((s: any) => s.role),
               formulas: pianoNotes.map((s: any) => s.formula),
               fingerprint: JSON.stringify(sv),
-              categoryId: tab === 'scales' ? sv.scaleId : sv.boxName,
+              categoryId: tab === 'scales' ? sv.scaleId : shapeQualityName,
             });
           }
         }
@@ -901,10 +902,13 @@ export default function QuizScreen() {
         }
       } else if (category === 'shape') {
         const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
-        const uniqueBoxNames = Array.from(new Set(allShapeSvs.map(s => s.boxName)));
-        
+        const isGuitarShapes = instrument === 'guitar';
+        const uniqueNames = Array.from(new Set(allShapeSvs.map(s =>
+          isGuitarShapes ? s.boxName : s.scaleName.split(' ').slice(1).join(' ')
+        )));
+
         // Fallback: if no shapes exist, switch to chord category
-        if (uniqueBoxNames.length === 0) {
+        if (uniqueNames.length === 0) {
           category = 'chord';
           finalVoicingTab = 'block';
           let optsPool = finalPool.length >= 4 ? finalPool : basePool;
@@ -921,11 +925,13 @@ export default function QuizScreen() {
             cIdxs = [0];
           }
         } else {
-          let DYNAMIC_SHAPE_POOL = uniqueBoxNames.map(name => ({ key: name, label: name }));
-          // Ensure at least 4 options by adding generic box names if needed
+          let DYNAMIC_SHAPE_POOL = uniqueNames.map(name => ({ key: name, label: name }));
+          // Pad to 4 options with instrument-appropriate fallbacks
           if (DYNAMIC_SHAPE_POOL.length < 4) {
-            const genericBoxNames = ['Box 1', 'Box 2', 'Box 3', 'Box 4', 'Box 5', 'Box 6'];
-            for (const gen of genericBoxNames) {
+            const genericNames = isGuitarShapes
+              ? ['Box 1', 'Box 2', 'Box 3', 'Box 4', 'Box 5', 'Box 6']
+              : ['Maj Shape', 'Min Shape', 'Aug Shape', 'Dim Shape', 'Sus4 Shape', 'Sus2 Shape'];
+            for (const gen of genericNames) {
               if (!DYNAMIC_SHAPE_POOL.some(sp => sp.key === gen)) {
                 DYNAMIC_SHAPE_POOL.push({ key: gen, label: gen });
               }
