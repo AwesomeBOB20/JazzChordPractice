@@ -454,46 +454,12 @@ export default function TunerScreen() {
                 );
               })}
             </View>
-            <Text style={[styles.playHint, { color: t.txt3 }]}>tap to play · tap again to stop</Text>
           </View>
         )}
         </View>
       </ScrollView>
 
       <View style={[styles.dock, { backgroundColor: t.bg, borderTopColor: t.border }]}>
-        <View style={{ marginBottom: 12 }}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
-            {mode === 'listen' && micAvailable && (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  toggleListening();
-                }}
-                style={[styles.enginePill, isRecording ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border }]}
-              >
-                <Ionicons name={isRecording ? 'stop' : 'play'} size={16} color={isRecording ? '#fff' : t.txt2} />
-                <Text style={[styles.enginePillTxt, { color: isRecording ? '#fff' : t.txt2 }]}>{isRecording ? 'Stop' : 'Start'}</Text>
-              </TouchableOpacity>
-            )}
-
-            {mode === 'play' && (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowTunings(!showTunings);
-                }}
-                style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border }]}
-              >
-                <Ionicons name="musical-note" size={16} color={t.txt2} />
-                <Text style={[styles.enginePillTxt, { color: t.txt2 }]}>{tuning.label}</Text>
-                <Ionicons name={showTunings ? 'chevron-up' : 'chevron-down'} size={16} color={t.txt2} />
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-        </View>
-
         <View style={styles.actionRow}>
           <TouchableOpacity style={[ styles.actionBtn, mode === 'listen' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('listen'); setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
             <Ionicons name="mic" size={20} color={mode === 'listen' ? '#fff' : t.txt2} />
@@ -503,6 +469,29 @@ export default function TunerScreen() {
             <Ionicons name="volume-high" size={20} color={mode === 'play' ? '#fff' : t.txt2} />
             <Text style={[styles.actionBtnTxt, { color: mode === 'play' ? '#fff' : t.txt2 }]}>Play</Text>
           </TouchableOpacity>
+          {mode === 'listen' && micAvailable ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                toggleListening();
+              }}
+              style={[styles.tunerActionBtn, { backgroundColor: isRecording ? '#D4537E' : '#639922' }]}
+            >
+              <Ionicons name={isRecording ? 'stop' : 'play'} size={26} color="#fff" />
+            </TouchableOpacity>
+          ) : mode === 'play' ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowTunings(!showTunings);
+              }}
+              style={[styles.tunerActionBtn, { backgroundColor: '#639922' }]}
+            >
+              <Ionicons name="options" size={26} color="#fff" />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     </View>
@@ -515,6 +504,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 56, borderRadius: 20, borderWidth: 1, gap: 8 },
   actionBtnTxt: { fontWeight: '700', fontSize: 15 },
+  tunerActionBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   
   modalBox: { width: '100%', padding: 20, borderRadius: 16, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
   modalTitle: { fontSize: 24, fontWeight: '800', letterSpacing: 0.5, marginBottom: 16 },
@@ -526,12 +516,8 @@ const styles = StyleSheet.create({
   
   listenLayout: { width: '100%', overflow: 'hidden' },
   
-  enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
-  enginePillTxt: { fontSize: 14, fontWeight: '700' },
-
   playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 32, justifyContent: 'center' },
-  playHint: { textAlign: 'center', fontSize: 12, fontWeight: '600', marginTop: 20, opacity: 0.4 },
-  stringsColumn: { gap: 0 },
+stringsColumn: { gap: 0 },
   stringRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },
   stringNum: { fontSize: 13, fontWeight: '800', width: 20, textAlign: 'center' },
   stringLineWrap: { flex: 1, height: 20, justifyContent: 'center', marginHorizontal: 10, position: 'relative' },
