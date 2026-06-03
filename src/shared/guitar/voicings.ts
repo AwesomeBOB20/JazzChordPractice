@@ -1418,6 +1418,9 @@ export interface ArpSubset {
   ivs: number[];
   roles: string[];
   formulaLabels: string[];
+  // The chord these notes spell (root + quality), or null if they don't resolve
+  // to a nameable chord. Used by the Quiz to label arpeggio answers.
+  chordName?: string | null;
 }
 
 export interface PatternSubset {
@@ -1533,7 +1536,8 @@ export function getArpSubsets(
             subLabel,
             ivs,
             roles,
-            formulaLabels: formula 
+            formulaLabels: formula,
+            chordName: identified,
           });
         }
       }
@@ -2146,13 +2150,18 @@ function buildHardcodedShapeVoicingsUncached(
 
             const boxNotes = Array.from(boxNotesMap.values());
             if (boxNotes.length > 0) {
-              const noteNames = namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP;
-              const rootLetter = noteNames[targetRoot];
+              const rootLetter = spellInterval(targetRoot, 'R', namingMode === 'flat');
               
+              // Clean display names with real ♭/♯ glyphs (NO underscores). Altered
+              // 5/9 shapes are named by their actual 4-tone interval content. Every
+              // reachable shapeKey must be covered so the underscore fallback never fires.
               const SHAPE_DISPLAY_NAMES: Record<string, string> = {
                 'maj_shape': 'Maj', 'min_shape': 'Min', 'aug_shape': 'Aug',
-                'dim_4_shape': 'Dim', 'sus4_shape': 'Sus4', 'sus2_shape': 'Sus2',
-                'min_b5_shape': 'm7b5', 'min_2_shape': 'Min 2', '7b9_shape': '7b9',
+                'dim_4_shape': 'Dim 4', 'sus4_shape': 'Sus4', 'sus2_shape': 'Sus2',
+                'min_b5_shape': 'Min ♭5', 'min_2_shape': 'Min 2', '7b9_shape': '♭9',
+                'maj_b5_shape': 'Maj ♭5',
+                'b5_shape': '♭5', 'b5_b9_shape': '♭5 ♭9', 'b5_s9_shape': '♭5 ♯9',
+                's5_b9_shape': '♯5 ♭9', 's5_s9_shape': '♯5 ♯9',
                 'lydian_shape': 'Lydian', 'phrygian_shape': 'Phrygian', 'blues_shape': 'Blues'
               };
               const shapeDisplayName = SHAPE_DISPLAY_NAMES[shapeKey] || shapeKey.replace('_shape', '');

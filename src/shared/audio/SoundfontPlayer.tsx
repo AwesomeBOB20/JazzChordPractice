@@ -369,14 +369,25 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         if (isArpMeasure) {
             const arpNotes = measure.midiNotes.filter(n => n != null && !isNaN(n)).slice().sort((a, b) => a - b);
             const slots = measure.beats * 2;              // eighth notes per measure
-            const slotMs = beatSecs * 500;                // half-beat ring (ms)
             const arpReleaseMs = 140;                     // gentle crossfade tail
+            const useSwing = measure.arpSwing || measure.rhythm === 'swing' || measure.rhythm === 'reggae';
+
+            // Pre-compute each slot's time offset so we can derive per-note hold duration.
+            const slotOffsets: number[] = [];
             for (let i = 0; i < slots; i++) {
-                const midi = arpNotes[i % arpNotes.length];
                 const beatIndex = Math.floor(i / 2);
                 const isOffbeat = i % 2 === 1;
-                const offsetSecs = beatIndex * beatSecs + (isOffbeat ? beatSecs * (measure.arpSwing ? 0.66 : 0.5) : 0);
-                events.push({ instrument, midi, volume: vol, timeOffset: offsetSecs, durationMs: slotMs + arpReleaseMs, releaseMs: arpReleaseMs });
+                slotOffsets.push(beatIndex * beatSecs + (isOffbeat ? beatSecs * (useSwing ? 0.66 : 0.5) : 0));
+            }
+
+            for (let i = 0; i < slots; i++) {
+                const midi = arpNotes[i % arpNotes.length];
+                // Hold until the next note's attack so the release crossfades smoothly into it.
+                // With swing the off-beat slot is only 0.34× a beat — using a fixed half-beat
+                // slotMs left those notes still at full volume when the next attack landed.
+                const nextOffsetSecs = i + 1 < slots ? slotOffsets[i + 1] : beatSecs * measure.beats;
+                const slotMs = (nextOffsetSecs - slotOffsets[i]) * 1000;
+                events.push({ instrument, midi, volume: vol, timeOffset: slotOffsets[i], durationMs: slotMs + arpReleaseMs, releaseMs: arpReleaseMs });
             }
         } else
         switch (measure.rhythm) {
