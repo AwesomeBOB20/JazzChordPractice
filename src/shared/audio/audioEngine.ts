@@ -203,11 +203,22 @@ export const getAudioEngineHtml = (assets: any) => `
           // of bridge latency. Per-note voice stealing is kept only for non-measure events.
           if (data.durationMs) {
             const XFADE = 0.06; // 60ms: fast enough to feel instant, long enough to be click-free
+            const now2 = audioCtx.currentTime;
             activeSources.forEach(existing => {
               if (existing.batchId !== thisBatchId && existing.gain && existing.source) {
                 try {
-                  existing.gain.gain.cancelScheduledValues(startTime);
-                  existing.gain.gain.setValueAtTime(existing.volume || 0, startTime);
+                  // Anchor at the ACTUAL current gain value, not the stored target volume.
+                  // If the bridge arrived late the release ramp may have already started,
+                  // so cancelScheduledValues(startTime) won't catch it and a naive
+                  // setValueAtTime(existing.volume) would snap the gain back up — the click.
+                  // Cancelling from now2 and anchoring at g.value freezes any in-progress
+                  // decay at its current point. The second setValueAtTime(anchorVol, startTime)
+                  // holds the level steady until the measure boundary so chords don't
+                  // audibly fade during the 250 ms look-ahead window.
+                  const anchorVol = Math.max(0.00001, existing.gain.gain.value);
+                  existing.gain.gain.cancelScheduledValues(now2);
+                  existing.gain.gain.setValueAtTime(anchorVol, now2);
+                  existing.gain.gain.setValueAtTime(anchorVol, startTime);
                   existing.gain.gain.linearRampToValueAtTime(0, startTime + XFADE);
                   existing.source.stop(startTime + XFADE + 0.02);
                   existing.scheduledStop = startTime + XFADE;
