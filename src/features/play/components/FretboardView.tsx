@@ -477,7 +477,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
   // the fretted notes and label the starting fret, while still drawing the open
   // strings above the nut, rather than a full-length neck with a huge empty gap.
   const hasOpenString = voicing.frets.some((f: any) => f.fret === 0);
-  const isOpenPosition = minFret <= 1;
+  const isOpenPosition = minFret <= 1 || (hasOpenString && minFret <= 5);
   const showOpenStrings = isOpenPosition || hasOpenString;
   const startFret = isOpenPosition ? 0 : minFret - 1;
   const fretNum = startFret + 1;
