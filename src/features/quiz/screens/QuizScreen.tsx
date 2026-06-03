@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Animated
@@ -734,8 +734,6 @@ export default function QuizScreen() {
                     notes: uniqueMidis,
                     roles: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.role : ''; }),
                     formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
-                    // categoryId = the shape TYPE (e.g. "E Min Shape"), so the quiz tests
-                    // which shape it is, not which CAGED box/position it sits in.
                     categoryId: randBox.scaleName,
                   };
                 }
@@ -1000,9 +998,7 @@ export default function QuizScreen() {
       } else if (category === 'shape') {
         const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
         const isGuitarShapes = instrument === 'guitar';
-        const rawShapeNames = Array.from(new Set(allShapeSvs.map(s =>
-          isGuitarShapes ? s.boxName : s.scaleName
-        )));
+        const rawShapeNames = Array.from(new Set(allShapeSvs.map(s => s.scaleName)));
 
         // Fallback: if no shapes exist, switch to chord category
         if (rawShapeNames.length === 0) {
@@ -1037,18 +1033,10 @@ export default function QuizScreen() {
             shapePool.push({ key: nm, label: lbl });
           };
           rawShapeNames.forEach(addShape);
-          if (isGuitarShapes) {
-            // Guitar box names don't vary by chord type; pad with generic box positions.
-            for (const gen of ['Box 1', 'Box 2', 'Box 3', 'Box 4', 'Box 5', 'Box 6']) {
-              if (shapePool.length >= 4) break;
-              addShape(gen);
-            }
-          } else {
-            // Piano: pad distractors with shape types from the other pooled chords (same root).
-            for (const ct of basePool) {
-              if (shapePool.length >= 12) break;
-              buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
-            }
+          // Pad distractors with shape names from other chord types at the same root.
+          for (const ct of basePool) {
+            if (shapePool.length >= 12) break;
+            buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
           }
           opts = buildCategoryOptions(catId, correctLabel, shapePool);
           cIdxs = [opts.findIndex(o => o.type === catId)];
@@ -1200,7 +1188,7 @@ export default function QuizScreen() {
   const rootName = namingMode === 'flat' ? NOTE_FLAT[questionRoot] : NOTE_SHARP[questionRoot];
   const accuracy = quizTotal > 0 ? Math.round((quizScore / quizTotal) * 100) : null;
 
-  const fretboardGroup: any = guitarVoicing ? [{
+  const fretboardGroup: any = useMemo(() => guitarVoicing ? [{
     label: 'Quiz',
     stringNums: '012345',
     voicings: [{
@@ -1209,7 +1197,7 @@ export default function QuizScreen() {
       type: guitarVoicing.type,
       capo: guitarVoicing.capo,
     }]
-  }] : [];
+  }] : [], [guitarVoicing]);
 
   const isFretboardSpecialMode = ['scales', 'shapes', 'arps', 'intervals'].includes(questionVoicingTab);
 
