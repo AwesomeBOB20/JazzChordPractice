@@ -5,7 +5,7 @@ import { View, Text, TouchableOpacity, StyleSheet,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
@@ -127,7 +127,7 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
 export default function PlayScreen() {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
-  const { bpm, arp, setArp, playMode, setPlayMode, octave, theme, labelMode, instrument, setInstrument, sortMode, scaleOverlay } = useSettingsStore();
+  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, instrument, setInstrument, sortMode, scaleOverlay } = useSettingsStore();
   const { rootSemi, chordType, namingMode, shiftRoot, cycleType, inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
   const playAnim = useRef(new Animated.Value(1)).current;
@@ -222,9 +222,20 @@ export default function PlayScreen() {
     if (instrument === 'piano') playCurrentChordRef.current(); else pendingPlayRef.current = true;
   }, [rootSemi, chordType]);
 
-  React.useEffect(() => { 
-    if (!isFocused) handleStop(); 
+  React.useEffect(() => {
+    if (!isFocused) handleStop();
   }, [isFocused]);
+
+  // Intervals/Arps/Shapes/Scales can only arpeggiate (playback already forces it),
+  // so force the header arp toggle to show/lock arpeggio while one of those tabs is
+  // active, reverting to the user's real `arp` setting otherwise. useFocusEffect
+  // (not a plain isFocused effect) because freezeOnBlur suspends in-screen effects
+  // on blur — focus events still fire, so this re-asserts on every (re)focus and
+  // when the tab changes while focused. The 'blur' listener in App.tsx clears it.
+  const arpForcingTab = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes';
+  useFocusEffect(
+    React.useCallback(() => { setArpForced(arpForcingTab); }, [arpForcingTab, setArpForced])
+  );
 
   const isFirstSettingsRender = useRef(true);
   React.useEffect(() => { 
@@ -697,9 +708,15 @@ export default function PlayScreen() {
     if (voicingTab === 'arps' || voicingTab === 'intervals') {
       const subset = voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx] : intervalSubsets[safeIntervalSubsetIdx];
       if (subset && subset.ivs) {
-        // Shift startMidi
         const startMidi = (octave + 1) * 12 + rootSemi;
-        const notes = subset.ivs.map((iv: number) => startMidi + iv);
+        // Build pitch-class set for this subset so we can find every instance
+        // across a ~2-octave span rather than just one occurrence per iv.
+        const pcs = subset.ivs.map((iv: number) => (rootSemi + iv) % 12);
+        const expanded: number[] = [];
+        for (let midi = startMidi - 12; midi <= startMidi + 24; midi++) {
+          if (pcs.includes(midi % 12) && midi >= 36 && midi <= 96) expanded.push(midi);
+        }
+        const notes = expanded.length > 0 ? expanded : subset.ivs.map((iv: number) => startMidi + iv);
         return [{ name: subset.label || '', chordLabel: displayChordName, notes, roles: subset.roles || [], formulas: subset.formulaLabels || subset.roles || [] }];
       }
       return [];
@@ -746,7 +763,7 @@ export default function PlayScreen() {
       return selectedGroup;
     }
     return [];
-  }, [rootSemi, chordType, octave, currentChordDef, voicingTab, scaleVoicings, arpVoicings, intervalVoicings, sortMode, displayChordName, selectedScaleId, rootNoteName]);
+  }, [rootSemi, chordType, octave, currentChordDef, voicingTab, scaleVoicings, arpVoicings, intervalVoicings, sortMode, displayChordName, selectedScaleId, rootNoteName, arpSubsets, intervalSubsets, safeArpSubsetIdx, safeIntervalSubsetIdx]);
 
   const pianoGroups: { label: string; startIdx: number; count: number }[] = React.useMemo(() => {
     if (!pianoVoicings.length) return [];

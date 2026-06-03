@@ -6,7 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
@@ -21,6 +21,7 @@ import {
   buildOpenVoicings, 
   buildBarreVoicings, 
   buildScaleVoicings,
+  buildArpVoicings,
   buildHardcodedShapeVoicings,
   getArpSubsets,
   getIntervalSubsets,
@@ -35,6 +36,14 @@ const ALL_CHORD_KEYS = Object.keys(CH);
 
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function bassRoleToInversion(bassRole: string): 'root' | '1st' | '2nd' | '3rd' {
+  if (!bassRole || bassRole === 'root') return 'root';
+  if (bassRole === '3rd' || bassRole === 'b3' || bassRole === 'b3rd') return '1st';
+  if (bassRole === '5th' || bassRole === 'b5' || bassRole === 'b5th' || bassRole === '#5' || bassRole === '#5th') return '2nd';
+  if (bassRole === 'b7' || bassRole === 'b7th' || bassRole === '7th' || bassRole === 'maj7' || bassRole === 'maj7th') return '3rd';
+  return 'root';
 }
 
 function findAudibleChordType(
@@ -90,25 +99,27 @@ function buildOptions(
     const ch = CH[type];
     if (!ch) return type;
 
+    const rootName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[correctRoot];
     const chordSymbol = ch.s;
 
-    // In audio mode, don't show slash notation since there's no visual reference
     if (quizMode === 'audio') {
-      return chordSymbol;
+      return `${rootName} ${chordSymbol}`;
     }
 
     if (!isInverted || inversion === 'root') {
-      return chordSymbol;
+      return `${rootName} ${chordSymbol}`;
     }
 
-    // Calculate bass note for slash notation
+    // Calculate bass note for slash notation using enharmonic-correct spelling.
     // Guard against accessing index that doesn't exist (e.g., 3rd inversion on triads)
     const shiftIndex = inversion === '1st' ? 1 : inversion === '2nd' ? 2 : 3;
-    const bassInterval = ch.iv[Math.min(shiftIndex, ch.iv.length - 1)];
-    const bassSemi = (correctRoot + bassInterval) % 12;
-    const bassNote = namingMode === 'flat' ? NOTE_FLAT[bassSemi] : NOTE_SHARP[bassSemi];
+    const safeIdx = Math.min(shiftIndex, ch.iv.length - 1);
+    const bassFormula = ch.f?.[safeIdx];
+    const bassNote = bassFormula
+      ? spellInterval(correctRoot, bassFormula, namingMode === 'flat')
+      : (namingMode === 'flat' ? NOTE_FLAT[(correctRoot + ch.iv[safeIdx]) % 12] : NOTE_SHARP[(correctRoot + ch.iv[safeIdx]) % 12]);
 
-    return `${chordSymbol} / ${bassNote}`;
+    return `${rootName} ${chordSymbol} / ${bassNote}`;
   };
 
   // In audio mode, filter pool to only include chord types that match the played notes
@@ -153,17 +164,41 @@ function buildOptions(
     }
   }
 
-  // Pass 2 (Safe Distractor Generator): If we STILL don't have 4 options,
-  // pad with distinct, unrelated core qualities that won't trick the user.
+  // Pass 2 (Safe Distractor Generator): pad with distinct core qualities from the user's pool.
   const SAFE_DISTRACTORS = ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'sus4', 'sus2', 'minMaj7', 'aug', 'dim', 'maj_b5'];
   const filteredSafeDistractors = SAFE_DISTRACTORS.filter(t => pool.includes(t));
+  if (filteredSafeDistractors.length > 0) {
+    attempts = 0;
+    while (opts.length < 4 && attempts < 100) {
+      attempts++;
+      const safeType = pickRandom(filteredSafeDistractors);
+      if (!seenTypes.has(safeType) && CH[safeType]) {
+        seenTypes.add(safeType);
+        opts.push({ root: correctRoot, type: safeType, label: makeLabel(safeType, true) });
+      }
+    }
+  }
+
+  // Pass 3: Draw from the full unfiltered pool — audio filter may have restricted too much.
   attempts = 0;
-  while (opts.length < 4 && attempts < 100) {
+  while (opts.length < 4 && attempts < 400) {
     attempts++;
-    const safeType = pickRandom(filteredSafeDistractors);
-    if (!seenTypes.has(safeType) && CH[safeType]) {
-      seenTypes.add(safeType);
-      opts.push({ root: correctRoot, type: safeType, label: makeLabel(safeType, true) });
+    if (pool.length === 0) break;
+    const randType = pickRandom(pool);
+    if (!seenTypes.has(randType) && CH[randType]) {
+      seenTypes.add(randType);
+      opts.push({ root: correctRoot, type: randType, label: makeLabel(randType, true) });
+    }
+  }
+
+  // Pass 4: Nuclear backstop — any known chord type, guarantees exactly 4 options.
+  attempts = 0;
+  while (opts.length < 4 && attempts < 1000) {
+    attempts++;
+    const randType = pickRandom(ALL_CHORD_KEYS);
+    if (!seenTypes.has(randType) && CH[randType]) {
+      seenTypes.add(randType);
+      opts.push({ root: correctRoot, type: randType, label: makeLabel(randType, true) });
     }
   }
 
@@ -265,15 +300,14 @@ export default function QuizScreen() {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, stopAudio: onStop, playSingleNote: onNotePress } = useAudio();
   const { octave, labelMode, theme, arp, instrument, isSettingsOpen, bpm } = useSettingsStore();
+  const setArpForced = useSettingsStore(s => s.setArpForced);
   const { activeTypes, namingMode } = useChordStore();
   const { quizMode, quizScore, quizTotal, quizStreak, resetQuiz, incrementQuiz, activeVoicingTypes, activeInversions } = useQuizStore();
 
   const t = THEMES[theme];
   const isFocused = useIsFocused();
 
-  // FIX 4: Remove destructive global labelMode override here. 
-  // We handle label visibility dynamically on the components themselves.
-  const quizLabelMode = (labelMode === 'notes') ? 'degrees' : labelMode;
+  const quizLabelMode = labelMode;
 
   useEffect(() => {
     if (!isFocused) {
@@ -298,6 +332,7 @@ export default function QuizScreen() {
 
   const [questionVoicingTab, setQuestionVoicingTab] = useState<string>('block');
   const [scaleVoicings, setScaleVoicings] = useState<any[]>([]);
+  const [arpVoicings, setArpVoicings] = useState<any[]>([]);
   const [shapeVoicings, setShapeVoicings] = useState<any[]>([]);
   const [arpSubsets, setArpSubsets] = useState<any[]>([]);
   const [intervalSubsets, setIntervalSubsets] = useState<any[]>([]);
@@ -311,21 +346,30 @@ export default function QuizScreen() {
   const pianoRef = useRef<PianoViewRef>(null);
   const fretboardRef = useRef<FretboardViewRef>(null);
 
+  const [isPlaying, setIsPlaying] = useState(false);
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const stopSeqFlash = () => {
     seqFlashTimers.current.forEach(time => clearTimeout(time));
     seqFlashTimers.current = [];
+    setIsPlaying(false);
   };
 
+  // Sequential (arpeggiated) flash — used for scales/arps/intervals/shapes, which
+  // always arpeggiate. Marks isPlaying so the sticky-player button becomes a Stop.
   const fireSeqFlash = (midiNotes: number[]) => {
     stopSeqFlash();
+    setIsPlaying(true);
     const msPerStep = 60000 / bpm / 2;
-    const AUDIO_LATENCY = 60; 
+    const AUDIO_LATENCY = 60;
     midiNotes.forEach((midi, i) => {
       const fire = () => { pianoRef.current?.flashMidi(midi); fretboardRef.current?.flashMidi(midi); };
       seqFlashTimers.current.push(setTimeout(fire, Math.round(msPerStep * i) + AUDIO_LATENCY));
     });
+    // Auto-revert to Play once the arpeggio has finished sounding.
+    seqFlashTimers.current.push(setTimeout(() => setIsPlaying(false), Math.round(msPerStep * midiNotes.length) + AUDIO_LATENCY + 150));
   };
+
+  const handleStopPlayback = () => { stopSeqFlash(); onStop(); };
 
   const animateTap = () => {
     Animated.sequence([
@@ -345,7 +389,6 @@ export default function QuizScreen() {
 
   const GS_MIDI = [40, 45, 50, 55, 59, 64];
 
-  // FIX 2 & 3: Perfectly extract the exact MIDI, Roles, and Formulas directly from the generated Voicing engine objects
   const { activeMidiNotes, activeRoles, activeFormulas, formulaByPC, noteNames } = React.useMemo(() => {
     let notes: number[] = [];
     let r: string[] = [];
@@ -358,7 +401,28 @@ export default function QuizScreen() {
       r = pianoVoicing.roles || [];
       f = pianoVoicing.formulas || pianoVoicing.roles || [];
     } else if (activeQuizInstrument === 'guitar') {
-      if (['scales', 'shapes', 'arps', 'intervals'].includes(questionVoicingTab) && pianoVoicing) {
+      if ((questionVoicingTab === 'arps' || questionVoicingTab === 'intervals') && arpVoicings.length > 0) {
+        // FretboardView always displays arpVoicings[0] (finds by boxName, defaults to first).
+        // Use the same box for audio so the note count exactly matches the diagram.
+        const curArpV = arpVoicings[0];
+        if (curArpV?.notes?.length) {
+          // Dedup by exact MIDI (not pitch class) so every diagram position plays,
+          // including multiple octaves of the same note class across the neck box.
+          const midiMap = new Map<number, { role: string; formula: string }>();
+          curArpV.notes.forEach((n: any) => {
+            const midi = GS_MIDI[n.stringIdx] + n.fret;
+            if (!midiMap.has(midi)) midiMap.set(midi, { role: n.role || '', formula: n.formula || '' });
+          });
+          const sorted = [...midiMap.entries()].sort((a, b) => a[0] - b[0]);
+          notes = sorted.map(([midi]) => midi);
+          r = sorted.map(([, v]) => v.role);
+          f = sorted.map(([, v]) => v.formula);
+        } else if (pianoVoicing) {
+          notes = pianoVoicing.notes || [];
+          r = pianoVoicing.roles || [];
+          f = pianoVoicing.formulas || pianoVoicing.roles || [];
+        }
+      } else if (['scales', 'shapes'].includes(questionVoicingTab) && pianoVoicing) {
         notes = pianoVoicing.notes || [];
         r = pianoVoicing.roles || [];
         f = pianoVoicing.formulas || pianoVoicing.roles || [];
@@ -398,7 +462,7 @@ export default function QuizScreen() {
     });
 
     return { activeMidiNotes: notes, activeRoles: r, activeFormulas: f, formulaByPC: fbpc, noteNames: names };
-  }, [activeQuizInstrument, pianoVoicing, guitarVoicing, questionVoicingTab, questionRoot, questionType, octave, namingMode]);
+  }, [activeQuizInstrument, pianoVoicing, guitarVoicing, questionVoicingTab, questionRoot, questionType, octave, namingMode, arpVoicings, safeArpSubsetIdx, safeIntervalSubsetIdx]);
 
 
   const getGuitarVoicingsForTab = (
@@ -453,7 +517,7 @@ export default function QuizScreen() {
     if (!ch) return [];
 
     const rootNoteName = (nMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[rootSemi];
-    const displayChordName = `${rootNoteName}${ch.s}`;
+    const displayChordName = `${rootNoteName} ${ch.s}`;
 
     if (tab === 'scales' || tab === 'shapes') {
       const scaleIds = CHORD_SCALE_MAP[chordType] ?? [];
@@ -554,6 +618,7 @@ export default function QuizScreen() {
       let finalVoicingTab = 'block';
 
       setScaleVoicings([]);
+      setArpVoicings([]);
       setShapeVoicings([]);
       setArpSubsets([]);
       setIntervalSubsets([]);
@@ -574,11 +639,14 @@ export default function QuizScreen() {
         return ch && ch.iv.length === 3;
       };
 
-      // Determine valid inversions for the current chord type
-      const getValidInversions = (chordType: string) => {
-        if (isTriadType(chordType)) {
-          return activeInversions.filter(inv => inv !== '3rd');
-        }
+      // Tabs whose voicings have no inversion-named entries (barre, open, shells, drops,
+      // scales, arps, intervals, shapes). For these, always use root position.
+      const NO_INV_TABS = ['open','barre','shells','drop2','drop3','drop2and4','scales','arps','intervals','shapes'];
+
+      // Determine valid inversions for the current chord type + voicing tab
+      const getValidInversions = (chordType: string, tab: string) => {
+        if (NO_INV_TABS.includes(tab)) return ['root'];
+        if (isTriadType(chordType)) return activeInversions.filter(inv => inv !== '3rd');
         return activeInversions;
       };
 
@@ -621,8 +689,8 @@ export default function QuizScreen() {
           finalPool = tempPool;
           finalVoicingTab = chosenVoicingTab;
 
-          // Filter inversion to be valid for the selected chord type
-          const validInversions = getValidInversions(finalType);
+          // Filter inversion to be valid for the selected chord type + voicing tab
+          const validInversions = getValidInversions(finalType, finalVoicingTab);
           finalInversion = validInversions.length > 0
             ? (pickRandom(validInversions) as 'root' | '1st' | '2nd' | '3rd')
             : 'root';
@@ -635,7 +703,7 @@ export default function QuizScreen() {
               finalGuitarVoicing = null;
               
               const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
-              const displayChordName = `${rootNoteName}${CH[finalType]?.s || ''}`;
+              const displayChordName = `${rootNoteName} ${CH[finalType]?.s || ''}`;
               
               if (finalVoicingTab === 'scales') {
                 const scaleIds = CHORD_SCALE_MAP[finalType] || [];
@@ -665,33 +733,54 @@ export default function QuizScreen() {
                     notes: uniqueMidis,
                     roles: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.role : ''; }),
                     formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
-                    categoryId: randBox.boxName,
+                    // categoryId = the shape TYPE (e.g. "E Min Shape"), so the quiz tests
+                    // which shape it is, not which CAGED box/position it sits in.
+                    categoryId: randBox.scaleName,
                   };
                 }
               } else if (finalVoicingTab === 'arps' || finalVoicingTab === 'intervals') {
-                const subsets = finalVoicingTab === 'arps'
+                const isArp = finalVoicingTab === 'arps';
+                let subsets = isArp
                   ? getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode)
                   : getIntervalSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || []);
-                
+                // Arps: only show subsets that spell a recognizable chord (triad or 7th chord).
+                // No fallback to unnamed subsets — those produce confusing questions.
+                if (isArp) {
+                  subsets = subsets.filter(s => s.chordName);
+                }
+
                 if (subsets.length > 0) {
                   const subsetIdx = Math.floor(Math.random() * subsets.length);
                   const subset = subsets[subsetIdx];
-                  if (finalVoicingTab === 'arps') {
+                  if (isArp) {
                     setArpSubsets(subsets);
                     setSafeArpSubsetIdx(subsetIdx);
                   } else {
                     setIntervalSubsets(subsets);
                     setSafeIntervalSubsetIdx(subsetIdx);
                   }
+
+                  // Build the arpeggio/interval ON THE GUITAR NECK from the chord's parent
+                  // scale boxes (mirrors PlayScreen) so the fretboard diagram renders.
+                  const scaleIds = CHORD_SCALE_MAP[finalType] || [];
+                  const parentBoxes = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, namingMode);
+                  const diagramName = isArp ? (subset.chordName || displayChordName) : `${subset.label} Interval`;
+                  setArpVoicings(buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subset.roles, subset.formulaLabels, diagramName));
+                  setScaleVoicings(parentBoxes);
+
+                  // Answer = the chord the arp subset spells (root+quality); if a subset
+                  // somehow doesn't resolve, fall back to the parent chord name (never a
+                  // formula). Intervals keep their interval-name label.
+                  const answerName = isArp ? (subset.chordName || displayChordName) : (subset.label || '');
                   const startMidi = (octave + 1) * 12 + finalRoot;
-                  const notes = (subset.ivs || []).map(iv => startMidi + iv);
+                  const notes = (subset.ivs || []).map((iv: number) => startMidi + iv);
                   finalPianoVoicing = {
-                    name: subset.label || '',
+                    name: answerName,
                     chordLabel: displayChordName,
                     notes,
                     roles: subset.roles || [],
                     formulas: subset.formulaLabels || subset.roles || [],
-                    categoryId: subset.label || (finalVoicingTab === 'arps' ? 'Arpeggio' : 'Interval'),
+                    categoryId: answerName || (isArp ? 'Arpeggio' : 'Interval'),
                   };
                 }
               }
@@ -703,6 +792,10 @@ export default function QuizScreen() {
               }
               // Fallback to any voicing if filtered result is empty
               finalGuitarVoicing = guitarVcs.length > 0 ? pickRandom(guitarVcs) : (vcs.length > 0 ? pickRandom(vcs) : null);
+              // Sync inversion to the actual voicing so the label matches the displayed bass note
+              if (finalGuitarVoicing) {
+                finalInversion = bassRoleToInversion(finalGuitarVoicing.bassNote);
+              }
             }
           } else {
             const vcs = getPianoVoicingsForTab(finalVoicingTab, finalType, finalRoot, namingMode);
@@ -714,6 +807,16 @@ export default function QuizScreen() {
                 ...pianoVc,
                 notes: invertedNotes,
               };
+              // Sync finalInversion to the actual bass — applyInversion may silently
+              // fall back to root position when shifts >= notes.length (e.g. 3rd inv
+              // on a 3-note voicing).
+              const sortedInv = [...invertedNotes].sort((a, b) => a - b);
+              const bassPC = ((sortedInv[0] % 12) - finalRoot + 12) % 12;
+              const bassIdx = CH[finalType]?.iv.findIndex((iv: number) => iv % 12 === bassPC) ?? -1;
+              if (bassIdx <= 0) finalInversion = 'root';
+              else if (bassIdx === 1) finalInversion = '1st';
+              else if (bassIdx === 2) finalInversion = '2nd';
+              else finalInversion = '3rd';
             } else {
               finalPianoVoicing = pianoVc;
             }
@@ -730,6 +833,9 @@ export default function QuizScreen() {
         if (instrument === 'guitar') {
           const vcs = getGuitarVoicingsForTab('open', finalType, finalRoot, namingMode);
           finalGuitarVoicing = vcs.length > 0 ? pickRandom(vcs) : null;
+          if (finalGuitarVoicing) {
+            finalInversion = bassRoleToInversion(finalGuitarVoicing.bassNote);
+          }
         } else {
           const vcs = getPianoVoicingsForTab('block', finalType, finalRoot, namingMode);
           finalPianoVoicing = vcs.length > 0 ? pickRandom(vcs) : null;
@@ -769,7 +875,7 @@ export default function QuizScreen() {
           if (audibleType && audibleType !== finalType) {
             finalType = audibleType;
             const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
-            const newLabel = `${rootNoteName}${CH[finalType]?.s || ''}`;
+            const newLabel = `${rootNoteName} ${CH[finalType]?.s || ''}`;
             if (finalPianoVoicing) {
               finalPianoVoicing = {
                 ...finalPianoVoicing,
@@ -827,33 +933,24 @@ export default function QuizScreen() {
           cIdxs = [0];
         }
       } else if (category === 'arp') {
+        // Answer + distractors are the CHORD NAMES the arpeggio subsets spell
+        // (root + quality), never formula numbers like "3-5-7".
         const arpPool: { key: string; label: string }[] = [];
         const arpSeen = new Set<string>([catId]);
-        const allSubs = getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode);
-        allSubs.forEach(s => {
-          if (s.label && s.label !== 'Arpeggio' && !arpSeen.has(s.label)) {
-            arpSeen.add(s.label);
-            arpPool.push({ key: s.label, label: s.label });
-          }
-        });
+        const addName = (nm: string | null | undefined) => {
+          if (nm && !arpSeen.has(nm)) { arpSeen.add(nm); arpPool.push({ key: nm, label: nm }); }
+        };
+        getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode)
+          .forEach(s => addName(s.chordName));
         for (const ct of basePool) {
           if (arpPool.length >= 15) break;
-          const subs = getArpSubsets(CH[ct].iv, CH[ct].r, CH[ct].f || [], finalRoot, namingMode);
-          subs.forEach(s => {
-            if (s.label && s.label !== 'Arpeggio' && !arpSeen.has(s.label)) {
-              arpSeen.add(s.label);
-              arpPool.push({ key: s.label, label: s.label });
-            }
-          });
+          getArpSubsets(CH[ct].iv, CH[ct].r, CH[ct].f || [], finalRoot, namingMode).forEach(s => addName(s.chordName));
         }
-        // Ensure at least 4 options by adding generic arpeggio labels if needed
+        // Pad to >=4 with plain chord-quality names at the question root (still chord names, never formulas).
         if (arpPool.length < 4) {
-          const genericArps = ['3-5-7', '1-3-5', '1-3-5-7', '1-5-7', '1-3-7', '3-5-7-9', '1-2-3-5', '1-3-5-9'];
-          for (const gen of genericArps) {
-            if (!arpSeen.has(gen)) {
-              arpSeen.add(gen);
-              arpPool.push({ key: gen, label: gen });
-            }
+          const rootName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
+          for (const ct of (basePool.length >= 4 ? basePool : ALL_CHORD_KEYS)) {
+            addName(CH[ct] ? `${rootName} ${CH[ct].s}` : null);
             if (arpPool.length >= 4) break;
           }
         }
@@ -901,10 +998,10 @@ export default function QuizScreen() {
         }
       } else if (category === 'shape') {
         const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
-        const uniqueBoxNames = Array.from(new Set(allShapeSvs.map(s => s.boxName)));
-        
+        const uniqueShapeNames = Array.from(new Set(allShapeSvs.map(s => s.scaleName)));
+
         // Fallback: if no shapes exist, switch to chord category
-        if (uniqueBoxNames.length === 0) {
+        if (uniqueShapeNames.length === 0) {
           category = 'chord';
           finalVoicingTab = 'block';
           let optsPool = finalPool.length >= 4 ? finalPool : basePool;
@@ -921,23 +1018,34 @@ export default function QuizScreen() {
             cIdxs = [0];
           }
         } else {
-          let DYNAMIC_SHAPE_POOL = uniqueBoxNames.map(name => ({ key: name, label: name }));
-          // Ensure at least 4 options by adding generic box names if needed
-          if (DYNAMIC_SHAPE_POOL.length < 4) {
-            const genericBoxNames = ['Box 1', 'Box 2', 'Box 3', 'Box 4', 'Box 5', 'Box 6'];
-            for (const gen of genericBoxNames) {
-              if (!DYNAMIC_SHAPE_POOL.some(sp => sp.key === gen)) {
-                DYNAMIC_SHAPE_POOL.push({ key: gen, label: gen });
-              }
-              if (DYNAMIC_SHAPE_POOL.length >= 4) break;
-            }
+          // Options are SHAPE TYPES (scaleName, e.g. "E Min Shape"), not box positions.
+          // Visual mode keeps the root ("E Min Shape"); audio mode drops it ("Min Shape").
+          const shapeLabelFor = (nm: string) => quizMode === 'visual' ? nm : nm.replace(/^[A-G][#♯b♭]?\s+/, '');
+          const correctLabel = shapeLabelFor(catId);
+          const seenKeys = new Set<string>([catId]);
+          // Dedupe by DISPLAYED label too, so audio mode never shows two identical
+          // "Min Shape" choices (different roots collapse to the same label).
+          const seenLabels = new Set<string>([correctLabel]);
+          const shapePool: { key: string; label: string }[] = [];
+          const addShape = (nm: string) => {
+            if (!nm || seenKeys.has(nm)) return;
+            const lbl = shapeLabelFor(nm);
+            if (seenLabels.has(lbl)) return;
+            seenKeys.add(nm); seenLabels.add(lbl);
+            shapePool.push({ key: nm, label: lbl });
+          };
+          uniqueShapeNames.forEach(addShape);
+          // Pad distractors with shape types from the other pooled chords (same root).
+          for (const ct of basePool) {
+            if (shapePool.length >= 12) break;
+            buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
           }
-          opts = buildCategoryOptions(catId, catId, DYNAMIC_SHAPE_POOL);
+          opts = buildCategoryOptions(catId, correctLabel, shapePool);
           cIdxs = [opts.findIndex(o => o.type === catId)];
 
           // Fallback: if correct answer not found, force it to be the first option
           if (cIdxs[0] === -1) {
-            opts[0] = { root: 0, type: catId, label: catId };
+            opts[0] = { root: 0, type: catId, label: correctLabel };
             cIdxs = [0];
           }
         }
@@ -988,16 +1096,31 @@ export default function QuizScreen() {
 
   const autoPlayNext = useRef(false);
 
+  // Scale/Arp/Interval/Shape questions can only arpeggiate (never block), so force
+  // arp playback for them regardless of the user's `arp` setting.
+  const forceArpThisQ = arp || quizCategory !== 'chord';
+
+  // Force the header arp toggle to show/lock arpeggio during those questions,
+  // reverting on chord questions. useFocusEffect (not a plain isFocused effect) so
+  // it re-asserts on every (re)focus despite freezeOnBlur; App.tsx's 'blur' listener
+  // clears it when leaving the screen.
+  useFocusEffect(
+    useCallback(() => { setArpForced(quizCategory !== 'chord'); }, [quizCategory, setArpForced])
+  );
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     if (autoPlayNext.current && questionType && CH[questionType] && !isSettingsOpen) {
       timer = setTimeout(() => {
-        onPlay(activeMidiNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
-        if (arp) {
-          fireSeqFlash(activeMidiNotes);
+        const notesToPlay = (quizCategory === 'arp' || quizCategory === 'interval')
+          ? [...activeMidiNotes].sort((a, b) => a - b)
+          : activeMidiNotes;
+        onPlay(notesToPlay, { guitar: activeQuizInstrument === 'guitar', forceArp: forceArpThisQ });
+        if (forceArpThisQ) {
+          fireSeqFlash(notesToPlay);
         } else {
-          pianoRef.current?.flashAll(activeMidiNotes);
-          fretboardRef.current?.flashAll(activeMidiNotes);
+          pianoRef.current?.flashAll(notesToPlay);
+          fretboardRef.current?.flashAll(notesToPlay);
         }
       }, 200);
       autoPlayNext.current = false;
@@ -1007,12 +1130,16 @@ export default function QuizScreen() {
 
   const replay = () => {
     stopSeqFlash();
-    onPlay(activeMidiNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
-    if (arp) {
-      fireSeqFlash(activeMidiNotes);
+    // Arps and intervals always play low→high so the sequence is pedagogically clear.
+    const notesToPlay = (quizCategory === 'arp' || quizCategory === 'interval')
+      ? [...activeMidiNotes].sort((a, b) => a - b)
+      : activeMidiNotes;
+    onPlay(notesToPlay, { guitar: activeQuizInstrument === 'guitar', forceArp: forceArpThisQ });
+    if (forceArpThisQ) {
+      fireSeqFlash(notesToPlay);
     } else {
-      pianoRef.current?.flashAll(activeMidiNotes);
-      fretboardRef.current?.flashAll(activeMidiNotes);
+      pianoRef.current?.flashAll(notesToPlay);
+      fretboardRef.current?.flashAll(notesToPlay);
     }
   };
 
@@ -1047,12 +1174,15 @@ export default function QuizScreen() {
     
     requestAnimationFrame(() => {
       incrementQuiz(correct);
-      onPlay(activeMidiNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
-      if (arp) {
-        fireSeqFlash(activeMidiNotes);
+      const notesToPlay = (quizCategory === 'arp' || quizCategory === 'interval')
+        ? [...activeMidiNotes].sort((a, b) => a - b)
+        : activeMidiNotes;
+      onPlay(notesToPlay, { guitar: activeQuizInstrument === 'guitar', forceArp: forceArpThisQ });
+      if (forceArpThisQ) {
+        fireSeqFlash(notesToPlay);
       } else {
-        pianoRef.current?.flashAll(activeMidiNotes);
-        fretboardRef.current?.flashAll(activeMidiNotes);
+        pianoRef.current?.flashAll(notesToPlay);
+        fretboardRef.current?.flashAll(notesToPlay);
       }
     });
   };
@@ -1060,13 +1190,14 @@ export default function QuizScreen() {
   const rootName = namingMode === 'flat' ? NOTE_FLAT[questionRoot] : NOTE_SHARP[questionRoot];
   const accuracy = quizTotal > 0 ? Math.round((quizScore / quizTotal) * 100) : null;
 
-  // FIX 5: Feed FretboardView the exact Voicing objects so it builds internally
   const fretboardGroup: any = guitarVoicing ? [{
     label: 'Quiz',
     stringNums: '012345',
-    voicings: [{ 
-      name: 'Quiz', 
-      frets: guitarVoicing.frets.map(f => ({ ...f, role: f.role || '' })) 
+    voicings: [{
+      name: 'Quiz',
+      frets: guitarVoicing.frets.map(f => ({ ...f, role: f.role || '' })),
+      type: guitarVoicing.type,
+      capo: guitarVoicing.capo,
     }]
   }] : [];
 
@@ -1127,39 +1258,21 @@ export default function QuizScreen() {
 
               <TouchableOpacity onPress={() => { animateTap(); replay(); }} activeOpacity={1}>
                 <Animated.View style={[styles.chordDisplay, { transform: [{ scale: tapAnim }] }]}>
-                  {quizCategory === 'chord' ? (
-                    quizMode === 'visual' ? (
-                      <View style={styles.chordNameRow}>
-                        <Text style={[styles.questionRoot, { color: t.txt1 }]}>{rootName}</Text>
-                        <Text style={[styles.questionType, { color: revealed ? t.accent : t.txt3 }]}>
-                          {revealed ? (CH[questionType] ? CH[questionType].s : '???') : '???'}
-                        </Text>
-                      </View>
-                    ) : (
-                      revealed ? (
-                        <View style={styles.chordNameRow}>
-                          <Text style={[styles.questionRoot, { color: t.txt1 }]}>{rootName}</Text>
-                          <Text style={[styles.questionType, { color: t.accent }]}>
-                            {CH[questionType] ? CH[questionType].s : ''}
-                          </Text>
-                        </View>
-                      ) : (
-                        <Text style={[styles.audioQuestion, { color: t.txt3 }]}>?</Text>
-                      )
-                    )
+                  {!revealed ? (
+                    // One consistent unanswered state for every category and mode: a
+                    // single big "?". The answer fills in here once an option is chosen.
+                    <Text style={[styles.audioQuestion, { color: t.txt3 }]}>?</Text>
+                  ) : quizCategory === 'chord' ? (
+                    <View style={styles.chordNameRow}>
+                      <Text style={[styles.questionRoot, { color: t.txt1 }]}>{rootName}</Text>
+                      <Text style={[styles.questionType, { color: t.accent }]}>
+                        {CH[questionType] ? CH[questionType].s : ''}
+                      </Text>
+                    </View>
                   ) : (
-                    quizCategory === 'scale' ? (
-                      <Text style={[styles.audioQuestion, { color: t.txt3 }]}>?</Text>
-                    ) : (
-                      <View>
-                        <Text style={{ fontSize: 11, color: t.txt3, fontWeight: '600', marginBottom: 2 }}>
-                          {rootName}{CH[questionType]?.s ?? ''}
-                        </Text>
-                        <Text style={[styles.questionType, { color: revealed ? t.accent : t.txt3, fontSize: 15 }]} numberOfLines={2}>
-                          {revealed ? (options[correctIdxs[0]]?.label ?? '???') : '???'}
-                        </Text>
-                      </View>
-                    )
+                    <Text style={[styles.revealAnswer, { color: t.accent }]} numberOfLines={2}>
+                      {options[correctIdxs[0]]?.label ?? ''}
+                    </Text>
                   )}
                 </Animated.View>
               </TouchableOpacity>
@@ -1226,8 +1339,8 @@ export default function QuizScreen() {
                             const vcs = getPianoVoicingsForTab(questionVoicingTab, opt.type, questionRoot, namingMode);
                             optionNotes = vcs.length > 0 ? vcs[0].notes : getChordNotes(questionRoot, opt.type, octave);
                           }
-                          onPlay(optionNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: arp });
-                          if (arp) fireSeqFlash(optionNotes);
+                          onPlay(optionNotes, { guitar: activeQuizInstrument === 'guitar', forceArp: forceArpThisQ });
+                          if (forceArpThisQ) fireSeqFlash(optionNotes);
                           else { pianoRef.current?.flashAll(optionNotes); fretboardRef.current?.flashAll(optionNotes); }
                         }
                       }}
@@ -1258,7 +1371,7 @@ export default function QuizScreen() {
                 scaleVoicings={scaleVoicings}
                 scaleMode={questionVoicingTab === 'scales'}
                 arpMode={questionVoicingTab === 'arps' || questionVoicingTab === 'intervals'}
-                arpVoicings={scaleVoicings}
+                arpVoicings={arpVoicings}
                 arpSubsets={questionVoicingTab === 'intervals' ? intervalSubsets : arpSubsets}
                 arpSubsetIdx={questionVoicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
                 shapesMode={questionVoicingTab === 'shapes'}
@@ -1316,9 +1429,9 @@ export default function QuizScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.playQuizBtn, { backgroundColor: '#639922' }]}
-            onPress={replay}>
-            <Ionicons name="play" size={26} color="#fff" />
+            style={[styles.playQuizBtn, { backgroundColor: isPlaying ? WRONG_COLOR : '#639922' }]}
+            onPress={isPlaying ? handleStopPlayback : replay}>
+            <Ionicons name={isPlaying ? 'stop' : 'play'} size={26} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -1355,8 +1468,11 @@ const styles = StyleSheet.create({
   questionRoot: { fontSize: 44, fontWeight: '700', lineHeight: 48 },
   questionType: { fontSize: 20, fontWeight: '600', marginBottom: 6 },
   audioQuestion: { fontSize: 60, fontWeight: '700', lineHeight: 66 },
+  // Revealed answer for the category modes (scale/arp/interval/shape) — sized to
+  // sit between the big root and the small type so every category reads alike.
+  revealAnswer: { fontSize: 24, fontWeight: '700', textAlign: 'center', lineHeight: 30 },
   optionsGrid: { flexDirection: 'column', gap: 8, width: '100%' },
-  optBtn: { width: '100%', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
+  optBtn: { width: '100%', paddingVertical: 10, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
   optText: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
   stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },

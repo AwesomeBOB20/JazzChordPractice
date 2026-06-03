@@ -19,6 +19,11 @@ export interface SettingsState {
   octave: number;
   arp: boolean;
   arpSwing: boolean;
+  // Transient (NOT persisted): set by the Play/Quiz screens to force the header
+  // arp toggle to show — and lock to — arpeggio mode while the current voicing
+  // tab / quiz category can only arpeggiate (intervals/arps/shapes/scales). The
+  // user's real `arp` preference is left untouched, so leaving the tab reverts.
+  arpForced: boolean;
   bassEnabled: boolean;
   metronomeEnabled: boolean;
   voiceLeading: boolean;
@@ -49,6 +54,7 @@ export interface SettingsState {
   setOctave: (oct: number) => void;
   setArp: (arp: boolean) => void;
   setArpSwing: (swing: boolean) => void;
+  setArpForced: (forced: boolean) => void;
   setBassEnabled: (enabled: boolean) => void;
   setMetronomeEnabled: (enabled: boolean) => void;
   setVoiceLeading: (enabled: boolean) => void;
@@ -83,6 +89,7 @@ export const useSettingsStore = create<SettingsState>()(
       octave: DEFAULT_PIANO_OCTAVE,
       arp: false,
       arpSwing: false,
+      arpForced: false,
       bassEnabled: false,
       metronomeEnabled: false,
       voiceLeading: true,
@@ -124,6 +131,7 @@ export const useSettingsStore = create<SettingsState>()(
       }),
       setArp: (arp) => set({ arp }),
       setArpSwing: (arpSwing) => set({ arpSwing }),
+      setArpForced: (arpForced) => set({ arpForced }),
       setBassEnabled: (bassEnabled) => set({ bassEnabled }),
       setMetronomeEnabled: (metronomeEnabled) => set({ metronomeEnabled }),
       setVoiceLeading: (voiceLeading) => set({ voiceLeading }),

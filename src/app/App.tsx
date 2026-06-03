@@ -82,6 +82,7 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
   const bpm = useSettingsStore((s: any) => s.bpm);
   const arp = useSettingsStore((s: any) => s.arp);
   const setArp = useSettingsStore((s: any) => s.setArp);
+  const arpForced = useSettingsStore((s: any) => s.arpForced);
   const setIsSettingsOpen = useSettingsStore((s: any) => s.setIsSettingsOpen);
 
   const quizMode = useQuizStore((s: any) => s.quizMode);
@@ -154,12 +155,16 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
             t={t}
           />
 
+          {/* arpForced: intervals/arps/shapes/scales (or the matching quiz categories)
+              can only arpeggiate, so the toggle shows — and locks to — arpeggio while
+              forced. Taps are ignored so the user's real `arp` preference is preserved
+              and restored when they leave the tab. */}
           <SlidingToggle
-            activeIndex={!arp ? 0 : 1}
-            onPressLeft={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(false); }}
-            onPressRight={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(true); }}
-            iconLeft={<MaterialCommunityIcons name="music-note-quarter" size={16} color={!arp ? '#fff' : t.txt2} />}
-            iconRight={<Ionicons name="musical-notes" size={16} color={arp ? '#fff' : t.txt2} />}
+            activeIndex={!(arp || arpForced) ? 0 : 1}
+            onPressLeft={() => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(false); }}
+            onPressRight={() => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(true); }}
+            iconLeft={<MaterialCommunityIcons name="music-note-quarter" size={16} color={!(arp || arpForced) ? '#fff' : t.txt2} />}
+            iconRight={<Ionicons name="musical-notes" size={16} color={(arp || arpForced) ? '#fff' : t.txt2} />}
             t={t}
           />
 
@@ -223,7 +228,8 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
   // 2. Prevent the Navigator from re-rendering every time a setting changes
   const theme = useSettingsStore((s: any) => s.theme);
   const setIsSettingsOpen = useSettingsStore((s: any) => s.setIsSettingsOpen);
-  
+  const setArpForced = useSettingsStore((s: any) => s.setArpForced);
+
   const t = THEMES[theme];
   const isLight = LIGHT_THEMES.has(theme);
 
@@ -239,8 +245,10 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
     // We hook the navigation 'blur' EVENT rather than an in-screen effect because
     // freezeOnBlur (below) suspends the departing screen's React effects, so its own
     // isFocused-based stop never commits — the tone would keep ringing.
-    blur: () => { stopAudio(); },
-  }), [setIsSettingsOpen, stopAudio]);
+    // Same reason we reset the forced-arp header lock here: the focused screen
+    // re-asserts it via useFocusEffect, so any leftover lock from another tab clears.
+    blur: () => { stopAudio(); setArpForced(false); },
+  }), [setIsSettingsOpen, stopAudio, setArpForced]);
 
   React.useEffect(() => {
     if (Platform.OS === 'android') {
