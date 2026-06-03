@@ -214,10 +214,12 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
   );
 });
 
-const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, rootSemi, namingMode, onNotePress, labelMode = 'degrees', imperativeFlashRef, scaleOverlay, overlayNotes = [] }: any) {
+const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, rootSemi, namingMode, onNotePress, labelMode = 'degrees', imperativeFlashRef, scaleOverlay, overlayNotes = [], colorModeOverride }: any) {
   const { notes, minFret, maxFret } = scaleVoicing;
+  // Honor colorModeOverride (like FretboardDiagram) so the Quiz can show theme
+  // color while unanswered and role colors on reveal for scales/arps/intervals/shapes.
   const storeColorMode = useSettingsStore((s: any) => s.colorMode);
-  const colorMode = useSettingsStore((s: any) => s.colorMode);
+  const colorMode = colorModeOverride || storeColorMode;
   const flashAnims = React.useRef<Record<string, Animated.Value>>({});
   const getFlashAnim = (key: string) => {
     if (!flashAnims.current[key]) { flashAnims.current[key] = new Animated.Value(1); }

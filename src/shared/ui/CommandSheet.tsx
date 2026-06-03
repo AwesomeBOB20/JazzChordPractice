@@ -159,6 +159,22 @@ export default function CommandSheet({
     })
   ).current;
 
+  // Auto-clean stale inversion selections when available inversions shrink
+  // (e.g., user switches from block to triads-only, removing '3rd' availability).
+  useEffect(() => {
+    const hasBlock = activeVoicingTypes.includes('block');
+    const hasTriads = activeVoicingTypes.includes('triads');
+    const hasDrop = ['drop2', 'drop3', 'drop2and4'].some(t => activeVoicingTypes.includes(t));
+    const available: string[] =
+      (!hasBlock && !hasTriads && !hasDrop) ? ['root'] :
+      (hasTriads && !hasBlock && !hasDrop) ? ['root', '1st', '2nd'] :
+      ['root', '1st', '2nd', '3rd'];
+    const cleaned = activeInversions.filter(inv => available.includes(inv));
+    if (cleaned.length !== activeInversions.length) {
+      setActiveInversions(cleaned.length > 0 ? cleaned : ['root']);
+    }
+  }, [activeVoicingTypes]);
+
   useEffect(() => {
     if (visible) {
       setModalVisible(true);
@@ -356,50 +372,64 @@ export default function CommandSheet({
                   </View>
                 </View>
 
-                <View style={{ gap: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <TouchableOpacity
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                      activeOpacity={0.6}
-                      onPress={() => {
-                        const allInversions = ['root', '1st', '2nd', '3rd'];
-                        const isAllSelected = allInversions.every(v => activeInversions.includes(v));
-                        if (isAllSelected) {
-                          setActiveInversions(['root']);
-                        } else {
-                          setActiveInversions(allInversions);
-                        }
-                      }}
-                    >
-                      <Ionicons name={['root', '1st', '2nd', '3rd'].every(v => activeInversions.includes(v)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
-                      <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>INVERSIONS</Text>
-                    </TouchableOpacity>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeInversions.length} Selected</Text>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {['root', '1st', '2nd', '3rd'].map(inv => {
-                      const isActive = activeInversions.includes(inv);
-                      return (
+                {(() => {
+                  // Derive which inversions are available based on the active voicing pool.
+                  // Triads: 3 inversions (root/1st/2nd); block + drops: 4 inversions (adds 3rd).
+                  // Open/barre/shells/arps/intervals/scales/shapes have no inversion system.
+                  const hasBlock = activeVoicingTypes.includes('block');
+                  const hasTriads = activeVoicingTypes.includes('triads');
+                  const hasDrop = ['drop2', 'drop3', 'drop2and4'].some(t => activeVoicingTypes.includes(t));
+                  const availableInversions: string[] =
+                    (!hasBlock && !hasTriads && !hasDrop) ? [] :
+                    (hasTriads && !hasBlock && !hasDrop) ? ['root', '1st', '2nd'] :
+                    ['root', '1st', '2nd', '3rd'];
+                  if (availableInversions.length === 0) return null;
+                  const isAllSelected = availableInversions.every(v => activeInversions.includes(v));
+                  return (
+                    <View style={{ gap: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                         <TouchableOpacity
-                          key={inv}
-                          activeOpacity={0.7}
-                          style={{
-                            paddingHorizontal: 16,
-                            paddingVertical: 10,
-                            borderRadius: 24,
-                            backgroundColor: isActive ? t.accent : t.bg3,
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                          activeOpacity={0.6}
+                          onPress={() => {
+                            if (isAllSelected) {
+                              setActiveInversions(['root']);
+                            } else {
+                              setActiveInversions(availableInversions);
+                            }
                           }}
-                          onPress={() => toggleInversion(inv)}
                         >
-                          <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>
-                            {inv.charAt(0).toUpperCase() + inv.slice(1)}
-                          </Text>
+                          <Ionicons name={isAllSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                          <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>INVERSIONS</Text>
                         </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeInversions.filter(i => availableInversions.includes(i)).length} Selected</Text>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                        {availableInversions.map(inv => {
+                          const isActive = activeInversions.includes(inv);
+                          return (
+                            <TouchableOpacity
+                              key={inv}
+                              activeOpacity={0.7}
+                              style={{
+                                paddingHorizontal: 16,
+                                paddingVertical: 10,
+                                borderRadius: 24,
+                                backgroundColor: isActive ? t.accent : t.bg3,
+                              }}
+                              onPress={() => toggleInversion(inv)}
+                            >
+                              <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>
+                                {inv.charAt(0).toUpperCase() + inv.slice(1)}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                })()}
               </ScrollView>
             )
           ) : currentMode === 'manual' ? (
