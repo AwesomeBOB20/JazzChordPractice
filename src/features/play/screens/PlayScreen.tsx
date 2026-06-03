@@ -167,13 +167,14 @@ export default function PlayScreen() {
 
   const fireSeqFlash = (midiNotes: number[], loop = false) => {
     stopSeqFlash(); isLoopingRef.current = loop;
-    const msPerStep = 60000 / bpm / 2;
     const AUDIO_LATENCY = 60; // Sync visual to audio bridge latency
     const SLOTS = loop ? ARP_SLOTS : midiNotes.length;
-    const measureMs = msPerStep * SLOTS;
     const pattern: number[] = loop ? buildArpPattern(midiNotes) : midiNotes.slice(0, SLOTS);
     setIsPlaying(true);
     const fireMeasure = () => {
+      // Re-read BPM each measure so animation stays locked to the audio engine when tempo changes.
+      const msPerStep = 60000 / useSettingsStore.getState().bpm / 2;
+      const measureMs = msPerStep * SLOTS;
       pattern.forEach((midi, i) => {
         const fire = () => { pianoRef.current?.flashMidi(midi); fretboardRef.current?.flashMidi(midi); };
         seqFlashTimers.current.push(setTimeout(fire, Math.round(msPerStep * i) + AUDIO_LATENCY));

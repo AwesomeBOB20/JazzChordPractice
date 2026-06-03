@@ -529,7 +529,8 @@ export default function QuizScreen() {
       const seen = new Set<string>();
 
       activeSvs.forEach(sv => {
-        const nameToUse = tab === 'scales' ? sv.scaleName : sv.boxName;
+        const shapeQualityName = sv.scaleName.split(' ').slice(1).join(' ');
+        const nameToUse = tab === 'scales' ? sv.scaleName : shapeQualityName;
         if (!seen.has(nameToUse)) {
           seen.add(nameToUse);
           const pcMap = new Map<number, { role: string, formula: string }>();
@@ -555,7 +556,7 @@ export default function QuizScreen() {
               roles: pianoNotes.map((s: any) => s.role),
               formulas: pianoNotes.map((s: any) => s.formula),
               fingerprint: JSON.stringify(sv),
-              categoryId: tab === 'scales' ? sv.scaleId : sv.boxName,
+              categoryId: tab === 'scales' ? sv.scaleId : shapeQualityName,
             });
           }
         }
@@ -998,10 +999,13 @@ export default function QuizScreen() {
         }
       } else if (category === 'shape') {
         const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
-        const uniqueShapeNames = Array.from(new Set(allShapeSvs.map(s => s.scaleName)));
+        const isGuitarShapes = instrument === 'guitar';
+        const rawShapeNames = Array.from(new Set(allShapeSvs.map(s =>
+          isGuitarShapes ? s.boxName : s.scaleName
+        )));
 
         // Fallback: if no shapes exist, switch to chord category
-        if (uniqueShapeNames.length === 0) {
+        if (rawShapeNames.length === 0) {
           category = 'chord';
           finalVoicingTab = 'block';
           let optsPool = finalPool.length >= 4 ? finalPool : basePool;
@@ -1018,13 +1022,11 @@ export default function QuizScreen() {
             cIdxs = [0];
           }
         } else {
-          // Options are SHAPE TYPES (scaleName, e.g. "E Min Shape"), not box positions.
           // Visual mode keeps the root ("E Min Shape"); audio mode drops it ("Min Shape").
           const shapeLabelFor = (nm: string) => quizMode === 'visual' ? nm : nm.replace(/^[A-G][#♯b♭]?\s+/, '');
           const correctLabel = shapeLabelFor(catId);
           const seenKeys = new Set<string>([catId]);
-          // Dedupe by DISPLAYED label too, so audio mode never shows two identical
-          // "Min Shape" choices (different roots collapse to the same label).
+          // Dedupe by DISPLAYED label too, so audio mode never shows two identical choices.
           const seenLabels = new Set<string>([correctLabel]);
           const shapePool: { key: string; label: string }[] = [];
           const addShape = (nm: string) => {
@@ -1034,11 +1036,19 @@ export default function QuizScreen() {
             seenKeys.add(nm); seenLabels.add(lbl);
             shapePool.push({ key: nm, label: lbl });
           };
-          uniqueShapeNames.forEach(addShape);
-          // Pad distractors with shape types from the other pooled chords (same root).
-          for (const ct of basePool) {
-            if (shapePool.length >= 12) break;
-            buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
+          rawShapeNames.forEach(addShape);
+          if (isGuitarShapes) {
+            // Guitar box names don't vary by chord type; pad with generic box positions.
+            for (const gen of ['Box 1', 'Box 2', 'Box 3', 'Box 4', 'Box 5', 'Box 6']) {
+              if (shapePool.length >= 4) break;
+              addShape(gen);
+            }
+          } else {
+            // Piano: pad distractors with shape types from the other pooled chords (same root).
+            for (const ct of basePool) {
+              if (shapePool.length >= 12) break;
+              buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
+            }
           }
           opts = buildCategoryOptions(catId, correctLabel, shapePool);
           cIdxs = [opts.findIndex(o => o.type === catId)];

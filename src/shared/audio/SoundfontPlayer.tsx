@@ -5,6 +5,7 @@ import { Audio } from 'expo-av'; // BRING THIS BACK just for OS configuration
 import { AUDIO_ASSETS } from '@shared/audio/audioAssets';
 import { getAudioEngineHtml } from './audioEngine'; // Update this import
 import { ARP_SLOTS, buildArpPattern } from './arpPattern';
+import { useSettingsStore } from '@features/settings/store/settingsStore';
 
 // (Keep your interfaces here: PlayNotesConfig, PlayMeasureConfig, ProgressionMeasure, SoundfontPlayerRef)
 export interface PlayNotesConfig { arp: boolean; bpm: number; volume: number; guitar?: boolean; scale?: boolean; hold?: boolean; arpSwing?: boolean; refFreq?: number; }
@@ -229,18 +230,17 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       if (!pattern.length) return;
 
       let slot = 0;
-      const beatMs = 60000 / bpm;
-
-      // Each note rings for one slot (half a beat) plus a release tail, so the
-      // next note's attack arrives while the previous is gently fading out.
-      const slotMs = beatMs * 0.5;
       const arpReleaseMs = 140;
       const playNextArp = () => {
+          // Re-read BPM and swing on every beat so live control changes take effect immediately.
+          const { bpm: currentBpm, arpSwing: currentSwing } = useSettingsStore.getState();
+          const beatMs = 60000 / currentBpm;
+          const slotMs = beatMs * 0.5;
           const midi = pattern[slot % ARP_SLOTS];
           sendSchedule([{ instrument, midi, volume: vol, timeOffset: 0, durationMs: slotMs + arpReleaseMs, releaseMs: arpReleaseMs }]);
 
           const isOffbeat = slot % 2 === 1;
-          const delayToNext = isOffbeat ? beatMs * (arpSwing ? 0.66 : 0.5) : beatMs * (arpSwing ? 1.34 : 0.5);
+          const delayToNext = isOffbeat ? beatMs * (currentSwing ? 0.66 : 0.5) : beatMs * (currentSwing ? 1.34 : 0.5);
 
           slot++;
           timersRef.current.push(setTimeout(playNextArp, delayToNext));
