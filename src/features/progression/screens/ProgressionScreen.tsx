@@ -260,7 +260,7 @@ export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
   const { theme, instrument, bpm, setBpm, voiceLeading, fretCap, pianoZone, octave, arp } = useSettingsStore();
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
-  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta } = useProgressionStore();
+  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory } = useProgressionStore();
   
   const t = THEMES[theme];
   const insets = useSafeAreaInsets();
@@ -297,7 +297,7 @@ export default function ProgressionScreen() {
     
     for (let i = 0; i < progression.length; i++) {
       const chord = progression[i];
-      if (!chord) { result.push(null); continue; }
+      if (!chord || chord.spacer) { result.push(null); continue; }
       
       let rawNotes = getExtensionVoicingNotes(chord, octave);
       if (!rawNotes) {
@@ -343,7 +343,7 @@ export default function ProgressionScreen() {
     
     for (let i = 0; i < progression.length; i++) {
       const chord = progression[i];
-      if (!chord) { result.push(null); continue; }
+      if (!chord || chord.spacer) { result.push(null); continue; }
       
       const rootMidi = ((octave + 1) * 12) + chord.rootSemi;
       let baseNotes: number[] = [];
@@ -397,7 +397,7 @@ export default function ProgressionScreen() {
 
   const diagramShapes = React.useMemo(() => {
     return progression.map((chord, idx) => {
-      if (!chord) return null;
+      if (!chord || chord.spacer) return null;
       const shapes = buildHardcodedShapeVoicings(chord.chordType, chord.rootSemi, namingMode, true);
       if (!shapes || shapes.length === 0) return null;
 
@@ -460,6 +460,11 @@ export default function ProgressionScreen() {
   const [isLibModalVisible, setIsLibModalVisible] = useState(false);
   const [songName, setSongName] = useState('');
   const [isBpmModalVisible, setIsBpmModalVisible] = useState(false);
+  // Library categories
+  const [selectedLibCategory, setSelectedLibCategory] = useState('Songs');
+  const [isCatModalVisible, setIsCatModalVisible] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [moveSongId, setMoveSongId] = useState<string | null>(null);
 
   const groupedCells = React.useMemo(() => {
     const groups: any[] = [];
@@ -473,6 +478,36 @@ export default function ProgressionScreen() {
     }
     return groups;
   }, [progression]);
+
+  // Measure numbers count only cells that contain a chord. Blank (null) cells —
+  // e.g. the padding indent inserts to push content to the next row — are empty
+  // spaces, not measures, so a chord keeps its number after indenting.
+  const measureNumbers = React.useMemo(() => {
+    let count = 0;
+    return groupedCells.map((g: any) => {
+      // Spacers (indent padding) aren't measures, so they don't take a number. A `null`
+      // cell IS an empty measure and stays numbered (with its dash), as it was before.
+      const isSpacerCell = g.type === 'single' && !!g.chord?.spacer;
+      if (isSpacerCell) return null;
+      count += 1;
+      return count;
+    });
+  }, [groupedCells]);
+
+  // Section (rehearsal) letters: each measure flagged with `section` gets the next
+  // letter A, B, C… in playback order, so they relabel automatically as you add/remove.
+  const sectionLetters = React.useMemo(() => {
+    let count = 0;
+    return groupedCells.map((g: any) => {
+      const chord = g.type === 'split' ? (g.left ?? g.right) : g.chord;
+      if (chord?.section) {
+        const letter = String.fromCharCode(65 + (count % 26));
+        count += 1;
+        return letter;
+      }
+      return null;
+    });
+  }, [groupedCells]);
 
   const [isDrawerVisible, setIsDrawerVisible] = useState(false);
   const drawerSlideAnim = useRef(new Animated.Value(sheetPixelHeight)).current;
@@ -571,18 +606,20 @@ export default function ProgressionScreen() {
 
   useEffect(() => {
     const backAction = () => {
+      if (moveSongId !== null) { setMoveSongId(null); return true; }
+      if (isCatModalVisible) { setIsCatModalVisible(false); return true; }
       if (isSaveModalVisible) { setIsSaveModalVisible(false); return true; }
       if (isBpmModalVisible) { setIsBpmModalVisible(false); return true; }
       if (isLibModalVisible) { setIsLibModalVisible(false); return true; }
       if (isDrawerVisible || drawerModalVisible) { closeDrawer(); return true; }
-      return false; 
+      return false;
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
-  }, [isSaveModalVisible, isBpmModalVisible, isLibModalVisible, isDrawerVisible, drawerModalVisible]);
+  }, [moveSongId, isCatModalVisible, isSaveModalVisible, isBpmModalVisible, isLibModalVisible, isDrawerVisible, drawerModalVisible]);
 
   const playSelectedCellAudio = (idx: number, chord: any) => {
-    if (!chord) return;
+    if (!chord || chord.spacer) return;
     let notesToPlay = getChordNotes(chord.rootSemi, chord.chordType, octave);
     if (instrument === 'guitar') {
       const GS = GUITAR_TUNING;
@@ -656,7 +693,7 @@ export default function ProgressionScreen() {
     const prevIdx = selectedCell === 0 ? progression.length - 1 : selectedCell - 1; 
     setSelectedCell(prevIdx);
     const chord = progression[prevIdx];
-    if (chord) { 
+    if (chord && !chord.spacer) { 
       setBrushRoot(chord.rootSemi); setBrushType(chord.chordType); 
       useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
       playSelectedCellAudio(prevIdx, chord);
@@ -668,7 +705,7 @@ export default function ProgressionScreen() {
     const nextIdx = selectedCell === progression.length - 1 ? 0 : selectedCell + 1; 
     setSelectedCell(nextIdx);
     const chord = progression[nextIdx];
-    if (chord) { 
+    if (chord && !chord.spacer) { 
       setBrushRoot(chord.rootSemi); setBrushType(chord.chordType); 
       useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
       playSelectedCellAudio(nextIdx, chord);
@@ -692,7 +729,28 @@ export default function ProgressionScreen() {
   const isRepeatStart = targetStartCell !== null && progression[targetStartCell]?.repeatStart;
   const isRepeatEnd = targetEndCell !== null && progression[targetEndCell]?.repeatEnd;
 
-  const selectedVolta = selectedCell !== null ? progression[selectedCell]?.volta : undefined;
+  // Volta belongs to the whole measure: when the right half of a split is selected,
+  // redirect reads and writes to the left chord (the canonical owner of the measure).
+  const voltaTargetCell = isRight ? pairLeftIdx : selectedCell;
+  const selectedVolta = voltaTargetCell !== null ? progression[voltaTargetCell]?.volta : undefined;
+  // Section marker belongs to the whole measure too (left chord of a split pair).
+  const selectedSection = voltaTargetCell !== null ? !!progression[voltaTargetCell]?.section : false;
+  // Volta/section apply only to a real measure — not an empty cell or an indent spacer.
+  const targetIsRealChord = voltaTargetCell !== null && !!progression[voltaTargetCell] && !progression[voltaTargetCell]!.spacer;
+
+  // Indent: find which visual column the selected cell occupies and compute how many
+  // blank cells to insert before it to push it to the start of the next row.
+  const selectedGIdx = selectedCell !== null ? groupedCells.findIndex(g =>
+    g.type === 'split' ? (g.leftIdx === selectedCell || g.rightIdx === selectedCell) : g.idx === selectedCell
+  ) : -1;
+  const indentSpaces = selectedGIdx >= 0 ? (4 - selectedGIdx % 4) % 4 : 0;
+
+  const handleIndent = () => {
+    if (selectedCell === null || indentSpaces === 0) return;
+    const insertBefore = isRight ? (pairLeftIdx ?? selectedCell) : selectedCell;
+    insertBlanks(insertBefore, indentSpaces);
+    setSelectedCell(selectedCell + indentSpaces);
+  };
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg }]}>
@@ -750,13 +808,27 @@ export default function ProgressionScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Volta Endings */}
+            {/* Section (rehearsal) marker — boxed Times New Roman letter on the measure */}
+            <TouchableOpacity
+              disabled={!targetIsRealChord}
+              onPress={() => {
+                if (!targetIsRealChord) return;
+                toggleSection(voltaTargetCell);
+              }}
+              style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]}
+            >
+              <View style={{ width: 18, height: 18, borderWidth: 1.5, borderColor: selectedSection ? t.accent : t.txt2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 11, fontWeight: 'bold', color: selectedSection ? t.accent : t.txt2, lineHeight: 13 }}>A</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Volta Endings — always targets the full measure (left chord of a split pair) */}
             <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
               <TouchableOpacity
-                disabled={selectedCell === null || !progression[selectedCell]}
+                disabled={!targetIsRealChord}
                 onPress={() => {
-                  if (selectedCell === null || !progression[selectedCell]) return;
-                  setVolta(selectedCell, selectedVolta === 1 ? undefined : 1);
+                  if (!targetIsRealChord) return;
+                  setVolta(voltaTargetCell, selectedVolta === 1 ? undefined : 1);
                 }}
                 style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}
               >
@@ -767,10 +839,10 @@ export default function ProgressionScreen() {
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
-                disabled={selectedCell === null || !progression[selectedCell]}
+                disabled={!targetIsRealChord}
                 onPress={() => {
-                  if (selectedCell === null || !progression[selectedCell]) return;
-                  setVolta(selectedCell, selectedVolta === 2 ? undefined : 2);
+                  if (!targetIsRealChord) return;
+                  setVolta(voltaTargetCell, selectedVolta === 2 ? undefined : 2);
                 }}
                 style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}
               >
@@ -808,6 +880,13 @@ export default function ProgressionScreen() {
               }}>
                 <Ionicons name="add" size={18} color={t.accent} />
               </TouchableOpacity>
+              <TouchableOpacity
+                disabled={selectedCell === null || indentSpaces === 0}
+                style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]}
+                onPress={handleIndent}
+              >
+                <Ionicons name="return-down-forward-outline" size={18} color={t.accent} />
+              </TouchableOpacity>
             </View>
 
             {/* Delete Chord */}
@@ -843,7 +922,7 @@ export default function ProgressionScreen() {
                 } else {
                   lastTap.current = { idx, time: now };
                   setSelectedCell(selectedCell === idx ? null : idx);
-                  if (chord) {
+                  if (chord && !chord.spacer) {
                     setBrushRoot(chord.rootSemi); setBrushType(chord.chordType);
                     useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
                     playSelectedCellAudio(idx, chord);
@@ -855,7 +934,7 @@ export default function ProgressionScreen() {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 lastTap.current = { idx: -1, time: 0 };
                 setSelectedCell(idx);
-                if (chord) {
+                if (chord && !chord.spacer) {
                   setBrushRoot(chord.rootSemi); setBrushType(chord.chordType);
                   useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
                   playSelectedCellAudio(idx, chord);
@@ -878,19 +957,26 @@ export default function ProgressionScreen() {
                   
                   return (
                     <View style={{ flex: 1, width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      
-                      {/* Volta Bracket */}
+
+                      {/* Section (rehearsal) letterbox — top-left corner, aligned with volta bracket */}
+                      {!isRightHalf && !!sectionLetters[gIdx] && (
+                        <View style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderWidth: 1.5, borderColor: t.accent, alignItems: 'center', justifyContent: 'center', zIndex: 12 }} pointerEvents="none">
+                          <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 9, fontWeight: 'bold', color: t.accent, lineHeight: 11 }}>{sectionLetters[gIdx]}</Text>
+                        </View>
+                      )}
+
+                      {/* Volta Bracket — shifts right of the section box when one is present */}
                       {!!chord?.volta && (
-                        <View style={{ position: 'absolute', top: 4, left: 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
+                        <View style={{ position: 'absolute', top: 4, left: (!isRightHalf && sectionLetters[gIdx]) ? 22 : 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
                           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
                           <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
                           <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{chord.volta}.</Text>
                         </View>
                       )}
 
-                      {/* Absolute Measure Number */}
-                      {!isRightHalf && (
-                        <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
+                      {/* Absolute Measure Number — blank cells are empty spaces, not numbered measures */}
+                      {!isRightHalf && measureNumbers[gIdx] != null && (
+                        <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{measureNumbers[gIdx]}</Text>
                       )}
                       
                       {/* Left Zone: Time Sig, Start Repeat */}
@@ -946,15 +1032,21 @@ export default function ProgressionScreen() {
               if (group.type === 'single') {
                 const { idx, chord } = group;
                 const { isSelected, isPlaying, bgColor, borderColor } = getCellProps(idx);
+                // A spacer (indent padding) reads as open background — no divider lines,
+                // no content — so it looks like nothing is there. A `null` cell is still a
+                // real, empty measure: it renders normally (dash + number), as before.
+                const isSpacerCell = !!chord?.spacer;
+                const showEmpty = isSpacerCell && !isSelected && !isPlaying;
                 return (
                   <TouchableOpacity key={`cell-${idx}`} activeOpacity={1}
                     style={[
-                      styles.cell, 
-                      { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight }, 
+                      styles.cell,
+                      { backgroundColor: showEmpty ? t.bg2 : bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight },
+                      showEmpty && { borderRightWidth: 0, borderBottomWidth: 0 },
                       (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 }
                     ]}
                     onPress={() => handleCellPress(idx, chord)} onLongPress={() => handleCellLongPress(idx, chord)} delayLongPress={300}>
-                    {renderContent(chord, idx, isPlaying, false, false)}
+                    {!isSpacerCell && renderContent(chord, idx, isPlaying, false, false)}
                   </TouchableOpacity>
                 );
               } else {
@@ -1002,7 +1094,7 @@ export default function ProgressionScreen() {
                   ]}>
                      
                      {/* Absolute Measure Number */}
-                     <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{gIdx + 1}</Text>
+                     <Text style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: '700', color: isPlaying ? t.accent : t.txt3, opacity: 0.6, zIndex: 10 }}>{measureNumbers[gIdx]}</Text>
 
                      {/* Left Zone */}
                      <View style={viewMode === 'diagram' ? { position: 'absolute', left: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-start', justifyContent: 'flex-end', paddingBottom: 4, paddingLeft: 4, height: '100%', zIndex: 2 }} pointerEvents="none">
@@ -1055,19 +1147,21 @@ export default function ProgressionScreen() {
                         {!!right?.repeatEnd && ( <Text style={{ fontSize: 22, color: t.accent, fontWeight: '800', marginBottom: 1 }}>𝄇</Text> )}
                      </View>
 
-                     {/* Volta Brackets for split halves */}
-                     {!!left?.volta && (
-                       <View style={{ position: 'absolute', top: 4, left: 4, width: '50%', height: 14, zIndex: 11 }} pointerEvents="none">
-                         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
-                         <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
-                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{left.volta}.</Text>
+                     {/* Section (rehearsal) letterbox — top-left corner, aligned with volta bracket */}
+                     {!!sectionLetters[gIdx] && (
+                       <View style={{ position: 'absolute', top: 4, left: 4, width: 14, height: 14, borderWidth: 1.5, borderColor: t.accent, alignItems: 'center', justifyContent: 'center', zIndex: 12 }} pointerEvents="none">
+                         <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 9, fontWeight: 'bold', color: t.accent, lineHeight: 11 }}>{sectionLetters[gIdx]}</Text>
                        </View>
                      )}
-                     {!!right?.volta && (
-                       <View style={{ position: 'absolute', top: 4, left: '50%', right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
+
+                     {/* Volta bracket spans the full cell — volta marks the whole measure.
+                         Read from the left chord only; right.volta is a legacy fallback.
+                         Shifts right of the section box when one is present. */}
+                     {!!(left?.volta ?? right?.volta) && (
+                       <View style={{ position: 'absolute', top: 4, left: sectionLetters[gIdx] ? 22 : 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
                          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
                          <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
-                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{right.volta}.</Text>
+                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{(left?.volta ?? right?.volta)}.</Text>
                        </View>
                      )}
 
@@ -1218,28 +1312,82 @@ export default function ProgressionScreen() {
             <Text style={[styles.modalTitle, { color: t.txt1 }]}>Library</Text>
             <TouchableOpacity onPress={() => setIsLibModalVisible(false)} style={{ padding: 4 }}><Ionicons name="close" size={28} color={t.txt1} /></TouchableOpacity>
           </View>
+          {/* Category selector: Exercises / Songs / custom… + add a category */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 8 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 8, alignItems: 'center', paddingRight: 8 }}>
+              {categories.map((cat: string) => {
+                const active = selectedLibCategory === cat;
+                return (
+                  <TouchableOpacity key={cat} onPress={() => setSelectedLibCategory(cat)} activeOpacity={0.7}
+                    style={{ paddingHorizontal: 16, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? t.accent : t.bg2, borderColor: active ? t.accent : t.border }}>
+                    <Text style={{ color: active ? '#fff' : t.txt2, fontWeight: '700', fontSize: 13 }}>{cat}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity onPress={() => { setNewCatName(''); setIsCatModalVisible(true); }} activeOpacity={0.7}
+              style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.bg2, borderColor: t.border }}>
+              <Ionicons name="add" size={20} color={t.accent} />
+            </TouchableOpacity>
+          </View>
+
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-            {savedSongs.length === 0 ? (
-              <View style={styles.emptyState}>
-                <View style={{ marginBottom: 12, opacity: 0.5 }}><Ionicons name="musical-notes-outline" size={48} color={t.txt3} /></View>
-                <Text style={[styles.emptyStateTitle, { color: t.txt1 }]}>No Saved Songs</Text>
-                <Text style={[styles.emptyStateSub, { color: t.txt3 }]}>Save a progression to access it here.</Text>
-              </View>
-            ) : (
-              savedSongs.map((song: any) => (
-                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => { stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} activeOpacity={0.7}>
+            {(() => {
+              const visibleSongs = savedSongs.filter((s: any) => (s.category || 'Songs') === selectedLibCategory);
+              if (visibleSongs.length === 0) {
+                return (
+                  <View style={styles.emptyState}>
+                    <View style={{ marginBottom: 12, opacity: 0.5 }}><Ionicons name="musical-notes-outline" size={48} color={t.txt3} /></View>
+                    <Text style={[styles.emptyStateTitle, { color: t.txt1 }]}>Nothing in {selectedLibCategory}</Text>
+                    <Text style={[styles.emptyStateSub, { color: t.txt3 }]}>Long-press a song (or tap its folder icon) to move it here.</Text>
+                  </View>
+                );
+              }
+              return visibleSongs.map((song: any) => (
+                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => { stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
                   <View style={[styles.songCardIcon, { backgroundColor: t.bg3, borderColor: t.border }]}><Ionicons name="play" size={20} color={t.accent} /></View>
                   <View style={{ flex: 1, paddingHorizontal: 12 }}>
                     <Text style={{ color: t.txt1, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{song.name}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Ionicons name="timer-outline" size={12} color={t.txt3} /><Text style={{ color: t.txt3, fontSize: 12, fontWeight: '600' }}>{song.bpm} BPM</Text></View>
                   </View>
+                  <TouchableOpacity onPress={() => setMoveSongId(song.id)} style={styles.deleteBtn}><Ionicons name="folder-outline" size={18} color={t.txt3} /></TouchableOpacity>
                   <TouchableOpacity onPress={() => deleteSong(song.id)} style={styles.deleteBtn}><Ionicons name="trash-outline" size={20} color={t.accent} /></TouchableOpacity>
                 </TouchableOpacity>
-              ))
-            )}
+              ));
+            })()}
           </ScrollView>
         </View>
       </SlideUpModal>
+
+      {/* New category */}
+      <PopUpModal visible={isCatModalVisible} onClose={() => setIsCatModalVisible(false)}>
+        <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
+          <Text style={[styles.modalTitle, { color: t.txt1 }]}>New Category</Text>
+          <TextInput style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border }]} placeholder="e.g. Ballads" placeholderTextColor={t.txt3} value={newCatName} onChangeText={setNewCatName} autoFocus />
+          <View style={styles.modalBtnRow}>
+            <TouchableOpacity style={styles.modalBtn} onPress={() => setIsCatModalVisible(false)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.modalBtn, { backgroundColor: t.accent }]} onPress={() => { const n = newCatName.trim(); if (n) { addCategory(n); setSelectedLibCategory(n); setNewCatName(''); setIsCatModalVisible(false); } }}><Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Add</Text></TouchableOpacity>
+          </View>
+        </View>
+      </PopUpModal>
+
+      {/* Move song to a category */}
+      <PopUpModal visible={moveSongId !== null} onClose={() => setMoveSongId(null)}>
+        <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
+          <Text style={[styles.modalTitle, { color: t.txt1 }]}>Move to…</Text>
+          <View style={{ gap: 8, marginTop: 16 }}>
+            {categories.map((cat: string) => (
+              <TouchableOpacity key={cat} activeOpacity={0.7} onPress={() => { if (moveSongId) setSongCategory(moveSongId, cat); setMoveSongId(null); }}
+                style={{ paddingVertical: 14, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: t.border, backgroundColor: t.bg }}>
+                <Text style={{ color: t.txt1, fontSize: 15, fontWeight: '700' }}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.modalBtnRow}>
+            <TouchableOpacity style={styles.modalBtn} onPress={() => setMoveSongId(null)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Cancel</Text></TouchableOpacity>
+          </View>
+        </View>
+      </PopUpModal>
 
       <BpmModal visible={isBpmModalVisible} onClose={() => setIsBpmModalVisible(false)} />
     </View>

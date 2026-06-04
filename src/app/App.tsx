@@ -3,12 +3,12 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Audio } from 'expo-av';
-import { NavigationContainer, useNavigation, useNavigationState, DefaultTheme } from '@react-navigation/native';
+import { NavigationContainer, useNavigationState, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Platform, View, Text, TouchableOpacity, Animated, ScrollView } from 'react-native';
+import { Platform, View, Text, TouchableOpacity, Animated } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import PlayScreen from '@features/play/screens/PlayScreen';
 import SettingsScreen from '@features/settings/screens/SettingsScreen';
@@ -23,7 +23,6 @@ import * as SystemUI from 'expo-system-ui';
 import * as NavigationBar from 'expo-navigation-bar';
 import { ErrorBoundary } from '@shared/ui/ErrorBoundary';
 import BpmModal from '@shared/ui/BpmModal';
-import { LinearGradient } from 'expo-linear-gradient';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -32,10 +31,10 @@ const LIGHT_THEMES = new Set(['light', 'frost', 'sage', 'latte']);
 // ─── THE NEW GLOBAL HUD ──────────────────────────────────────────────────────
 
 function SlidingToggle({
-  activeIndex, onPressLeft, onPressRight, iconLeft, iconRight, t
+  activeIndex, onPressLeft, onPressRight, iconLeft, iconRight, t, width
 }: {
   activeIndex: number; onPressLeft: () => void; onPressRight: () => void;
-  iconLeft: React.ReactNode; iconRight: React.ReactNode; t: any;
+  iconLeft: React.ReactNode; iconRight: React.ReactNode; t: any; width?: number;
 }) {
   const anim = useRef(new Animated.Value(activeIndex)).current;
 
@@ -48,24 +47,35 @@ function SlidingToggle({
     }).start();
   }, [activeIndex]);
 
-  const BUTTON_WIDTH = 40;
+  const FIXED_BUTTON_WIDTH = 30;
   const PADDING = 4;
+  // An explicit width (from the header's measured equal-column math) makes the toggle
+  // exactly match the tempo pill; without one it falls back to its natural size.
+  const stretch = width != null && width > 0;
+  const buttonWidth = stretch
+    ? Math.max(0, (width - PADDING * 2) / 2)
+    : FIXED_BUTTON_WIDTH;
   const translateX = anim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, BUTTON_WIDTH]
+    outputRange: [0, buttonWidth]
   });
+  const cellStyle = stretch
+    ? { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, zIndex: 1 }
+    : { width: FIXED_BUTTON_WIDTH, alignItems: 'center' as const, justifyContent: 'center' as const, zIndex: 1 };
 
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: t.bg2, borderRadius: 20, padding: PADDING, borderWidth: 1, borderColor: t.border, position: 'relative', height: 40 }}>
+    <View
+      style={{ flexDirection: 'row', backgroundColor: t.bg2, borderRadius: 20, padding: PADDING, borderWidth: 1, borderColor: t.border, position: 'relative', height: 40, ...(stretch ? { width } : null) }}
+    >
       <Animated.View style={{
         position: 'absolute', left: PADDING, top: PADDING, bottom: PADDING,
-        width: BUTTON_WIDTH, backgroundColor: t.accent, borderRadius: 16,
+        width: buttonWidth, backgroundColor: t.accent, borderRadius: 16,
         transform: [{ translateX }]
       }} />
-      <TouchableOpacity activeOpacity={0.7} onPress={onPressLeft} style={{ width: BUTTON_WIDTH, alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+      <TouchableOpacity activeOpacity={0.7} onPress={onPressLeft} style={cellStyle}>
         {iconLeft}
       </TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.7} onPress={onPressRight} style={{ width: BUTTON_WIDTH, alignItems: 'center', justifyContent: 'center', zIndex: 1 }}>
+      <TouchableOpacity activeOpacity={0.7} onPress={onPressRight} style={cellStyle}>
         {iconRight}
       </TouchableOpacity>
     </View>
@@ -89,132 +99,94 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
   const setQuizMode = useQuizStore((s: any) => s.setQuizMode);
   
   const t = THEMES[theme];
-  const navigation = useNavigation<any>();
 
-  // Tracks when to show the left/right fades
-  const [showRightFade, setShowRightFade] = useState(false);
-  const [showLeftFade, setShowLeftFade] = useState(false);
-  const [isScrollable, setIsScrollable] = useState(false);
-  const scrollX = useRef(0);
-  const layoutW = useRef(0);
-  const contentW = useRef(0);
+  // Every control (instrument, arpeggiation, the Quiz-only visual/audio toggle, and
+  // tempo) gets the same explicit pixel width (computed below) so they're always equal
+  // width and fill the row. The Quiz screen just adds one more equal-width control.
+  // The settings icon stays a fixed 40×40.
+  const isQuiz = currentRoute === 'Quiz';
 
-  const checkFade = () => {
-    // Phase 2 Fix: Add a 2-pixel buffer to ignore fractional rounding and ghosting
-    // Subtract 24 to account for the ScrollView's paddingRight
-    const isOverflowing = Math.round(contentW.current - 24) > Math.round(layoutW.current) + 2;
-    
-    if (isScrollable !== isOverflowing) {
-      setIsScrollable(isOverflowing);
-    }
-
-    if (isOverflowing) {
-      const maxScroll = contentW.current - layoutW.current;
-      setShowRightFade(scrollX.current < maxScroll - 5);
-      setShowLeftFade(scrollX.current > 5);
-    } else {
-      // Lock fades off completely if all buttons fit on the screen
-      setShowRightFade(false);
-      setShowLeftFade(false);
-    }
-  };
+  // Flex-based equal columns proved unreliable (Yoga wouldn't shrink the tempo pill
+  // below its text), so we size the columns explicitly. Measure the row's inner width
+  // and divide the leftover (after the fixed settings icon + gaps) evenly among the
+  // controls. Every control then gets the SAME pixel width.
+  const H_PAD = 16;      // paddingHorizontal
+  const GAP = 8;         // gap between items
+  const SETTINGS_W = 40; // fixed settings icon
+  const [rowWidth, setRowWidth] = useState(0);
+  const numControls = isQuiz ? 4 : 3; // instrument, arp, (visual/audio), tempo
+  // gaps = one between every adjacent element (controls + settings)
+  const numGaps = numControls; // numControls + 1 elements → numControls gaps
+  const cellWidth = rowWidth > 0
+    ? Math.max(0, (rowWidth - H_PAD * 2 - SETTINGS_W - GAP * numGaps) / numControls)
+    : 0;
+  const cw = cellWidth > 0 ? cellWidth : undefined; // undefined → natural size for first frame
 
   return (
-    <View style={{
+    <View
+      onLayout={(e) => setRowWidth(e.nativeEvent.layout.width)}
+      style={{
       paddingTop: Math.max(insets.top, 20) + 8,
       paddingBottom: 12,
-      paddingHorizontal: 16,
+      paddingHorizontal: H_PAD,
       backgroundColor: t.bg,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       borderBottomWidth: 1,
       borderBottomColor: t.border,
       zIndex: 10,
-      gap: 12
+      gap: GAP
     }}>
-      {/* Left: Scrollable Toggles & Clock */}
-      <View style={{ flex: 1, position: 'relative', flexDirection: 'row' }}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          scrollEnabled={isScrollable}
-          onLayout={(e) => { layoutW.current = e.nativeEvent.layout.width; checkFade(); }}
-          onContentSizeChange={(w) => { contentW.current = w; checkFade(); }}
-          onScroll={(e) => { scrollX.current = e.nativeEvent.contentOffset.x; checkFade(); }}
-          scrollEventThrottle={16}
-          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 24 }}
-          style={{ flex: 1 }}
-        >
-          <SlidingToggle
-            activeIndex={instrument === 'piano' ? 0 : 1}
-            onPressLeft={() => setInstrument('piano')}
-            onPressRight={() => setInstrument('guitar')}
-            iconLeft={<MaterialCommunityIcons name="piano" size={16} color={instrument === 'piano' ? '#fff' : t.txt2} />}
-            iconRight={<MaterialCommunityIcons name="guitar-acoustic" size={16} color={instrument === 'guitar' ? '#fff' : t.txt2} />}
-            t={t}
-          />
+      <SlidingToggle
+        width={cw}
+        activeIndex={instrument === 'piano' ? 0 : 1}
+        onPressLeft={() => setInstrument('piano')}
+        onPressRight={() => setInstrument('guitar')}
+        iconLeft={<MaterialCommunityIcons name="piano" size={16} color={instrument === 'piano' ? '#fff' : t.txt2} />}
+        iconRight={<MaterialCommunityIcons name="guitar-acoustic" size={16} color={instrument === 'guitar' ? '#fff' : t.txt2} />}
+        t={t}
+      />
 
-          {/* arpForced: intervals/arps/shapes/scales (or the matching quiz categories)
-              can only arpeggiate, so the toggle shows — and locks to — arpeggio while
-              forced. Taps are ignored so the user's real `arp` preference is preserved
-              and restored when they leave the tab. */}
-          <SlidingToggle
-            activeIndex={!(arp || arpForced) ? 0 : 1}
-            onPressLeft={() => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(false); }}
-            onPressRight={() => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(true); }}
-            iconLeft={<MaterialCommunityIcons name="music-note-quarter" size={16} color={!(arp || arpForced) ? '#fff' : t.txt2} />}
-            iconRight={<Ionicons name="musical-notes" size={16} color={(arp || arpForced) ? '#fff' : t.txt2} />}
-            t={t}
-          />
+      {/* arpForced: intervals/arps/shapes/scales (or the matching quiz categories)
+          can only arpeggiate, so the toggle shows — and locks to — arpeggio while
+          forced. Taps are ignored so the user's real `arp` preference is preserved
+          and restored when they leave the tab. */}
+      <SlidingToggle
+        width={cw}
+        activeIndex={!(arp || arpForced) ? 0 : 1}
+        onPressLeft={() => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(false); }}
+        onPressRight={() => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(true); }}
+        iconLeft={<MaterialCommunityIcons name="music-note-quarter" size={16} color={!(arp || arpForced) ? '#fff' : t.txt2} />}
+        iconRight={<Ionicons name="musical-notes" size={16} color={(arp || arpForced) ? '#fff' : t.txt2} />}
+        t={t}
+      />
 
-          {currentRoute === 'Quiz' && (
-            <SlidingToggle
-              activeIndex={quizMode === 'visual' ? 0 : 1}
-              onPressLeft={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setQuizMode('visual'); }}
-              onPressRight={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setQuizMode('audio'); }}
-              iconLeft={<Ionicons name="eye" size={16} color={quizMode === 'visual' ? '#fff' : t.txt2} />}
-              iconRight={<Ionicons name="ear" size={16} color={quizMode === 'audio' ? '#fff' : t.txt2} />}
-              t={t}
-            />
-          )}
+      {isQuiz && (
+        <SlidingToggle
+          width={cw}
+          activeIndex={quizMode === 'visual' ? 0 : 1}
+          onPressLeft={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setQuizMode('visual'); }}
+          onPressRight={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setQuizMode('audio'); }}
+          iconLeft={<Ionicons name="eye" size={16} color={quizMode === 'visual' ? '#fff' : t.txt2} />}
+          iconRight={<Ionicons name="ear" size={16} color={quizMode === 'audio' ? '#fff' : t.txt2} />}
+          t={t}
+        />
+      )}
 
-          {/* The Master Clock */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={onOpenBpmModal}
-            style={{ paddingHorizontal: 16, height: 40, justifyContent: 'center', backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: '800', color: t.txt1, letterSpacing: 1 }}>{bpm} BPM</Text>
-          </TouchableOpacity>
-        </ScrollView>
+      {/* The Master Clock — metronome icon + live BPM. Same explicit width as the toggles. */}
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={onOpenBpmModal}
+        style={{ width: cw, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 40, paddingHorizontal: 12, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border }}
+      >
+        <MaterialCommunityIcons name="metronome" size={17} color={t.txt1} />
+        <Text style={{ fontSize: 13, fontWeight: '800', color: t.txt1, letterSpacing: 0.5 }}>{bpm}</Text>
+      </TouchableOpacity>
 
-        {/* Dynamic Linear Gradient Fades */}
-        {showLeftFade && (
-          <LinearGradient
-            colors={[t.bg, 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 24 }}
-            pointerEvents="none"
-          />
-        )}
-        {showRightFade && (
-          <LinearGradient
-            colors={['transparent', t.bg]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 24 }}
-            pointerEvents="none"
-          />
-        )}
-      </View>
-
-      {/* Right: Settings / Dashboard (Sticky) */}
       <TouchableOpacity
         activeOpacity={0.7}
         onPress={() => setIsSettingsOpen(true)}
-        style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, flexShrink: 0 }}
+        style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border }}
       >
         <Ionicons name="settings-outline" size={20} color={t.txt2} />
       </TouchableOpacity>
@@ -264,10 +236,22 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
   return (
     <Tab.Navigator
       initialRouteName="Play"
+      // PERFORMANCE: keep every tab's native views attached at all times (default on
+      // Android is to DETACH inactive screens, so each switch pays to re-attach the
+      // destination's views). With lazy:false + freeze, this makes a tab switch just a
+      // visibility toggle of already-resident, already-frozen views — the fastest path.
+      // Trade-off: higher memory (all screens resident), acceptable for ~5 screens.
+      detachInactiveScreens={false}
       screenOptions={({ route }) => ({
         header: () => <GlobalHeader onOpenBpmModal={onOpenBpmModal} currentRoute={route.name} />,
         headerShown: true,
-        freezeOnBlur: true, // PERFORMANCE: Freezes inactive tabs to save memory/CPU
+        // PERFORMANCE: pre-load every tab at startup (lazy:false) so switching is
+        // instant — no first-visit mount delay. Pairs with freezeOnBlur + the
+        // enableFreeze() in index.ts: once mounted, inactive tabs are frozen so they
+        // don't keep re-rendering in the background. (Trade-off: slightly more work at
+        // launch, in exchange for zero-delay tab switches afterward.)
+        lazy: false,
+        freezeOnBlur: true, // freeze inactive tabs after mount to save CPU
         tabBarPressColor: 'transparent', // UI POLISH: Kills the native Android gray ripple
         tabBarStyle: {
           backgroundColor: t.tabBar,

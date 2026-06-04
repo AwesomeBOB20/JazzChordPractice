@@ -66,11 +66,15 @@ function findClosestString(midi: number, cents: number, strings: { name: string;
 
 export default function TunerScreen() {
   const insets = useSafeAreaInsets();
-  const { playTone: onPlayTone, stopTone: onStopTone } = useAudio();
+  const { playTone, stopAudio } = useAudio();
   const { theme, referenceFrequency } = useSettingsStore();
   const t = THEMES[theme];
 
-  const [mode, setMode] = useState<'listen' | 'play'>('listen');
+  // The mic-based pitch detector is implemented in the Android native module only;
+  // the iOS native module is still a stub, so Listen mode would do nothing on iPhone.
+  // Hide it there and default to Play mode until the iOS pitch detector is ported.
+  const micAvailable = Platform.OS !== 'ios';
+  const [mode, setMode] = useState<'listen' | 'play'>(micAvailable ? 'listen' : 'play');
   const [tuningKey, setTuningKey] = useState('standard');
   const [showTunings, setShowTunings] = useState(false);
   const tuning = TUNINGS[tuningKey];
@@ -99,8 +103,6 @@ export default function TunerScreen() {
 
   const hasLockedInRef = useRef(false);
   const lastHapticTimeRef = useRef(0);
-
-  const micAvailable = true;
 
   // --- Pitch event producer: write refs only, never setState. ---
   useEffect(() => {
@@ -231,20 +233,19 @@ export default function TunerScreen() {
     }
   }, [isRecording]);
 
-  const STRING_VOLUME_BOOST = [3.0, 2.4, 1.8, 1.4, 1.1, 1.0];
-
   const toggleString = useCallback((stringIdx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (playingStringIdx === stringIdx) {
-      onStopTone(); setPlayingStringIdx(null);
+      stopAudio(); setPlayingStringIdx(null);
     } else {
-      onStopTone();
+      stopAudio();
       const s = tuningStrings[stringIdx];
-      const boostedVol = Math.min(100, 80 * STRING_VOLUME_BOOST[stringIdx]);
-      setTimeout(() => { onPlayTone(s.midi, boostedVol); }, 30);
+      // Smooth, continuous sine reference held until tapped off. The engine applies
+      // a per-note loudness tilt so it stays pleasant and undistorted across strings.
+      setTimeout(() => { playTone(s.midi, 100); }, 30);
       setPlayingStringIdx(stringIdx);
     }
-  }, [tuningStrings, onPlayTone, onStopTone, playingStringIdx]);
+  }, [tuningStrings, playTone, stopAudio, playingStringIdx]);
 
   // Read live values out of refs (re-read every render-tick driven by the rAF loop).
   // `renderTick` is referenced so React doesn't bail on the dependency.
@@ -290,7 +291,7 @@ export default function TunerScreen() {
               const tu = TUNINGS[key];
               return (
                 <TouchableOpacity key={key} style={[ styles.tuningOverlayItem, selected && { backgroundColor: t.accent + '18' }, index !== TUNING_KEYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.border } ]}
-                  onPress={() => { setTuningKey(key); setShowTunings(false); setPlayingStringIdx(null); onStopTone(); }}>
+                  onPress={() => { setTuningKey(key); setShowTunings(false); setPlayingStringIdx(null); stopAudio(); }}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.tuningOverlayLabel, { color: selected ? t.accent : t.txt1 }]}>{tu.label}</Text>
                     <Text style={[styles.tuningOverlayNotes, { color: t.txt3 }]}>{tu.strings.map(s => s.name.replace(/[0-9]/g, '')).join(' · ')}</Text>
@@ -461,11 +462,13 @@ export default function TunerScreen() {
 
       <View style={[styles.dock, { backgroundColor: t.bg, borderTopColor: t.border }]}>
         <View style={styles.actionRow}>
-          <TouchableOpacity style={[ styles.actionBtn, mode === 'listen' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('listen'); setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
-            <Ionicons name="mic" size={20} color={mode === 'listen' ? '#fff' : t.txt2} />
-            <Text style={[styles.actionBtnTxt, { color: mode === 'listen' ? '#fff' : t.txt2 }]}>Listen</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[ styles.actionBtn, mode === 'play' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('play'); if (isRecording) { stopListening(); setIsRecording(false); } setPlayingStringIdx(null); onStopTone(); }} activeOpacity={0.75}>
+          {micAvailable && (
+            <TouchableOpacity style={[ styles.actionBtn, mode === 'listen' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('listen'); setPlayingStringIdx(null); stopAudio(); }} activeOpacity={0.75}>
+              <Ionicons name="mic" size={20} color={mode === 'listen' ? '#fff' : t.txt2} />
+              <Text style={[styles.actionBtnTxt, { color: mode === 'listen' ? '#fff' : t.txt2 }]}>Listen</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[ styles.actionBtn, mode === 'play' ? { backgroundColor: t.accent, borderColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border } ]} onPress={() => { setMode('play'); if (isRecording) { stopListening(); setIsRecording(false); } setPlayingStringIdx(null); stopAudio(); }} activeOpacity={0.75}>
             <Ionicons name="volume-high" size={20} color={mode === 'play' ? '#fff' : t.txt2} />
             <Text style={[styles.actionBtnTxt, { color: mode === 'play' ? '#fff' : t.txt2 }]}>Play</Text>
           </TouchableOpacity>

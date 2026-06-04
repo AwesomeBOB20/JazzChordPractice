@@ -61,45 +61,74 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
   // Volta (1st/2nd ending) rules:
   //   - pass 1 through a repeat region: play volta:1 measures, skip volta:2 measures
   //   - pass 2 (after jumping back from repeatEnd): skip volta:1 measures, play volta:2 measures
+  //
+  // activeRepeatEndIdx tracks which repeatEnd we're currently iterating inside.
+  // We keep it as running state rather than re-scanning forward on every chord, because
+  // volta:2 chords live *after* the repeatEnd barline — a forward scan from their position
+  // finds no repeatEnd, so currentPass would default to 1 and they'd be skipped entirely.
   const unrollRepeats = (progression: any[]): number[] => {
     const result: number[] = [];
     const hasRepeated: Record<number, boolean> = {};
-    // passCount tracks which pass we are on for each repeatEnd barline index
     const passCount: Record<number, number> = {};
+    let activeRepeatEndIdx: number | null = null; // null = outside any repeat
     let i = 0;
+
     while (i < progression.length) {
-      if (!progression[i]) { i++; continue; }
+      if (!progression[i] || progression[i].spacer) { i++; continue; }
 
-      // Determine which repeat region (if any) this chord belongs to, and what pass we're on
       const chord = progression[i];
+      const currentPass = activeRepeatEndIdx !== null ? (passCount[activeRepeatEndIdx] ?? 1) : 1;
+      const isInActiveRepeat = activeRepeatEndIdx !== null;
 
-      // Find the nearest enclosing repeatEnd to determine current pass for this position
-      // We use the passCount of the nearest upcoming/enclosing repeatEnd
-      let enclosingRepeatEndIdx: number | null = null;
-      for (let j = i; j < progression.length; j++) {
-        if (progression[j]?.repeatEnd) { enclosingRepeatEndIdx = j; break; }
+      // Skip volta mismatches. When the skipped chord also carries a repeatEnd (e.g. the
+      // volta:1 section ends on the same barline as the repeat), clear the repeat context
+      // here so we continue in neutral mode without double-jumping or stale pass state.
+      // For split measures (two consecutive beats:2 chords sharing one cell), the volta
+      // marker lives only on the LEFT chord — skip the right half automatically so the
+      // whole measure is treated as a unit.
+      if (isInActiveRepeat) {
+        if (chord.volta === 1 && currentPass === 2) {
+          if (chord.repeatEnd && hasRepeated[i]) {
+            hasRepeated[i] = false;
+            passCount[i] = 1;
+            activeRepeatEndIdx = null;
+          }
+          i++;
+          // If this was the left half of a split, also consume the right half.
+          if (chord.beats === 2 && i < progression.length && progression[i]?.beats === 2 && !progression[i]?.volta) {
+            if (progression[i]?.repeatEnd && hasRepeated[i]) {
+              hasRepeated[i] = false;
+              passCount[i] = 1;
+              activeRepeatEndIdx = null;
+            }
+            i++;
+          }
+          continue;
+        }
+        if (chord.volta === 2 && currentPass === 1) { i++; continue; }
       }
-      const currentPass = enclosingRepeatEndIdx !== null ? (passCount[enclosingRepeatEndIdx] ?? 1) : 1;
-
-      // Skip this chord if its volta doesn't match the current pass
-      if (chord.volta === 1 && currentPass === 2) { i++; continue; }
-      if (chord.volta === 2 && currentPass === 1) { i++; continue; }
 
       result.push(i);
 
-      if (chord.repeatEnd && !hasRepeated[i]) {
-        hasRepeated[i] = true;
-        passCount[i] = 2; // next time through this repeatEnd it will be pass 2
-        let startIdx = 0;
-        for (let j = i; j >= 0; j--) {
-          if (progression[j]?.repeatStart) { startIdx = j; break; }
-        }
-        i = startIdx; // jump back to repeat start
-      } else {
-        if (chord.repeatEnd) {
+      if (chord.repeatEnd) {
+        if (!hasRepeated[i]) {
+          // Pass 1 complete: set up pass 2 and jump back to the repeat start.
+          hasRepeated[i] = true;
+          passCount[i] = 2;
+          activeRepeatEndIdx = i;
+          let startIdx = 0;
+          for (let j = i; j >= 0; j--) {
+            if (progression[j]?.repeatStart) { startIdx = j; break; }
+          }
+          i = startIdx;
+        } else {
+          // Pass 2 complete: reset state and continue forward.
           hasRepeated[i] = false;
-          passCount[i] = 1; // reset for any future loops (e.g. when the player loops the whole piece)
+          passCount[i] = 1;
+          activeRepeatEndIdx = null;
+          i++;
         }
+      } else {
         i++;
       }
     }
@@ -181,7 +210,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     const settingsStore    = useSettingsStore.getState();
     const { progression, rhythm } = progressionStore;
     const { bpm, octave, instrument, arp, arpSwing, bassEnabled, metronomeEnabled, voiceLeading,
-            mixChordVol, mixBassVol, mixClickVol, mixHiCutFreq, mixHiCutGain } = settingsStore;
+            mixChordVol, mixBassVol, mixClickVol } = settingsStore;
 
     const orderedIndices = unrollRepeats(progression);
     if (!orderedIndices.length) return [];
@@ -193,7 +222,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
 
     return slicedIndices.map((chordIdx, seqPos): ProgressionMeasure | null => {
       const chord   = progression[chordIdx];
-      if (!chord) return null;
+      if (!chord || chord.spacer) return null;
       const nextProgIdx  = seqPos + 1 < slicedIndices.length ? slicedIndices[seqPos + 1] : chordIdx;
       const nextRoot     = progression[nextProgIdx]?.rootSemi ?? chord.rootSemi;
       const beats        = chord.beats || 4;
@@ -223,8 +252,6 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
         resetBassState:   seqPos === 0, // bass state machine resets at the start of each pass
         bassVolume:       mixBassVol,
         clickVolume:      mixClickVol,
-        hiCutFreq:        mixHiCutFreq,
-        hiCutGain:        mixHiCutGain,
       } as ProgressionMeasure;
     }).filter((m): m is ProgressionMeasure => m !== null);
   };

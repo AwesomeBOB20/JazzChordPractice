@@ -22,7 +22,7 @@ export interface PlaybackOptions {
 
 interface AudioContextType {
   playChord: (overrideNotes?: number[], options?: PlaybackOptions) => void;
-  playSingleNote: (midi: number, volume: number, guitar?: boolean) => void;
+  playSingleNote: (midi: number, volume: number, guitar?: boolean, durationMs?: number | null) => void;
   stopAudio: () => void;
   playTone: (midi: number, volume: number) => void;
   stopTone: () => void;
@@ -57,8 +57,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const playSingleNote = useCallback((midi: number, volume: number, guitar?: boolean) => {
-    playerRef.current?.playSingleNote(midi, volume, guitar ?? false);
+  const playSingleNote = useCallback((midi: number, volume: number, guitar?: boolean, durationMs?: number | null) => {
+    playerRef.current?.playSingleNote(midi, volume, guitar ?? false, durationMs);
   }, []);
 
   const stopAudio = useCallback(() => {

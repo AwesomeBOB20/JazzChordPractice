@@ -225,6 +225,14 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
     if (!flashAnims.current[key]) { flashAnims.current[key] = new Animated.Value(1); }
     return flashAnims.current[key];
   };
+  // Discard stale flash-pulse values when the diagram swaps so a note whose pop was
+  // cut off mid-flight (stuck at 1.35) is never reused on the next load (which would
+  // render it enlarged). Fresh values always start at scale 1. See FretboardDiagram.
+  const prevScaleVoicingRef = React.useRef(scaleVoicing);
+  if (prevScaleVoicingRef.current !== scaleVoicing) {
+    prevScaleVoicingRef.current = scaleVoicing;
+    flashAnims.current = {};
+  }
   const flashDot = (key: string) => {
     const anim = getFlashAnim(key);
     Animated.sequence([
@@ -461,6 +469,16 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
     if (!flashAnims.current[key]) { flashAnims.current[key] = new Animated.Value(1); }
     return flashAnims.current[key];
   };
+  // When the voicing changes, discard the previous flash-pulse values. They're keyed
+  // by string+fret and persist in this ref; a value left mid-pop (e.g. 1.35, when a
+  // note's pop was cut off as the diagram swapped — useNativeDriver cancels it in
+  // place) would otherwise be reused by a new note on the same string/fret and render
+  // stuck-enlarged. Clearing guarantees every new diagram's notes start at scale 1.
+  const prevVoicingRef = React.useRef(voicing);
+  if (prevVoicingRef.current !== voicing) {
+    prevVoicingRef.current = voicing;
+    flashAnims.current = {};
+  }
   const entranceAnim = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => { entranceAnim.setValue(0); Animated.spring(entranceAnim, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }).start(); }, [voicing]);
 

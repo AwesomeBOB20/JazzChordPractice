@@ -81,7 +81,7 @@ export default function ProgressionPlayerDock({
   // pill walks through root → 2nd → 3rd → 4th → 5th of the note-role palette.
   const RHYTHMS = [
     { key: 'straight',  label: 'Straight', color: ROLE_COLORS_GLOBAL['root'] }, // orange-red
-    { key: 'swing',     label: 'Swing',    color: ROLE_COLORS_GLOBAL['2'] },    // purple
+    { key: 'swing',     label: 'Swing',    color: ROLE_COLORS_GLOBAL['7'] },    // 7th degree — yellow-brown
     { key: 'bossanova', label: 'Bossa',    color: ROLE_COLORS_GLOBAL['3'] },    // blue
     { key: 'twostep',   label: 'Two-Step', color: ROLE_COLORS_GLOBAL['4'] },    // teal
     { key: 'reggae',    label: 'Reggae',   color: ROLE_COLORS_GLOBAL['5'] },    // green
