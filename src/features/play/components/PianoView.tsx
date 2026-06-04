@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { View, ScrollView, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { Theme } from '@shared/ui/themes';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { formatDegree, SCALES, getGlobalLabel } from '@shared/theory/musicTheory';
@@ -100,6 +101,15 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
 
   const getFlashAnim = (midi: number) => { if (!flashAnims.current[midi]) { flashAnims.current[midi] = new Animated.Value(1); } return flashAnims.current[midi]; };
   const doFlashMidi = (midi: number) => { const anim = getFlashAnim(midi); Animated.sequence([ Animated.timing(anim, { toValue: 0.95, duration: 60, useNativeDriver: true }), Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }), ]).start(); };
+  // Each key gets its own tap gesture rather than sharing React Native's single touch
+  // responder, so several keys pressed at the same time each fire independently —
+  // this is what enables double stops / playing multiple notes at once.
+  const makeKeyTap = (midi: number) =>
+    Gesture.Tap()
+      .runOnJS(true)
+      .maxDuration(600000) // holding a key down before releasing still counts as a tap
+      .maxDistance(16)     // a small drag fails the tap so the keyboard can still scroll
+      .onStart(() => { doFlashMidi(midi); onNotePress?.(midi); });
   // Discard stale flash-pulse values when the displayed notes change, so a key whose
   // press-pulse was cut off mid-flight (left at 0.95) isn't reused stuck-pressed on the
   // next chord. Keyed by midi and persists in the ref otherwise. Fresh values = 1.
@@ -218,11 +228,13 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           }
 
           return (
-            <Animated.View key={pc} onStartShouldSetResponder={() => true} onResponderRelease={() => { doFlashMidi(midi); onNotePress?.(midi); }} style={[styles.whiteKey, { backgroundColor: keyColor, borderColor: theme.border, borderWidth: 1, width: keyWidth, transform: [{ translateY: whiteTransY }, { scaleY: anim }], shadowColor: isActive ? keyColor : '#000', shadowOpacity: isActive ? 0.3 : 0.05 }]}>
-              {/* Bulletproof absolutely positioned tab for the scale overlay color */}
-              {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, backgroundColor: overlayColor, borderBottomLeftRadius: 5, borderBottomRightRadius: 5 }} />}
-              <Text style={[styles.keyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
-            </Animated.View>
+            <GestureDetector key={pc} gesture={makeKeyTap(midi)}>
+              <Animated.View style={[styles.whiteKey, { backgroundColor: keyColor, borderColor: theme.border, borderWidth: 1, width: keyWidth, transform: [{ translateY: whiteTransY }, { scaleY: anim }], shadowColor: isActive ? keyColor : '#000', shadowOpacity: isActive ? 0.3 : 0.05 }]}>
+                {/* Bulletproof absolutely positioned tab for the scale overlay color */}
+                {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, backgroundColor: overlayColor, borderBottomLeftRadius: 5, borderBottomRightRadius: 5 }} />}
+                <Text style={[styles.keyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
+              </Animated.View>
+            </GestureDetector>
           );
         })}
         {BLACK_PCS.map(pc => {
@@ -270,11 +282,13 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           }
 
           return (
-            <Animated.View key={pc} onStartShouldSetResponder={() => true} onResponderRelease={() => { doFlashMidi(midi); onNotePress?.(midi); }} style={[styles.blackKeyTouch, styles.blackKey, { left: BLACK_OFFSETS[pc] * keyWidth, width: Math.round(keyWidth * 0.59), backgroundColor: keyColor, borderColor: theme.border, borderWidth: keyBorder, transform: [{ translateY: blackTransY }, { scaleY: anim }] }]}>
-              {/* Bulletproof absolutely positioned tab for the scale overlay color */}
-              {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: overlayColor, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 }} />}
-              <Text style={[styles.blackKeyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
-            </Animated.View>
+            <GestureDetector key={pc} gesture={makeKeyTap(midi)}>
+              <Animated.View style={[styles.blackKeyTouch, styles.blackKey, { left: BLACK_OFFSETS[pc] * keyWidth, width: Math.round(keyWidth * 0.59), backgroundColor: keyColor, borderColor: theme.border, borderWidth: keyBorder, transform: [{ translateY: blackTransY }, { scaleY: anim }] }]}>
+                {/* Bulletproof absolutely positioned tab for the scale overlay color */}
+                {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: overlayColor, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 }} />}
+                <Text style={[styles.blackKeyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
+              </Animated.View>
+            </GestureDetector>
           );
         })}
       </View>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Svg, { Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
 import { Theme } from '@shared/ui/themes';
 import { Voicing, VoicingGroup, ScaleVoicing } from '@shared/guitar';
@@ -116,16 +117,13 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
         elevation: isOpen ? 0 : 4,
       }}
     >
-      <TouchableOpacity
-        style={StyleSheet.absoluteFillObject}
-        onPress={onNotePress}
-        activeOpacity={0.8}
-        hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
-      >
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      {/* Per-note tap gesture (instead of the shared touch responder) so multiple
+          notes pressed at once each fire independently — enables double stops. */}
+      <GestureDetector gesture={Gesture.Tap().runOnJS(true).maxDuration(600000).maxDistance(16).onStart(() => onNotePress?.())}>
+        <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
           <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
         </View>
-      </TouchableOpacity>
+      </GestureDetector>
     </Animated.View>
   );
 });
