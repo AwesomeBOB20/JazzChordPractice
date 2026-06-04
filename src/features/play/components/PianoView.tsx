@@ -355,6 +355,15 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
 
   const getFlashAnim = (midi: number) => { if (!flashAnims.current[midi]) { flashAnims.current[midi] = new Animated.Value(1); } return flashAnims.current[midi]; };
   const doFlashMidi = (midi: number) => { const anim = getFlashAnim(midi); Animated.sequence([ Animated.timing(anim, { toValue: 0.95, duration: 60, useNativeDriver: true }), Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }), ]).start(); };
+  // Each key gets its own tap gesture rather than sharing React Native's single touch
+  // responder, so several keys pressed at the same time each fire independently —
+  // this is what enables double stops / playing multiple notes at once.
+  const makeKeyTap = (midi: number) =>
+    Gesture.Tap()
+      .runOnJS(true)
+      .maxDuration(600000) // holding a key down before releasing still counts as a tap
+      .maxDistance(16)     // a small drag fails the tap so the keyboard can still scroll
+      .onStart(() => { doFlashMidi(midi); onNotePress?.(midi); });
   // Reset any in-flight flash to rest when the displayed notes change, so a key whose
   // press-pulse was cut off mid-flight (left at 0.95) isn't reused stuck-pressed on the
   // next chord. We reset the VALUES in place rather than recreating the objects, so each
@@ -592,14 +601,18 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           const midi = base + pc;
           const v = keyVisuals.get(midi) || {};
           return (
-            <WhiteKey key={pc} keyColor={v.keyColor} keyTextColor={v.keyTextColor} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} anim={getFlashAnim(midi)} isActive={v.isActive} borderColor={theme.border} />
+            <GestureDetector key={pc} gesture={makeKeyTap(midi)}>
+              <WhiteKey keyColor={v.keyColor} keyTextColor={v.keyTextColor} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} anim={getFlashAnim(midi)} isActive={v.isActive} borderColor={theme.border} />
+            </GestureDetector>
           );
         })}
         {BLACK_PCS.map(pc => {
           const midi = base + pc;
           const v = keyVisuals.get(midi) || {};
           return (
-            <BlackKey key={pc} keyColor={v.keyColor} keyTextColor={v.keyTextColor} keyBorder={v.keyBorder} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} left={BLACK_LEFT_PCT[pc]} width={BLACK_WIDTH_PCT} anim={getFlashAnim(midi)} borderColor={theme.border} />
+            <GestureDetector key={pc} gesture={makeKeyTap(midi)}>
+              <BlackKey keyColor={v.keyColor} keyTextColor={v.keyTextColor} keyBorder={v.keyBorder} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} left={BLACK_LEFT_PCT[pc]} width={BLACK_WIDTH_PCT} anim={getFlashAnim(midi)} borderColor={theme.border} />
+            </GestureDetector>
           );
         })}
       </View>

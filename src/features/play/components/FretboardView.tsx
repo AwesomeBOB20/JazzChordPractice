@@ -168,9 +168,13 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
         elevation: isOpen ? 0 : 4,
       }}
     >
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
-      </View>
+      {/* Per-note tap gesture (instead of the shared touch responder) so multiple
+          notes pressed at once each fire independently — enables double stops. */}
+      <GestureDetector gesture={Gesture.Tap().runOnJS(true).maxDuration(600000).maxDistance(16).onStart(() => onNotePress?.())}>
+        <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+          <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
+        </View>
+      </GestureDetector>
     </Animated.View>
   );
 });
