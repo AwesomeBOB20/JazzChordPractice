@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Jazz Chord Practice",
+    "name": "Kord",
     "slug": "jazzchordpractice",
     "owner": "anthonysteller314s-organization",
     "version": "1.0.0",
@@ -27,7 +27,7 @@
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Jazz Chord Practice uses the microphone for the guitar tuner to detect the pitch of the notes you play."
+        "NSMicrophoneUsageDescription": "Kord uses the microphone for the guitar tuner to detect the pitch of the notes you play."
       }
     },
     "extra": {
