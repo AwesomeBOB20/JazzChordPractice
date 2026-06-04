@@ -28,6 +28,7 @@ import {
   Voicing,
   VoicingGroup,
   filterVoicingsByInversion,
+  anyTypeSupportsVoicingTab,
 } from '@shared/guitar';
 import { buildPianoVoicings, applyInversion } from '@shared/piano/pianoVoicings';
 import { UnifiedVoicing } from '@shared/types/models';
@@ -494,14 +495,14 @@ export default function QuizScreen() {
     } else if (tab === 'triads') {
       groups = buildTriadVoicings(ch, rootSemi, rootNoteName, nMode);
     } else if (tab === 'shells') {
-      if (ch.iv.length >= 4) {
-        groups = buildShellVoicings(chordType, ch, rootSemi, rootNoteName, '', nMode);
-      }
+      // Triads get dedicated skip-string shell grips (buildShellVoicings dispatches to
+      // buildTriadShellVoicings for 3-note chords), so don't gate on iv.length.
+      groups = buildShellVoicings(chordType, ch, rootSemi, rootNoteName, '', nMode);
     } else if (tab === 'drop2' || tab === 'drop3' || tab === 'drop2and4') {
-      if (ch.iv.length >= 4) {
-        const allDrops = buildDropVoicings(chordType, ch, rootSemi, rootNoteName, '', nMode);
-        groups = allDrops.filter(g => g.voicings[0]?.type === tab);
-      }
+      // Likewise triads have generated drop3 / drop2&4 grips (drop2 doesn't apply to a
+      // triad, so that filter simply yields nothing — handled by the caller).
+      const allDrops = buildDropVoicings(chordType, ch, rootSemi, rootNoteName, '', nMode);
+      groups = allDrops.filter(g => g.voicings[0]?.type === tab);
     }
 
     return groups.flatMap(g => g.voicings);
@@ -617,6 +618,9 @@ export default function QuizScreen() {
       let finalPianoVoicing: UnifiedVoicing | null = null;
       let finalPool: string[] = [];
       let finalVoicingTab = 'block';
+      // Tracks whether the guitar diagram will actually render something. Piano never
+      // shows "No Voicings Found" (only the fretboard does), so it starts satisfied.
+      let renderableGuitar = instrument !== 'guitar';
 
       setScaleVoicings([]);
       setArpVoicings([]);
@@ -632,7 +636,15 @@ export default function QuizScreen() {
         : ['open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'];
       
       const currentVoicingPool = activeVoicingTypes.filter(v => allowedVoicings.includes(v));
-      const finalVoicingPool = currentVoicingPool.length > 0 ? currentVoicingPool : allowedVoicings;
+      // Honor "what works with what": only draw from voicing categories that at least
+      // one of the active chord types actually supports (matches the hidden chips in
+      // the quiz settings), so the quiz never burns retries on — or falls back away
+      // from — an impossible chord+category combo. Triads always qualifies, so this is
+      // never empty.
+      const supportedVoicings = allowedVoicings.filter(v => anyTypeSupportsVoicingTab(v, instrument, basePool));
+      const poolBase = currentVoicingPool.length > 0 ? currentVoicingPool : allowedVoicings;
+      const supportedSelected = poolBase.filter(v => supportedVoicings.includes(v));
+      const finalVoicingPool = supportedSelected.length > 0 ? supportedSelected : (supportedVoicings.length > 0 ? supportedVoicings : allowedVoicings);
 
       // Filter inversions based on chord type (triads don't support 3rd inversion)
       const isTriadType = (type: string) => {
@@ -721,6 +733,7 @@ export default function QuizScreen() {
                     formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
                     categoryId: randBox.scaleId,
                   };
+                  renderableGuitar = true;
                 }
               } else if (finalVoicingTab === 'shapes') {
                 const shapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
@@ -736,6 +749,7 @@ export default function QuizScreen() {
                     formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
                     categoryId: randBox.scaleName,
                   };
+                  renderableGuitar = true;
                 }
               } else if (finalVoicingTab === 'arps' || finalVoicingTab === 'intervals') {
                 const isArp = finalVoicingTab === 'arps';
@@ -764,8 +778,12 @@ export default function QuizScreen() {
                   const scaleIds = CHORD_SCALE_MAP[finalType] || [];
                   const parentBoxes = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, namingMode);
                   const diagramName = isArp ? (subset.chordName || displayChordName) : `${subset.label} Interval`;
-                  setArpVoicings(buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subset.roles, subset.formulaLabels, diagramName));
+                  const builtArps = buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subset.roles, subset.formulaLabels, diagramName);
+                  setArpVoicings(builtArps);
                   setScaleVoicings(parentBoxes);
+                  // The fretboard arp/interval diagram renders from builtArps — if it
+                  // came back empty (no parent scale boxes), this is not renderable.
+                  renderableGuitar = builtArps.length > 0;
 
                   // Answer = the chord the arp subset spells (root+quality); if a subset
                   // somehow doesn't resolve, fall back to the parent chord name (never a
@@ -795,6 +813,7 @@ export default function QuizScreen() {
               if (finalGuitarVoicing) {
                 finalInversion = bassRoleToInversion(finalGuitarVoicing.bassNote);
               }
+              renderableGuitar = !!finalGuitarVoicing;
             }
           } else {
             const vcs = getPianoVoicingsForTab(finalVoicingTab, finalType, finalRoot, namingMode);
@@ -835,9 +854,54 @@ export default function QuizScreen() {
           if (finalGuitarVoicing) {
             finalInversion = bassRoleToInversion(finalGuitarVoicing.bassNote);
           }
+          renderableGuitar = !!finalGuitarVoicing;
         } else {
           const vcs = getPianoVoicingsForTab('block', finalType, finalRoot, namingMode);
           finalPianoVoicing = vcs.length > 0 ? pickRandom(vcs) : null;
+        }
+      }
+
+      // ── Guarantee a renderable guitar diagram ───────────────────────────────
+      // No combination of root / type / voicing tab may leave the fretboard empty
+      // ("No Voicings Found"). If the chosen question produced nothing displayable
+      // (e.g. an arp subset that spells no nameable chord, a tab with no parent
+      // scale boxes, or a chord type lacking the chosen voicing), fall back to a
+      // concrete chord voicing — barre/open maj7 exists for every root, so this
+      // always resolves.
+      if (instrument === 'guitar' && !renderableGuitar) {
+        setScaleVoicings([]); setArpVoicings([]); setShapeVoicings([]);
+        setArpSubsets([]); setIntervalSubsets([]);
+        setSafeArpSubsetIdx(0); setSafeIntervalSubsetIdx(0);
+        finalPianoVoicing = null;
+
+        const CONCRETE_TABS = ['barre', 'open', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4'];
+        const SAFE_TYPES = [finalType, 'maj7', 'min7', 'dom7', 'maj', 'min'];
+        let picked: Voicing | null = null;
+        let pickedTab = 'barre';
+        let pickedRoot = finalRoot;
+        let pickedType = finalType;
+        outer:
+        for (const ty of SAFE_TYPES) {
+          if (!CH[ty]) continue;
+          for (const tb of CONCRETE_TABS) {
+            for (let r = 0; r < 12; r++) {
+              const root = (finalRoot + r) % 12;
+              const vcs = getGuitarVoicingsForTab(tb, ty, root, namingMode);
+              if (vcs.length > 0) {
+                picked = pickRandom(vcs); pickedTab = tb; pickedRoot = root; pickedType = ty;
+                break outer;
+              }
+            }
+          }
+        }
+        if (picked) {
+          finalGuitarVoicing = picked;
+          finalRoot = pickedRoot;
+          finalType = pickedType;
+          finalVoicingTab = pickedTab;
+          finalInversion = bassRoleToInversion(picked.bassNote);
+          finalPool = [finalType];
+          renderableGuitar = true;
         }
       }
 
@@ -1033,10 +1097,18 @@ export default function QuizScreen() {
             shapePool.push({ key: nm, label: lbl });
           };
           rawShapeNames.forEach(addShape);
-          // Pad distractors with shape names from other chord types at the same root.
+          // Pad distractors with shape names from other chord types at the same root:
+          // first from the active pool (most relevant), then from ALL chord types so
+          // there are always ≥4 choices even when only one chord type is enabled.
           for (const ct of basePool) {
             if (shapePool.length >= 12) break;
             buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
+          }
+          if (shapePool.length < 3) {
+            for (const ct of ALL_CHORD_KEYS) {
+              if (shapePool.length >= 12) break;
+              buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
+            }
           }
           opts = buildCategoryOptions(catId, correctLabel, shapePool);
           cIdxs = [opts.findIndex(o => o.type === catId)];

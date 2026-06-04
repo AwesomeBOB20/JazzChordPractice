@@ -8,7 +8,7 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
   let lastMinFret: number = 0;
   
   return progression.map(chord => {
-    if (!chord) return null;
+    if (!chord || chord.spacer) return null;
     const def = CH[chord.chordType];
     if (!def) return null;
     
@@ -93,6 +93,24 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       let minD = Infinity;
       let best = allVoicings[0];
 
+      // When a targetZone is set, pre-filter to zone-adjacent voicings so that zone
+      // compliance is a hard constraint rather than a soft penalty competing against
+      // voice leading. Voice leading then picks the smoothest option *within* the zone.
+      // Fall back to the full set only if no voicings exist near the zone.
+      const ZONE_WINDOW = 5; // frets each side of targetZone treated as "in zone"
+      let candidates: typeof allVoicings;
+      if (targetZone !== null) {
+        const inZone = allVoicings.filter((v: any) => {
+          const active = v.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
+          if (!active.length) return false;
+          const minF = Math.min(...active);
+          return minF >= Math.max(0, targetZone - ZONE_WINDOW) && minF <= targetZone + ZONE_WINDOW;
+        });
+        candidates = inZone.length > 0 ? inZone : allVoicings;
+      } else {
+        candidates = allVoicings;
+      }
+
       // Calculate last position bounds for strict position locking
       const lastActive = lastFrets.filter((f: any) => f && f.fret !== null && f.fret > 0).map((f: any) => f.fret);
       const lastMin = lastActive.length ? Math.min(...lastActive) : 0;
@@ -101,7 +119,7 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       // Pre-calculate the highest active string of the previous chord for Soprano weighting
       const lastHighestStr = [0, 1, 2, 3, 4, 5].find(s => lastFrets[s] && lastFrets[s].fret !== null && lastFrets[s].fret > 0);
 
-      for (const v of allVoicings) {
+      for (const v of candidates) {
         let d = 0;
         
         // 1. TYPE PENALTY: Strict Hierarchy

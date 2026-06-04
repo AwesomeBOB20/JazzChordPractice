@@ -19,6 +19,59 @@ export const getAudioEngineHtml = (assets: any) => `
 
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioContext();
+
+    // ── MASTER BUS: gentle makeup gain → transparent safety limiter → speakers ──
+    // Every voice (samples + tone oscillators + metronome) routes through this. The
+    // earlier setup (1.5× drive into a hard-knee 20:1 brick-wall limiter) made the app
+    // louder but slammed the limiter on anything loud, which a Web Audio compressor
+    // turns into harmonic distortion (the "fuzzy/distorted" sound). Cleanliness vs.
+    // loudness is a tradeoff; this leans CLEAN: only a touch of makeup, and a soft-knee
+    // low-ratio limiter that merely catches true peaks instead of crushing everything.
+    const MASTER_DRIVE = 1.15; // light makeup. Raise = louder but pushes the limiter harder (more distortion).
+    const masterBus = audioCtx.createGain();
+    masterBus.gain.value = MASTER_DRIVE;
+    const masterLimiter = audioCtx.createDynamicsCompressor();
+    masterLimiter.threshold.value = -1.5; // only act near full scale
+    masterLimiter.knee.value = 6;          // soft knee → smooth, musical, no hard-clip fuzz
+    masterLimiter.ratio.value = 6;         // gentle catch, not a brick wall
+    masterLimiter.attack.value = 0.005;
+    masterLimiter.release.value = 0.2;     // smooth recovery, no pumping
+    masterBus.connect(masterLimiter);
+    masterLimiter.connect(audioCtx.destination); // dry path
+
+    // ── Subtle master reverb (adds 'space'/polish so nothing sounds dry & cheap) ──
+    // Algorithmically-generated impulse (decaying stereo noise) → no audio asset
+    // needed. Runs as a parallel send off the master bus and is summed back INTO the
+    // limiter, so the tail can never push the output past the ceiling. REVERB_WET
+    // controls the amount; keep it low so it's ambience, not a wash.
+    const REVERB_WET = 0.12;
+    function makeImpulse(seconds, decay) {
+      const rate = audioCtx.sampleRate;
+      const len = Math.max(1, Math.floor(rate * seconds));
+      const buf = audioCtx.createBuffer(2, len, rate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = buf.getChannelData(ch);
+        for (let i = 0; i < len; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+        }
+      }
+      return buf;
+    }
+    const reverb = audioCtx.createConvolver();
+    reverb.buffer = makeImpulse(1.8, 2.8); // ~1.8s soft room/hall
+    const reverbWet = audioCtx.createGain();
+    reverbWet.gain.value = REVERB_WET;
+    masterBus.connect(reverb);
+    reverb.connect(reverbWet);
+    reverbWet.connect(masterLimiter); // wet summed back in, then limited
+
+    // Dry bus that BYPASSES the reverb (for the metronome — clicks must stay tight and
+    // precise for practice, not get a wash of tail). Same makeup gain + limiter as the
+    // main bus, just no reverb send.
+    const dryBus = audioCtx.createGain();
+    dryBus.gain.value = MASTER_DRIVE;
+    dryBus.connect(masterLimiter);
+
     const buffers = { piano: {}, guitar: {}, bass: {} };
     let activeSources = [];
     let nextMeasureTime = 0;
@@ -238,7 +291,7 @@ export const getAudioEngineHtml = (assets: any) => `
 
                 source.connect(filter);
                 filter.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
+                gainNode.connect(dryBus); // metronome bypasses reverb (stays tight)
 
                 const time = startTime + ev.timeOffset;
                 const isAccent = ev.midi === 84;
@@ -257,13 +310,10 @@ export const getAudioEngineHtml = (assets: any) => `
 
                 source.start(time);
                 source.stop(time + 0.08);
-
-                const entry = { source, gain: gainNode };
-                source.onended = () => {
-                  const idx = activeSources.indexOf(entry);
-                  if (idx !== -1) activeSources.splice(idx, 1);
-                };
-                activeSources.push(entry);
+                // Metronome clicks are short self-stopping oscillators. Keeping them out of
+                // activeSources prevents the measure-boundary crossfade from reading their
+                // pre-fire gain (WebAudio default 1.0), cancelling their envelope, and blasting
+                // a full-volume triangle wave for the rest of the beat.
               } catch (e) {
                 bridgeLog('Metronome synthesis error: ' + e.message);
               }
@@ -305,7 +355,7 @@ export const getAudioEngineHtml = (assets: any) => `
             source.playbackRate.value = rate;
             
             source.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
+            gainNode.connect(masterBus);
 
             const eventStartTime = startTime + ev.timeOffset;
             gainNode.gain.setValueAtTime(0, eventStartTime);
@@ -353,20 +403,22 @@ export const getAudioEngineHtml = (assets: any) => `
           // Hold pad runs well below the tuner: a pure sine puts all its energy at one
           // frequency, so a high/loud one makes small phone speakers distort. Lower level
           // = smoother, non-harsh tone with headroom.
-          const vol = tunerMode ? 0.25 : 0.20;
+          const vol = tunerMode ? 0.24 : 0.20;
           const now = audioCtx.currentTime;
 
           const masterGain = audioCtx.createGain();
           masterGain.gain.setValueAtTime(0, now);
-          masterGain.gain.linearRampToValueAtTime(vol, now + (tunerMode ? 0.06 : 0.08)); // gentle attack; overlaps the outgoing tone's release for a click-free crossfade
-          masterGain.connect(audioCtx.destination);
+          masterGain.gain.linearRampToValueAtTime(vol, now + (tunerMode ? 0.12 : 0.08)); // soft breathy flute attack (tuner); overlaps the outgoing tone's release for a click-free crossfade
+          masterGain.connect(masterBus);
 
           const newOscillators = [];
           midis.forEach(midi => {
             let m = midi;
             if (tunerMode) {
-              // Tuner: shift exactly +1 octave — preserves the E·A·D·G·B·E low→high
-              // order while moving all strings into a comfortable listening range.
+              // Tuner: shift up one octave. Phone speakers can't reproduce the true
+              // low-string fundamentals (~82 Hz E), where a pure sine just rattles and
+              // sounds bad — an octave up lands every string in the range the speaker
+              // handles cleanly. The loudness tilt below keeps the top strings smooth.
               m = midi + 12;
             } else {
               // Hold chord: normalise to a comfortable middle register (C4–B5). High
@@ -376,18 +428,58 @@ export const getAudioEngineHtml = (assets: any) => `
             }
             const freq = 440 * Math.pow(2, (m - 69) / 12);
 
-            // Pure single sine per note. 1/N scaling keeps the worst-case sum at vol
-            // (no clipping) for both the hold pad and the tuner.
+            // 1/N scaling keeps the worst-case sum at vol (no clipping) for both modes.
             const noteGain = audioCtx.createGain();
-            noteGain.gain.value = 1.0 / numNotes;
-            noteGain.connect(masterGain);
-
-            const osc = audioCtx.createOscillator();
-            osc.type = 'sine';
-            osc.frequency.value = freq;
-            osc.connect(noteGain);
-            osc.start(now);
-            newOscillators.push(osc);
+            let level = 1.0 / numNotes;
+            if (tunerMode) {
+              // Equal-loudness tilt: phone speakers under-reproduce lows (so low strings
+              // sound quiet) and the ear is very sensitive up high (so high strings sound
+              // loud). Boost the lows and cut the highs hard to even them out. Centre is
+              // ~330 Hz: below that gets louder, above gets quieter.
+              const tilt = 330 / freq; // 2.0 at the low E, 0.5 at the high E
+              level *= Math.max(0.5, Math.min(1.7, tilt));
+            }
+            if (tunerMode) {
+              // Round, full tone built from EVEN/octave harmonics only — fundamental +
+              // octave + a soft double-octave. Even harmonics are octave-consonant, so it
+              // sounds round and smooth with some presence/air, but has NO odd partials
+              // (3rd/5th) and NO sawtooth, so it can't get reedy or buzzy. Deliberately
+              // NO sub-octave: that half-frequency tone rattles small phone speakers
+              // (the real source of the "buzz"). Low-pass is open so the high end stays.
+              const partials = [
+                { mult: 1.0, gain: 1.0 },  // fundamental (dominant → round)
+                { mult: 2.0, gain: 0.4 },  // octave (body/roundness)
+                { mult: 4.0, gain: 0.12 }, // double-octave (gentle air/presence)
+              ];
+              const totalGain = partials.reduce((s, p) => s + p.gain, 0);
+              noteGain.gain.value = level / totalGain; // normalise the summed partials
+              noteGain.connect(masterGain);
+              const lp = audioCtx.createBiquadFilter();
+              lp.type = 'lowpass';
+              lp.frequency.value = 3000; // open enough to keep air, tames only the very top
+              lp.Q.value = 0.5;
+              lp.connect(noteGain);
+              partials.forEach(p => {
+                const o = audioCtx.createOscillator();
+                o.type = 'sine';
+                o.frequency.value = freq * p.mult;
+                const g = audioCtx.createGain();
+                g.gain.value = p.gain;
+                o.connect(g);
+                g.connect(lp);
+                o.start(now);
+                newOscillators.push(o);
+              });
+            } else {
+              noteGain.gain.value = level;
+              noteGain.connect(masterGain);
+              const osc = audioCtx.createOscillator();
+              osc.type = 'sine'; // hold pad stays a single pure sine
+              osc.frequency.value = freq;
+              osc.connect(noteGain);
+              osc.start(now);
+              newOscillators.push(osc);
+            }
           });
 
           // Register as a tracked voice so future PLAY_TONEs and STOP_TONEs

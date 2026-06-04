@@ -100,6 +100,15 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
 
   const getFlashAnim = (midi: number) => { if (!flashAnims.current[midi]) { flashAnims.current[midi] = new Animated.Value(1); } return flashAnims.current[midi]; };
   const doFlashMidi = (midi: number) => { const anim = getFlashAnim(midi); Animated.sequence([ Animated.timing(anim, { toValue: 0.95, duration: 60, useNativeDriver: true }), Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }), ]).start(); };
+  // Discard stale flash-pulse values when the displayed notes change, so a key whose
+  // press-pulse was cut off mid-flight (left at 0.95) isn't reused stuck-pressed on the
+  // next chord. Keyed by midi and persists in the ref otherwise. Fresh values = 1.
+  const midiKey = midiNotes.join(',');
+  const prevMidiKeyRef = useRef(midiKey);
+  if (prevMidiKeyRef.current !== midiKey) {
+    prevMidiKeyRef.current = midiKey;
+    flashAnims.current = {};
+  }
   
   useImperativeHandle(ref, () => ({ 
     flashMidi: (midi: number) => doFlashMidi(midi), 

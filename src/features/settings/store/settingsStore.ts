@@ -44,8 +44,6 @@ export interface SettingsState {
   mixChordVol:  number; // 0-100  chord instrument level         (default 80)
   mixBassVol:   number; // 0-100  bass level                     (default 70)
   mixClickVol:  number; // 0-100  metronome click level          (default 80)
-  mixHiCutFreq: number; // 500-8000  highshelf start freq in Hz  (default 3500)
-  mixHiCutGain: number; // -20 to 0  shelf cut in dB             (default -8)
 
   // Actions
   setTheme: (theme: keyof typeof THEMES) => void;
@@ -73,8 +71,6 @@ export interface SettingsState {
   setMixChordVol:  (v: number) => void;
   setMixBassVol:   (v: number) => void;
   setMixClickVol:  (v: number) => void;
-  setMixHiCutFreq: (v: number) => void;
-  setMixHiCutGain: (v: number) => void;
   setOctaveNumbering: (enabled: boolean) => void;
   factoryReset: () => void;
 }
@@ -110,8 +106,6 @@ export const useSettingsStore = create<SettingsState>()(
       mixChordVol:  70,
       mixBassVol:   100,
       mixClickVol:  21,
-      mixHiCutFreq: 3500,
-      mixHiCutGain: -8,
 
       // Setters
       setTheme: (theme) => set({ theme }),
@@ -154,8 +148,6 @@ export const useSettingsStore = create<SettingsState>()(
       setMixChordVol:  (mixChordVol)  => set({ mixChordVol }),
       setMixBassVol:   (mixBassVol)   => set({ mixBassVol }),
       setMixClickVol:  (mixClickVol)  => set({ mixClickVol }),
-      setMixHiCutFreq: (mixHiCutFreq) => set({ mixHiCutFreq }),
-      setMixHiCutGain: (mixHiCutGain) => set({ mixHiCutGain }),
       setOctaveNumbering: (octaveNumbering) => set({ octaveNumbering }),
 
       factoryReset: () => set({
@@ -202,8 +194,6 @@ export const useSettingsStore = create<SettingsState>()(
         mixChordVol:  state.mixChordVol,
         mixBassVol:   state.mixBassVol,
         mixClickVol:  state.mixClickVol,
-        mixHiCutFreq: state.mixHiCutFreq,
-        mixHiCutGain: state.mixHiCutGain,
         octaveNumbering: state.octaveNumbering,
       }),
     }

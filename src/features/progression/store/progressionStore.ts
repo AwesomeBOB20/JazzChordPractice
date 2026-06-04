@@ -10,6 +10,7 @@ export interface ProgressionState {
   rhythm: string;
   guitarNeckZone: number | null;
   savedSongs: SavedSong[];
+  categories: string[];
 
   setProgressionChord: (index: number, rootSemi: number, chordType: string, instrument?: 'piano' | 'guitar', arp?: boolean) => void;
   setGuitarNeckZone: (zone: number | null) => void;
@@ -20,15 +21,29 @@ export interface ProgressionState {
   toggleRepeatStart: (index: number) => void;
   toggleRepeatEnd: (index: number) => void;
   setVolta: (index: number, volta: 1 | 2 | undefined) => void;
+  toggleSection: (index: number) => void;
   transposeProgression: (semitones: number) => void;
   setChordBeats: (index: number, beats: 2 | 3 | 4) => void;
+  insertBlanks: (beforeIdx: number, count: number) => void;
   setRhythm: (rhythm: string) => void;
 
   saveSong: (name: string, bpm: number) => void;
   loadSong: (id: string) => void;
   deleteSong: (id: string) => void;
   importSongs: (songs: SavedSong[]) => void;
+  addCategory: (name: string) => void;
+  setSongCategory: (id: string, category: string) => void;
 }
+
+// Built-in library categories. Always present (merged in on rehydrate); users can add more.
+export const DEFAULT_CATEGORIES = ['Exercises', 'Songs'];
+
+// A "spacer" is indent padding: it occupies a grid cell to push the measures after it
+// onto the next row, but it is NOT a measure. It renders as empty background (no border,
+// number, or dash) and is skipped by playback/voicing. This is deliberately distinct from
+// a `null` cell, which is a real but empty measure (shown with a dash and a measure number).
+export const makeSpacer = (): ProgressionChord => ({ rootSemi: 0, chordType: 'maj', namingMode: 'flat', spacer: true });
+export const isSpacer = (c: ProgressionChord | null | undefined): boolean => !!c && c.spacer === true;
 
 const buildMajorCircle = (): (ProgressionChord | null)[] => {
   const res: (ProgressionChord | null)[] = [];
@@ -40,7 +55,7 @@ const buildMajorCircle = (): (ProgressionChord | null)[] => {
     res.push({ rootSemi: ii, chordType: 'min7', namingMode: mode, beats: 4 });
     res.push({ rootSemi: v, chordType: 'dom7', namingMode: mode, beats: 4 });
     res.push({ rootSemi: root, chordType: 'maj7', namingMode: mode, beats: 4 });
-    res.push({ rootSemi: root, chordType: 'maj7', namingMode: mode, beats: 4 });
+    res.push({ rootSemi: root, chordType: 'maj6', namingMode: mode, beats: 4 }); // 4th bar of each line → 6th chord
   });
   return res;
 };
@@ -61,11 +76,11 @@ const buildMinorCircle = (): (ProgressionChord | null)[] => {
 };
 
 export const DEFAULT_SONGS: SavedSong[] = [
-  { id: 'default-ii-v-i', name: 'Major ii-V-I (All Keys)', bpm: 120, rhythm: 'straight', progression: buildMajorCircle() },
-  { id: 'minor-ii-v-i', name: 'Minor ii-V-i (All Keys)', bpm: 120, rhythm: 'straight', progression: buildMinorCircle() },
+  { id: 'default-ii-v-i', name: 'Major ii-V-I (All Keys)', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMajorCircle() },
+  { id: 'minor-ii-v-i', name: 'Minor ii-V-i (All Keys)', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMinorCircle() },
   { id: 'autumn-leaves', name: 'Autumn Leaves', bpm: 110, rhythm: 'straight', progression: [
     // [ Am7 D7 Gmaj7 Cmaj7 | F#m7b5 B7 Em7 E7 ]
-    { rootSemi: 9, chordType: 'min7', namingMode: 'flat', beats: 4, repeatStart: true },
+    { rootSemi: 9, chordType: 'min7', namingMode: 'flat', beats: 4, repeatStart: true, section: true },
     { rootSemi: 2, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 7, chordType: 'maj7', namingMode: 'flat', beats: 4 },
     { rootSemi: 0, chordType: 'maj7', namingMode: 'flat', beats: 4 },
@@ -81,7 +96,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 4, chordType: 'min7', namingMode: 'flat', beats: 4 },
 
     // Am7 D7 Gmaj7 Gmaj7
-    { rootSemi: 9, chordType: 'min7', namingMode: 'flat', beats: 4 },
+    { rootSemi: 9, chordType: 'min7', namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 2, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 7, chordType: 'maj7', namingMode: 'flat', beats: 4 },
     { rootSemi: 7, chordType: 'maj7', namingMode: 'flat', beats: 4 },
@@ -145,16 +160,17 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 2, chordType: 'dom7b5', namingMode: 'flat', beats: 4 },
     { rootSemi: 2, chordType: 'dom7b5', namingMode: 'flat', beats: 4 },
 
-    // Dm7 G7 C6 (Dm7 G7) ]
+    // Dm7 G7 C6 | [1st] (Dm7 G7) ]
     { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 4 },
     { rootSemi: 7, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
-    { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 2 },
+    { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 2, volta: 1 },
     { rootSemi: 7, chordType: 'dom7', namingMode: 'flat', beats: 2, repeatEnd: true },
 
-    // (Gm7 C7)
-    { rootSemi: 7, chordType: 'min7', namingMode: 'flat', beats: 2 },
+    // [2nd] (Gm7 C7) — blank cells indent the Fmaj7 section to the next row
+    { rootSemi: 7, chordType: 'min7', namingMode: 'flat', beats: 2, volta: 2 },
     { rootSemi: 0, chordType: 'dom7', namingMode: 'flat', beats: 2 },
+    makeSpacer(), makeSpacer(), makeSpacer(),
 
     // Fmaj7 Fmaj7 Fmaj7 Fmaj7
     { rootSemi: 5, chordType: 'maj7', namingMode: 'flat', beats: 4 },
@@ -184,7 +200,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
   ]},
   { id: 'all-of-me', name: 'All of Me', bpm: 120, rhythm: 'straight', progression: [
     // C6 C6 E7 E7
-    { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
+    { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
     { rootSemi: 4, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 4, chordType: 'dom7', namingMode: 'flat', beats: 4 },
@@ -204,7 +220,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 4 },
     { rootSemi: 7, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     // C6 C6 E7 E7
-    { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
+    { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
     { rootSemi: 4, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 4, chordType: 'dom7', namingMode: 'flat', beats: 4 },
@@ -254,6 +270,7 @@ export const useProgressionStore = create<ProgressionState>()(
       rhythm: 'straight',
       guitarNeckZone: null,
       savedSongs: DEFAULT_SONGS,
+      categories: [...DEFAULT_CATEGORIES],
 
       setGuitarNeckZone: (zone) => set({ guitarNeckZone: zone }),
 
@@ -269,6 +286,7 @@ export const useProgressionStore = create<ProgressionState>()(
           repeatStart: existing?.repeatStart,
           repeatEnd: existing?.repeatEnd,
           volta: existing?.volta,
+          spacer: false, // filling a cell turns a spacer into a real measure
           intervals: getChordIntervals(chordType),
         };
         return { progression: next };
@@ -300,17 +318,22 @@ export const useProgressionStore = create<ProgressionState>()(
       }),
       toggleRepeatStart: (index) => set((state) => {
         const next = [...state.progression];
-        if (next[index]) next[index] = { ...next[index]!, repeatStart: !next[index]!.repeatStart };
+        if (next[index] && !next[index]!.spacer) next[index] = { ...next[index]!, repeatStart: !next[index]!.repeatStart };
         return { progression: next };
       }),
       toggleRepeatEnd: (index) => set((state) => {
         const next = [...state.progression];
-        if (next[index]) next[index] = { ...next[index]!, repeatEnd: !next[index]!.repeatEnd };
+        if (next[index] && !next[index]!.spacer) next[index] = { ...next[index]!, repeatEnd: !next[index]!.repeatEnd };
         return { progression: next };
       }),
       setVolta: (index, volta) => set((state) => {
         const next = [...state.progression];
-        if (next[index]) next[index] = { ...next[index]!, volta };
+        if (next[index] && !next[index]!.spacer) next[index] = { ...next[index]!, volta };
+        return { progression: next };
+      }),
+      toggleSection: (index) => set((state) => {
+        const next = [...state.progression];
+        if (next[index] && !next[index]!.spacer) next[index] = { ...next[index]!, section: !next[index]!.section };
         return { progression: next };
       }),
       transposeProgression: (semitones) => set((state) => {
@@ -325,15 +348,23 @@ export const useProgressionStore = create<ProgressionState>()(
         if (next[index]) next[index] = { ...next[index]!, beats };
         return { progression: next };
       }),
+      insertBlanks: (beforeIdx, count) => set((state) => {
+        const next = [...state.progression];
+        // Indent inserts spacers (empty background), not blank measures — so the chord
+        // keeps its number and the gap reads as open space rather than added measures.
+        next.splice(beforeIdx, 0, ...Array.from({ length: count }, makeSpacer));
+        return { progression: next };
+      }),
       setRhythm: (rhythm) => set({ rhythm }),
       
       saveSong: (name, bpm) => set((state) => ({
-        savedSongs: [...state.savedSongs, { 
+        savedSongs: [...state.savedSongs, {
           id: Date.now().toString(),
-          name, 
-          progression: state.progression, 
+          name,
+          progression: state.progression,
           bpm,
-          rhythm: state.rhythm
+          rhythm: state.rhythm,
+          category: 'Songs',
         }]
       })),
       loadSong: (id) => set((state) => {
@@ -362,10 +393,36 @@ export const useProgressionStore = create<ProgressionState>()(
         
         return { savedSongs: [...state.savedSongs, ...songsToAdd] };
       }),
+      addCategory: (name) => set((state) => {
+        const trimmed = name.trim();
+        if (!trimmed || state.categories.includes(trimmed)) return state;
+        return { categories: [...state.categories, trimmed] };
+      }),
+      setSongCategory: (id, category) => set((state) => ({
+        savedSongs: state.savedSongs.map((s) => (s.id === id ? { ...s, category } : s)),
+      })),
     }),
     {
       name: 'jazz-progression-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      // Preset songs are read-only references keyed by a fixed id. saveSong() always
+      // mints a fresh numeric id, so user songs never collide with presets. Re-deriving
+      // presets from DEFAULT_SONGS on every rehydrate means code edits to a preset (new
+      // endings, fixed chords, etc.) actually reach the user instead of being shadowed by
+      // their persisted snapshot. User-saved songs (non-preset ids) are preserved.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<ProgressionState>;
+        const presetIds = new Set(DEFAULT_SONGS.map((s) => s.id));
+        const userSongs = (p.savedSongs ?? []).filter((s) => !presetIds.has(s.id));
+        // Built-in categories always present; user-added categories preserved and appended.
+        const categories = Array.from(new Set([...DEFAULT_CATEGORIES, ...(p.categories ?? [])]));
+        return {
+          ...current,
+          ...p,
+          savedSongs: [...DEFAULT_SONGS, ...userSongs],
+          categories,
+        };
+      },
     }
   )
 );

@@ -135,12 +135,16 @@ export const HARDCODED_SHAPES = {
     { name: 'G Shape', frets: [[4],[2,3],[1],[1,4,5],[4],[4]], roles: [['1'],['b3','3'],['5'],['1','b3','3'],['5'],['1']] }
   ],
 
+  // Major ♭5 shape = the major shape with only the 5th lowered a semitone to ♭5; the
+  // 1, 2 and 3 are unchanged. Frets verified to sound exactly {1, 2, 3, ♭5} per string.
+  // (C Shape: its 5th sat at relative fret 0, which can't drop to ♭5 in-position, so that
+  // one note is omitted — the ♭5 still appears on the outer strings.)
   'maj_b5_shape': [
-    { name: 'E Shape', frets: [[2,4],[1,3],[3],[1,2],[1],[2,4]], roles: [['1','2'],['3','b5'],['1'],['2','3'],['b5'],['1','2']] },
-    { name: 'D Shape', frets: [[2,4],[2],[2,4],[1,2],[4],[2,4]], roles: [['2','3'],['b5'],['1','2'],['3','b5'],['1'],['2','3']] },
-    { name: 'C Shape', frets: [[0,3],[3],[0,2],[0],[1,2],[0,3]], roles: [['3','b5'],['1'],['2','3'],['b5'],['1','2'],['3','b5']] },
-    { name: 'A Shape', frets: [[2],[2,4],[1,2],[3],[2,4],[2]], roles: [['b5'],['1','2'],['3','b5'],['1'],['2','3'],['b5']] },
-    { name: 'G Shape', frets: [[4],[1,2],[1],[1,2],[2,4],[4]], roles: [['1'],['2','3'],['b5'],['1','2'],['3','b5'],['1']] }
+    { name: 'E Shape', frets: [[2,4],[1,3],[4],[1,3],[1],[2,4]], roles: [['1','2'],['3','b5'],['1'],['2','3'],['b5'],['1','2']] },
+    { name: 'D Shape', frets: [[2,4],[1],[2,4],[1,3],[5],[2,4]], roles: [['2','3'],['b5'],['1','2'],['3','b5'],['1'],['2','3']] },
+    { name: 'C Shape', frets: [[0,2],[3],[0,2],[],[1,3],[0,2]], roles: [['3','b5'],['1'],['2','3'],[],['1','2'],['3','b5']] },
+    { name: 'A Shape', frets: [[1],[2,4],[1,3],[4],[2,4],[1]], roles: [['b5'],['1','2'],['3','b5'],['1'],['2','3'],['b5']] },
+    { name: 'G Shape', frets: [[4],[1,3],[0],[1,3],[1,3],[4]], roles: [['1'],['2','3'],['b5'],['1','2'],['3','b5'],['1']] }
   ],
 
 };

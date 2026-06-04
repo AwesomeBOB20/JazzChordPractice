@@ -9,12 +9,12 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 
 // (Keep your interfaces here: PlayNotesConfig, PlayMeasureConfig, ProgressionMeasure, SoundfontPlayerRef)
 export interface PlayNotesConfig { arp: boolean; bpm: number; volume: number; guitar?: boolean; scale?: boolean; hold?: boolean; arpSwing?: boolean; refFreq?: number; }
-export interface PlayMeasureConfig { bpm: number; volume: number; guitar?: boolean; arp?: boolean; resetClock?: boolean; bassEnabled?: boolean; metronomeEnabled?: boolean; arpSwing?: boolean; beats?: number; rhythm?: string; voiceLeading?: boolean; intervals?: number[]; nextRoot?: number; rootSemi?: number; refFreq?: number; bassLine?: number[]; countOff?: boolean; bassVolume?: number; clickVolume?: number; hiCutFreq?: number; hiCutGain?: number; skipTransitionFade?: boolean; }
-export interface ProgressionMeasure { chordIdx: number; midiNotes: number[]; beats: number; bpm: number; volume: number; guitar: boolean; arp: boolean; arpSwing: boolean; rhythm: string; intervals: number[]; nextRoot: number; rootSemi: number; bassLine: number[]; bassEnabled: boolean; metronomeEnabled: boolean; voiceLeading: boolean; resetBassState: boolean; bassVolume: number; clickVolume: number; hiCutFreq: number; hiCutGain: number; }
+export interface PlayMeasureConfig { bpm: number; volume: number; guitar?: boolean; arp?: boolean; resetClock?: boolean; bassEnabled?: boolean; metronomeEnabled?: boolean; arpSwing?: boolean; beats?: number; rhythm?: string; voiceLeading?: boolean; intervals?: number[]; nextRoot?: number; rootSemi?: number; refFreq?: number; bassLine?: number[]; countOff?: boolean; bassVolume?: number; clickVolume?: number; skipTransitionFade?: boolean; }
+export interface ProgressionMeasure { chordIdx: number; midiNotes: number[]; beats: number; bpm: number; volume: number; guitar: boolean; arp: boolean; arpSwing: boolean; rhythm: string; intervals: number[]; nextRoot: number; rootSemi: number; bassLine: number[]; bassEnabled: boolean; metronomeEnabled: boolean; voiceLeading: boolean; resetBassState: boolean; bassVolume: number; clickVolume: number; }
 
 export interface SoundfontPlayerRef {
   playNotes: (midiNotes: number[], config: PlayNotesConfig) => void;
-  playSingleNote: (midi: number, volume: number, guitar?: boolean) => void;
+  playSingleNote: (midi: number, volume: number, guitar?: boolean, durationMs?: number | null) => void;
   playArpLoop: (midiNotes: number[], bpm: number, volume: number, guitar?: boolean, arpSwing?: boolean) => void;
   stop: () => void;
   playMeasure: (midiNotes: number[], config: PlayMeasureConfig) => void;
@@ -71,20 +71,6 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         setIsEngineReady(true);
       } else if (data.type === 'LOG') {
         console.log("[WebView Engine]:", data.message);
-      } else if (data.type === 'MEASURE_DOWNBEAT') {
-        // The engine sent this measure's downbeat as an absolute wall-clock target, well
-        // ahead of the beat. Schedule our own timer to that target (minus a small render
-        // lead) so the highlight border lands on the beat — locked to the audio clock,
-        // free of bridge latency, and with no cumulative drift over the song.
-        if (progOnChordChangeRef.current && typeof data.targetWallMs === 'number') {
-          const RENDER_LEAD_MS = 62; // compensate the setState -> re-render -> paint delay (~4 frames)
-          const delay = Math.max(0, data.targetWallMs - Date.now() - RENDER_LEAD_MS);
-          const tid = setTimeout(() => {
-            timersRef.current = timersRef.current.filter(t => t !== tid);
-            progOnChordChangeRef.current?.(data.seqIdx, data.chordIdx);
-          }, delay);
-          timersRef.current.push(tid);
-        }
       }
     } catch (e) {
       console.warn("WebView Message Error:", e);
@@ -191,8 +177,9 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       sendSchedule(events);
     },
 
-    playSingleNote: (midi, volume, guitar = false) => {
-      sendSchedule([{ instrument: guitar ? 'guitar' : 'piano', midi, volume: volume / 100, timeOffset: 0, durationMs: 1000, releaseMs: 350 }]);
+    playSingleNote: (midi, volume, guitar = false, durationMs = 1000) => {
+      // durationMs === null → ring the full sample (held out) until STOP_ALL stops it.
+      sendSchedule([{ instrument: guitar ? 'guitar' : 'piano', midi, volume: volume / 100, timeOffset: 0, durationMs, releaseMs: 350 }]);
     },
 
     playTone: (midi, volume) => {
@@ -332,11 +319,21 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         const currentIdx = progSeqIdxRef.current;
         const currentChordIdx = measure.chordIdx;
 
-        // Wall-clock start of this measure's audio. Used ONLY to pace the look-ahead
-        // scheduler below — NOT to drive the highlight. The highlight is fired from the
-        // WebView's audio clock via MEASURE_DOWNBEAT (passed as the downbeat meta on the
-        // schedule call), which stays locked to the audio and never drifts over the song.
+        // Wall-clock start of this measure's audio, derived from the absolute JS timeline.
         const measureStartMs = progBaseTimeRef.current + progLoopOffsetRef.current + progMeasureOffsetsRef.current[currentIdx];
+
+        // Schedule the visual highlight from the JS side using measureStartMs directly.
+        // This avoids the WebView bridge round-trip (30–80 ms) that previously made the
+        // border update arrive late. We know the wall-clock target here in JS already —
+        // no need to wait for MEASURE_DOWNBEAT to bounce back through the bridge.
+        // RENDER_LEAD_MS compensates for setState → reconcile → native commit → GPU paint.
+        const RENDER_LEAD_MS = 150;
+        const highlightDelay = Math.max(0, measureStartMs - Date.now() - RENDER_LEAD_MS);
+        const highlightTid = setTimeout(() => {
+          timersRef.current = timersRef.current.filter(t => t !== highlightTid);
+          progOnChordChangeRef.current?.(currentIdx, currentChordIdx);
+        }, highlightDelay);
+        timersRef.current.push(highlightTid);
 
         const instrument = measure.guitar ? 'guitar' : 'piano';
         const vol = Math.min(1.5, (measure.volume / 100) * 1.5);
@@ -501,7 +498,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         }
 
         const currentMeasureMs = (beatSecs * 1000) * measure.beats;
-        sendSchedule(events, currentMeasureMs, { seqIdx: currentIdx, chordIdx: currentChordIdx });
+        sendSchedule(events, currentMeasureMs);
         
         // Schedule the next check at absolute time: 250ms before next measure starts.
         // 100ms was too tight — the JS→WebView bridge can add 30–80ms of latency, and the

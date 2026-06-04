@@ -8,6 +8,7 @@ import { useChordStore } from '@features/play/store/chordStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
 import { THEMES } from '@shared/ui/themes';
 import { CH, NOTE_FLAT, NOTE_SHARP, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
+import { anyTypeSupportsVoicingTab } from '@shared/guitar';
 
 const ROOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
@@ -63,6 +64,14 @@ export default function CommandSheet({
         { key: 'scales', label: 'Scales' },
       ];
   
+  // Hide voicing categories that NONE of the selected chord types support (e.g. a
+  // 7♭5 has no Open shape → the Open chip disappears). When no chord types are
+  // selected the quiz draws from all of them, so show every category. Triads is
+  // always supported, so this list is never empty.
+  const availableVoicingOptions = activeTypes.length === 0
+    ? voicingOptions
+    : voicingOptions.filter(o => anyTypeSupportsVoicingTab(o.key, instrument, activeTypes));
+
   const t = THEMES[theme];
   const insets = useSafeAreaInsets();
 
@@ -333,7 +342,7 @@ export default function CommandSheet({
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
                       activeOpacity={0.6}
                       onPress={() => {
-                        const allKeys = voicingOptions.map(o => o.key);
+                        const allKeys = availableVoicingOptions.map(o => o.key);
                         const isAllSelected = allKeys.every(v => activeVoicingTypes.includes(v));
                         if (isAllSelected) {
                           setActiveVoicingTypes([allKeys[0]]); // Keep at least one to prevent crash
@@ -342,14 +351,14 @@ export default function CommandSheet({
                         }
                       }}
                     >
-                      <Ionicons name={voicingOptions.map(o => o.key).every(v => activeVoicingTypes.includes(v)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                      <Ionicons name={availableVoicingOptions.map(o => o.key).every(v => activeVoicingTypes.includes(v)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
                       <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>ACTIVE VOICING POOL</Text>
                     </TouchableOpacity>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{voicingOptions.map(o => o.key).filter(v => activeVoicingTypes.includes(v)).length} Selected</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{availableVoicingOptions.filter(v => activeVoicingTypes.includes(v.key)).length} Selected</Text>
                   </View>
                   
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {voicingOptions.map(item => {
+                    {availableVoicingOptions.map(item => {
                       const isActive = activeVoicingTypes.includes(item.key);
                       return (
                         <TouchableOpacity

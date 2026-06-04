@@ -11,7 +11,7 @@ import { useChordStore } from '@features/play/store/chordStore';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
 import { ChordCard, CommandSheet, PianoView, type PianoViewRef, FretboardView, type FretboardViewRef } from '@shared/ui';
-import { buildTriadVoicings, buildShellVoicings, buildDropVoicings, buildScaleVoicings, buildArpVoicings, getArpSubsets, getIntervalSubsets, VoicingGroup, ScaleVoicing, buildOpenVoicings, buildBarreVoicings, buildHardcodedShapeVoicings, ShapeDisplayMode, OPEN_SHAPES, BARRE_SHAPES, findTriads, DROP_VOICINGS } from '@shared/guitar';
+import { buildTriadVoicings, buildShellVoicings, buildDropVoicings, buildScaleVoicings, buildArpVoicings, getArpSubsets, getIntervalSubsets, VoicingGroup, ScaleVoicing, buildOpenVoicings, buildBarreVoicings, buildHardcodedShapeVoicings, ShapeDisplayMode, OPEN_SHAPES, BARRE_SHAPES, findTriads, DROP_VOICINGS, voicingTabSupportsType } from '@shared/guitar';
 import { SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { buildPianoVoicings } from '@shared/piano';
 import { useAudio } from '@shared/audio/AudioContext';
@@ -364,34 +364,9 @@ export default function PlayScreen() {
   };
 
   const getEligibleTypesForTab = (tab: VoicingTabKey, instr: string, types: string[]): string[] => {
-    const isPiano = instr === 'piano';
-    const filtered = types.filter(t => {
-      const ch = CH[t];
-      if (!ch) return false;
-      switch (tab) {
-        case 'block': return isPiano;
-        case 'open': return !isPiano && t in OPEN_SHAPES;
-        case 'barre': return !isPiano && t in BARRE_SHAPES;
-        case 'triads': return true;
-        case 'shells': {
-          if (isPiano) {
-            return ch.iv.length >= 4 && ch.iv.some(iv => iv === 9 || iv === 10 || iv === 11);
-          }
-          return ch.iv.length >= 3; // triads now get shells too (full triad on the 6 shell string sets)
-        }
-        case 'drop2':
-        case 'drop3':
-        case 'drop2and4': {
-          if (isPiano) return ch.iv.length >= 4;
-          return ch.iv.length >= 3; // triads included — they get drop voicings too (doubled note on 4-string shapes)
-        }
-        case 'scales': return (CHORD_SCALE_MAP[t] ?? []).length > 0;
-        case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
-        case 'intervals': return getIntervalSubsets(ch.iv, ch.r, ch.f || []).length > 0;
-        case 'shapes': return buildHardcodedShapeVoicings(t, 0, 'sharp').length > 0;
-        default: return true;
-      }
-    });
+    // Uses the shared voicingTabSupportsType predicate (single source of truth shared
+    // with the quiz settings + quiz generation) so eligibility never drifts.
+    const filtered = types.filter(t => voicingTabSupportsType(tab, instr, t));
     return filtered.length > 0 ? filtered : types;
   };
 
@@ -879,7 +854,17 @@ export default function PlayScreen() {
   const ALL_VOICING_TABS: { key: VoicingTabKey; label: string }[] = [ { key: 'block', label: 'Block' }, { key: 'open', label: 'Open' }, { key: 'barre', label: 'Barre' }, { key: 'triads', label: 'Triads' }, { key: 'shells', label: 'Shells' }, { key: 'drop2',  label: 'Drop 2' }, { key: 'drop3',  label: 'Drop 3' }, { key: 'drop2and4', label: 'Drop 2 & 4' }, { key: 'intervals', label: 'Intervals' }, { key: 'arps',   label: 'Arps' }, { key: 'shapes', label: 'Shapes' }, { key: 'scales', label: 'Scales' } ];
   const VOICING_TABS = ALL_VOICING_TABS.filter(tab => tabCounts[tab.key] > 0);
 
-  React.useEffect(() => { if (tabCounts[voicingTab] === 0 && VOICING_TABS.length > 0) setVoicingTab(VOICING_TABS[0].key); }, [tabCounts]);
+  // If the current voicing tab isn't valid for the current chord/instrument (count 0
+  // — e.g. 'block' right after switching to guitar, or 'open' after switching to
+  // piano), correct it DURING render rather than in an effect. A useEffect runs AFTER
+  // paint, so the diagram would flash its "No Voicings Found" empty state for one frame
+  // before the fix — that's the glitch when switching instruments. Setting state during
+  // render makes React re-render synchronously with the valid tab BEFORE committing, so
+  // the bad frame never paints. The `!==` guard makes it converge in one pass
+  // (VOICING_TABS[0] always has count > 0, and tabCounts doesn't depend on voicingTab).
+  if (tabCounts[voicingTab] === 0 && VOICING_TABS.length > 0 && voicingTab !== VOICING_TABS[0].key) {
+    setVoicingTab(VOICING_TABS[0].key);
+  }
 
   React.useLayoutEffect(() => {
     if (instrument !== 'piano') return;
