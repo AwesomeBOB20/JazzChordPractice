@@ -1,5 +1,6 @@
-import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { View, ScrollView, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { Theme } from '@shared/ui/themes';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { formatDegree, SCALES, getGlobalLabel } from '@shared/theory/musicTheory';
@@ -170,6 +171,61 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   const lowestRoot = minMidi - ((minMidi - rootSemi + 12) % 12);
   const highestRoot = maxMidi + ((rootSemi - maxMidi % 12 + 12) % 12);
 
+  // ── True multitouch input ──────────────────────────────────────────────────
+  // The keys themselves are purely visual (no touch handlers). Per-key handlers —
+  // whether TouchableOpacity, the JS responder system, or onTouchEnd — all funnel
+  // through React Native's single-pointer model inside a ScrollView, so only ONE note
+  // could ever sound at a time. Instead, ONE gesture surface covers the whole keyboard,
+  // reads every active finger (changedTouches), and hit-tests each finger's (x,y) to a
+  // key, firing on finger-DOWN. Pressing C and G together => both play at once.
+  //
+  // hitTestMidi maps a point in keyboard-content space to a MIDI note using the exact
+  // same geometry the keys are drawn with (keyWidth, BLACK_OFFSETS, BKH). Black keys sit
+  // on top and win wherever the touch falls inside their narrower/shorter footprint.
+  const hitTestMidi = useCallback((x: number, y: number): number | null => {
+    const kw = keyWidth;
+    const octaveWidth = 7 * kw;
+    if (x < 0 || y < 0) return null;
+    const octaveIndex = Math.floor(x / octaveWidth);
+    if (octaveIndex < 0 || octaveIndex >= OCTAVE_LIST.length) return null;
+    const base = OCTAVE_LIST[octaveIndex] * 12;
+    const xInOct = x - octaveIndex * octaveWidth;
+    // Black keys occupy the top BKH px; check them first since they render above whites.
+    if (y <= BKH) {
+      const bw = Math.round(kw * 0.59);
+      for (const pc of BLACK_PCS) {
+        const left = BLACK_OFFSETS[pc] * kw;
+        if (xInOct >= left && xInOct <= left + bw) return base + pc;
+      }
+    }
+    // Otherwise the white key under x.
+    let wi = Math.floor(xInOct / kw);
+    if (wi < 0) wi = 0; else if (wi > 6) wi = 6;
+    return base + WHITE_PCS[wi];
+  }, [keyWidth]);
+
+  // Refs keep the gesture instance stable across renders while always calling the latest
+  // handlers/geometry (onNotePress is recreated by the parent on every render).
+  const hitTestRef = useRef(hitTestMidi); hitTestRef.current = hitTestMidi;
+  const onNotePressRef = useRef(onNotePress); onNotePressRef.current = onNotePress;
+
+  // Gesture.Manual never activates on its own, so it does NOT steal the gesture from the
+  // surrounding ScrollView — drag-to-scroll, auto-centering and zoom all keep working.
+  // We only consume the raw touch stream: every finger that goes down plays its key.
+  // runOnJS(true) lets the callback call onNotePress (a JS bridge call) directly.
+  const keyGesture = useMemo(() =>
+    Gesture.Manual()
+      .runOnJS(true)
+      .onTouchesDown((e) => {
+        for (const t of e.changedTouches) {
+          const midi = hitTestRef.current(t.x, t.y);
+          if (midi == null) continue;
+          doFlashMidi(midi);
+          onNotePressRef.current?.(midi);
+        }
+      }),
+  []);
+
   const renderOctave = (oct: number) => {
     const base = oct * 12; const noteNamesArr = namingMode === 'flat' ? ALL_NOTE_NAMES_FLAT : ALL_NOTE_NAMES_SHARP;
 
@@ -218,7 +274,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           }
 
           return (
-            <Animated.View key={pc} onStartShouldSetResponder={() => true} onResponderRelease={() => { doFlashMidi(midi); onNotePress?.(midi); }} style={[styles.whiteKey, { backgroundColor: keyColor, borderColor: theme.border, borderWidth: 1, width: keyWidth, transform: [{ translateY: whiteTransY }, { scaleY: anim }], shadowColor: isActive ? keyColor : '#000', shadowOpacity: isActive ? 0.3 : 0.05 }]}>
+            <Animated.View key={pc} style={[styles.whiteKey, { backgroundColor: keyColor, borderColor: theme.border, borderWidth: 1, width: keyWidth, transform: [{ translateY: whiteTransY }, { scaleY: anim }], shadowColor: isActive ? keyColor : '#000', shadowOpacity: isActive ? 0.3 : 0.05 }]}>
               {/* Bulletproof absolutely positioned tab for the scale overlay color */}
               {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, backgroundColor: overlayColor, borderBottomLeftRadius: 5, borderBottomRightRadius: 5 }} />}
               <Text style={[styles.keyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
@@ -270,7 +326,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           }
 
           return (
-            <Animated.View key={pc} onStartShouldSetResponder={() => true} onResponderRelease={() => { doFlashMidi(midi); onNotePress?.(midi); }} style={[styles.blackKeyTouch, styles.blackKey, { left: BLACK_OFFSETS[pc] * keyWidth, width: Math.round(keyWidth * 0.59), backgroundColor: keyColor, borderColor: theme.border, borderWidth: keyBorder, transform: [{ translateY: blackTransY }, { scaleY: anim }] }]}>
+            <Animated.View key={pc} style={[styles.blackKeyTouch, styles.blackKey, { left: BLACK_OFFSETS[pc] * keyWidth, width: Math.round(keyWidth * 0.59), backgroundColor: keyColor, borderColor: theme.border, borderWidth: keyBorder, transform: [{ translateY: blackTransY }, { scaleY: anim }] }]}>
               {/* Bulletproof absolutely positioned tab for the scale overlay color */}
               {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: overlayColor, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 }} />}
               <Text style={[styles.blackKeyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
@@ -356,7 +412,11 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
         </View>
       )}
       <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ borderTopWidth: 0, backgroundColor: theme.bg2 }} contentContainerStyle={[styles.content, { height: WKH }]} onLayout={(e) => { viewWidth.current = e.nativeEvent.layout.width; }} onContentSizeChange={() => { if (!isReady.current) { isReady.current = true; scrollRef.current?.scrollTo({ x: computeScrollX(), animated: false }); } }}>
-        {OCTAVE_LIST.map(oct => renderOctave(oct))}
+        <GestureDetector gesture={keyGesture}>
+          <View style={{ flexDirection: 'row', height: WKH }}>
+            {OCTAVE_LIST.map(oct => renderOctave(oct))}
+          </View>
+        </GestureDetector>
       </ScrollView>
       <View style={[styles.zoomBar, { backgroundColor: theme.bg2, borderTopColor: theme.border }]}>
         <TouchableOpacity style={[styles.zoomBtn, { backgroundColor: theme.bg, borderWidth: 1, borderColor: theme.border }]} onPress={() => setKeyWidth(Math.max(MIN_WKW, keyWidth - 6))}><Text style={[styles.zoomBtnText, { color: theme.accent }]}>−</Text></TouchableOpacity>
