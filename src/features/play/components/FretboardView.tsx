@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Svg, { Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
 import { Theme } from '@shared/ui/themes';
 import { Voicing, VoicingGroup, ScaleVoicing } from '@shared/guitar';
@@ -80,6 +81,25 @@ const MARGIN_TOP = 40;
 const MARGIN_BOTTOM = 32;
 const DOT_R = 14;
 
+// ── True multitouch input (mirrors PianoView) ───────────────────────────────
+// The dots are purely visual; a single GestureDetector over the note layer reads every
+// active finger and maps each to the nearest dot. Per-dot TouchableOpacity routes
+// through React Native's single-pointer model, so only one note could ever sound at a
+// time — this surface lets several fingers play several notes at once.
+type HitTarget = { cx: number; cy: number; midi: number; dotKey: string };
+const HIT_RADIUS = 30; // px from a dot's centre that still counts as a hit
+function nearestNote(targets: HitTarget[], x: number, y: number): HitTarget | null {
+  let best: HitTarget | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    const dx = t.cx - x, dy = t.cy - y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = t; }
+  }
+  return best && bestD <= HIT_RADIUS * HIT_RADIUS ? best : null;
+}
+
 // Static note: no per-note position/entrance Animated machinery. Earlier this
 // component created a per-note Animated.ValueXY + spring effect AND an
 // Animated.Value + timing effect for EVERY dot (~6 on a chord diagram, up to
@@ -96,7 +116,10 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
   const isRoot = isRootProp !== undefined ? isRootProp : (label === 'R' || label === '1');
 
   return (
+    // pointerEvents="none": the dot never captures touches itself — the diagram's single
+    // gesture surface hit-tests fingers to dots, which is what enables true multitouch.
     <Animated.View
+      pointerEvents="none"
       style={{
         position: 'absolute',
         left: cx - DOT_R,
@@ -116,16 +139,9 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
         elevation: isOpen ? 0 : 4,
       }}
     >
-      <TouchableOpacity
-        style={StyleSheet.absoluteFillObject}
-        onPress={onNotePress}
-        activeOpacity={0.8}
-        hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
-      >
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
-        </View>
-      </TouchableOpacity>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
+      </View>
     </Animated.View>
   );
 });
@@ -267,6 +283,20 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
     };
   }
 
+  // Multitouch surface: dots register themselves into hitTargetsRef while rendering
+  // (reset each render below), and one Manual gesture maps every finger to the nearest.
+  const hitTargetsRef = React.useRef<HitTarget[]>([]);
+  hitTargetsRef.current = [];
+  const onNotePressRef = React.useRef(onNotePress); onNotePressRef.current = onNotePress;
+  const flashDotRef = React.useRef(flashDot); flashDotRef.current = flashDot;
+  const noteGesture = React.useMemo(() =>
+    Gesture.Manual().runOnJS(true).onTouchesDown((e) => {
+      for (const t of e.changedTouches) {
+        const hit = nearestNote(hitTargetsRef.current, t.x, t.y);
+        if (hit) { flashDotRef.current(hit.dotKey); onNotePressRef.current?.(hit.midi); }
+      }
+    }), []);
+
   // Anchor to the nut only for a genuine open-position box (low fretted notes). A box
   // shifted up the neck still shows its open strings above the nut, but its fretted
   // notes are windowed with a starting-fret label instead of a long empty neck.
@@ -311,6 +341,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
           );
         })}
       </Svg>
+      <GestureDetector gesture={noteGesture}>
       <View style={{ position: 'absolute', top: 0, left: 0, width: SVG_W, height: SVG_H }}>
         {/* Ghost Scale Dots */}
         {scaleOverlay && (() => {
@@ -366,25 +397,26 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
             const cy = fret === 0 ? MARGIN_TOP - 20 : MARGIN_TOP + (adjustedFret - 0.5) * FRET_SPACING;
             const stableKey = `ghost-${stringIdx}-${fret}`;
             const dotKey = `${stringIdx}-${fret}`; // ADDED
+            hitTargetsRef.current.push({ cx, cy, midi, dotKey });
 
             return (
-              <FretboardNote 
-                key={stableKey} 
+              <FretboardNote
+                key={stableKey}
                 viewportShift={startFret}
-                cx={cx} 
+                cx={cx}
                 cy={cy}
-                color={color} 
+                color={color}
                 textColor={textColor}
                 borderColor={borderColor}
                 openColor={openColor}
-                label={label} 
+                label={label}
                 isActive={true}
                 isOpen={fret === 0}
                 bg="transparent"
                 isGhost={true}
                 isRootProp={isRoot}
-                flashAnim={getFlashAnim(dotKey)} 
-                onNotePress={() => { flashDot(dotKey); onNotePress?.(midi); }} 
+                flashAnim={getFlashAnim(dotKey)}
+                onNotePress={() => { flashDot(dotKey); onNotePress?.(midi); }}
               />
             );
           });
@@ -432,28 +464,30 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
           const isVisible = fret === 0 || (fret >= startFret && fret <= startFret + NUM_FRETS);
 
           if (fret < 0) return null;
+          if (isVisible) hitTargetsRef.current.push({ cx, cy, midi, dotKey });
 
           return (
-            <FretboardNote 
-              key={stableKey} 
+            <FretboardNote
+              key={stableKey}
               viewportShift={startFret}
-              cx={cx} 
+              cx={cx}
               cy={cy}
-              color={color} 
+              color={color}
               textColor={textColor}
               borderColor={borderColor}
               openColor={openColor}
-              label={label} 
+              label={label}
               isActive={isVisible}
               isOpen={fret === 0}
               bg={theme.bg2}
               isRootProp={isRoot}
-              flashAnim={getFlashAnim(dotKey)} 
-              onNotePress={() => { flashDot(dotKey); onNotePress?.(midi); }} 
+              flashAnim={getFlashAnim(dotKey)}
+              onNotePress={() => { flashDot(dotKey); onNotePress?.(midi); }}
             />
           );
         })}
       </View>
+      </GestureDetector>
     </View>
     </View>
   );
@@ -481,6 +515,20 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
   }
   const entranceAnim = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => { entranceAnim.setValue(0); Animated.spring(entranceAnim, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }).start(); }, [voicing]);
+
+  // Multitouch surface (see PianoView / nearestNote). These hooks must live ABOVE the
+  // early return below. hitTargetsRef is filled by the dots as they render; the gesture
+  // reads it (and the latest flashDot/onNotePress via refs) when a finger lands.
+  const hitTargetsRef = React.useRef<HitTarget[]>([]);
+  const onNotePressRef = React.useRef(onNotePress);
+  const flashDotRef = React.useRef<((key: string) => void) | null>(null);
+  const noteGesture = React.useMemo(() =>
+    Gesture.Manual().runOnJS(true).onTouchesDown((e) => {
+      for (const t of e.changedTouches) {
+        const hit = nearestNote(hitTargetsRef.current, t.x, t.y);
+        if (hit && flashDotRef.current) { flashDotRef.current(hit.dotKey); onNotePressRef.current?.(hit.midi); }
+      }
+    }), []);
 
   if (!voicing || !voicing.frets) return null;
 
@@ -530,6 +578,12 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
     };
   }
 
+  // Refresh per-render: clear the hit list (dots repopulate it below) and point the
+  // gesture's refs at this render's handlers.
+  hitTargetsRef.current = [];
+  onNotePressRef.current = onNotePress;
+  flashDotRef.current = flashDot;
+
   return (
     <View style={{ alignItems: 'center' }}>
       <FretboardMiniMap minFret={isOpenPosition ? 1 : minFret} maxFret={maxFret} theme={theme} />
@@ -572,6 +626,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           );
         })}
       </Svg>
+      <GestureDetector gesture={noteGesture}>
       <View style={{ position: 'absolute', top: 0, left: 0, width: SVG_W, height: SVG_H }}>
         {/* Ghost Scale Dots */}
         {(() => {
@@ -625,14 +680,15 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
             const labelStr = getGlobalLabel(labelMode, namingMode, rootSemi, formula, role, midi, note.noteName);
             const stableKey = `ghost-${stringIdx}-${fret}`;
             const dotKey = `${stringIdx}-${fret}`;
+            hitTargetsRef.current.push({ cx, cy, midi, dotKey });
 
             return (
-              <FretboardNote 
-                key={stableKey} 
+              <FretboardNote
+                key={stableKey}
                 viewportShift={startFret}
-                cx={cx} 
+                cx={cx}
                 cy={cy}
-                color={color} 
+                color={color}
                 textColor={textColor}
                 borderColor={borderColor}
                 openColor={openColor}
@@ -721,28 +777,30 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           // Key is just the string! This allows it to slide up and down the string smoothly.
           const stableKey = `active-${strIdx}`;
           const dotKey = `${strIdx}-${activeFret}`;
+          if (isActive) hitTargetsRef.current.push({ cx, cy, midi, dotKey });
 
           return (
-            <FretboardNote 
+            <FretboardNote
               key={stableKey}
               viewportShift={startFret}
-              cx={cx} 
+              cx={cx}
               cy={cy}
-              color={color} 
+              color={color}
               textColor={textColor}
               borderColor={borderColor}
               openColor={openColor}
-              label={label} 
+              label={label}
               isActive={isActive}
               isOpen={isZero}
               bg={theme.bg2}
               isRootProp={isRoot}
-              flashAnim={getFlashAnim(dotKey)} 
-              onNotePress={() => { flashDot(dotKey); onNotePress?.(midi); }} 
+              flashAnim={getFlashAnim(dotKey)}
+              onNotePress={() => { flashDot(dotKey); onNotePress?.(midi); }}
             />
           );
         })}
       </View>
+      </GestureDetector>
     </View>
     </View>
   );
