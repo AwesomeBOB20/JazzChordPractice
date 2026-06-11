@@ -10,8 +10,9 @@ import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
+import ListeningVisual from '@features/quiz/components/ListeningVisual';
 import { THEMES } from '@shared/ui/themes';
-import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
+import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, preferredAccidentalForRoot, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CommandSheet } from '@shared/ui';
 import { useAudio } from '@shared/audio/AudioContext';
 import { 
@@ -25,6 +26,7 @@ import {
   buildHardcodedShapeVoicings,
   getArpSubsets,
   getIntervalSubsets,
+  identifyCompleteChord,
   Voicing,
   VoicingGroup,
   filterVoicingsByInversion,
@@ -39,12 +41,38 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function bassRoleToInversion(bassRole: string): 'root' | '1st' | '2nd' | '3rd' {
-  if (!bassRole || bassRole === 'root') return 'root';
-  if (bassRole === '3rd' || bassRole === 'b3' || bassRole === 'b3rd') return '1st';
-  if (bassRole === '5th' || bassRole === 'b5' || bassRole === 'b5th' || bassRole === '#5' || bassRole === '#5th') return '2nd';
-  if (bassRole === 'b7' || bassRole === 'b7th' || bassRole === '7th' || bassRole === 'maj7' || bassRole === 'maj7th') return '3rd';
-  return 'root';
+// The actual inversion of a voicing, from its lowest sounding note's position in the chord's
+// interval stack. Index-based so it's correct for ALL chords — e.g. a sus2's 2nd (iv index 1)
+// reads as 1st inversion, which role-name mapping misses. '1st' always corresponds to the
+// functional 3rd (or sus tone for sus chords, or 2nd/4th as applicable). '3rd' requires the
+// 4th chord tone to be a true 7th/6th (iv[3] < 12) — for chords like add9 where the 4th tone
+// is the 9th (iv[3]=14), that note in the bass is 'other', not a named inversion.
+// 'other' = bass is an extension (9th, 11th, etc.) with no standard inversion name.
+function inversionOfBass(midis: number[], root: number, chordType: string): 'root' | '1st' | '2nd' | '3rd' | 'other' {
+  if (!midis.length) return 'root';
+  const ch = CH[chordType];
+  const bassPc = ((Math.min(...midis) % 12) + 12) % 12;
+  const rootPc = ((root % 12) + 12) % 12;
+  if (bassPc === rootPc) return 'root';
+  const idx = ch ? ch.iv.findIndex(iv => (root + iv) % 12 === bassPc) : -1;
+  if (idx === 1) return '1st';
+  if (idx === 2) return '2nd';
+  // 3rd inversion only when the 4th chord tone is a 7th/6th (iv < 12), not an extension
+  // like a 9th. add9/minAdd9 have iv[3]=14 (M9) — 9th in bass is 'other', not '3rd'.
+  if (idx === 3 && ch && ch.iv[3] < 12) return '3rd';
+  return 'other';
+}
+
+// A guitar voicing's inversion from its actual lowest fretted note (index-based, so it's
+// correct for sus / non-tertian chords too). Replaces the old role-based bassRoleToInversion,
+// which assumed 3rd→1st / 5th→2nd / 7th→3rd and mislabeled sus chords.
+const GS_MIDI_STANDARD = [40, 45, 50, 55, 59, 64]; // standard guitar tuning (low E … high E)
+function guitarVoicingInversion(frets: any[], root: number, chordType: string): 'root' | '1st' | '2nd' | '3rd' {
+  const midis = (frets || [])
+    .map((fr: any, str: number) => fr && fr.fret !== null && fr.fret !== undefined ? GS_MIDI_STANDARD[str] + (fr.fret as number) : null)
+    .filter((m: any): m is number => m !== null);
+  const inv = inversionOfBass(midis, root, chordType);
+  return inv === 'other' ? '3rd' : inv;
 }
 
 function findAudibleChordType(
@@ -84,6 +112,9 @@ function findSimplestContainedChordType(
   return best;
 }
 
+// preferredAccidentalForRoot (spelling by the root's circle-of-fifths key, so A♭ minor reads
+// A♭ C♭ E♭ D♭ not G♯ B D♯ C♯) lives in musicTheory so the shape builder shares the exact rule.
+
 function buildOptions(
   correctRoot: number,
   correctType: string,
@@ -91,7 +122,13 @@ function buildOptions(
   quizMode: 'visual' | 'audio',
   namingMode: 'sharp' | 'flat',
   playedNotes?: number[],
-  inversion: 'root' | '1st' | '2nd' | '3rd' = 'root'
+  inversion: 'root' | '1st' | '2nd' | '3rd' = 'root',
+  // Pre-spelled bass note for the slash, derived from the ACTUAL displayed voicing's lowest
+  // note. Takes precedence over `inversion` because drop2 (and any 5+ note chord like 7#5#9)
+  // can put a non-root tone — even an extension like the #9 — in the bass, which the
+  // root/1st/2nd/3rd enum can't express. `undefined` = not provided (use legacy inversion
+  // path); `null` = provided, root in bass (no slash); string = that bass note.
+  displayedBass?: string | null
 ): { root: number; type: string; label: string }[] {
   const opts: { root: number; type: string; label: string }[] = [];
   const seenTypes = new Set<string>();
@@ -102,17 +139,23 @@ function buildOptions(
 
     const rootName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[correctRoot];
     const chordSymbol = ch.s;
+    const base = `${rootName} ${chordSymbol}`;
+
+    // Preferred path: use the real displayed/played bass note (same string on every option
+    // so the slash isn't a giveaway). Applies in BOTH visual and audio modes — a non-root
+    // bass is audible in audio mode too, so the answer should still show the slash.
+    if (displayedBass !== undefined) {
+      return displayedBass ? `${base} / ${displayedBass}` : base;
+    }
 
     if (quizMode === 'audio') {
-      return `${rootName} ${chordSymbol}`;
+      return base;
     }
 
+    // Legacy fallback: derive the bass from the inversion enum (tertian chords only).
     if (!isInverted || inversion === 'root') {
-      return `${rootName} ${chordSymbol}`;
+      return base;
     }
-
-    // Calculate bass note for slash notation using enharmonic-correct spelling.
-    // Guard against accessing index that doesn't exist (e.g., 3rd inversion on triads)
     const shiftIndex = inversion === '1st' ? 1 : inversion === '2nd' ? 2 : 3;
     const safeIdx = Math.min(shiftIndex, ch.iv.length - 1);
     const bassFormula = ch.f?.[safeIdx];
@@ -120,7 +163,7 @@ function buildOptions(
       ? spellInterval(correctRoot, bassFormula, namingMode === 'flat')
       : (namingMode === 'flat' ? NOTE_FLAT[(correctRoot + ch.iv[safeIdx]) % 12] : NOTE_SHARP[(correctRoot + ch.iv[safeIdx]) % 12]);
 
-    return `${rootName} ${chordSymbol} / ${bassNote}`;
+    return `${base} / ${bassNote}`;
   };
 
   // In audio mode, filter pool to only include chord types that match the played notes
@@ -321,6 +364,14 @@ export default function QuizScreen() {
   const [questionRoot, setQuestionRoot] = useState(0);
   const [questionType, setQuestionType] = useState('maj7');
   const [questionInversion, setQuestionInversion] = useState<'root' | '1st' | '2nd' | '3rd'>('root');
+  // Per-question enharmonic spelling, chosen from the root's key (see
+  // preferredAccidentalForRoot) so a flat-key chord/shape/scale reads with flats. Drives the
+  // diagram labels, the answer choices and the revealed name so they all read identically.
+  // Arps/intervals re-root themselves and keep the user's namingMode. Init from namingMode.
+  const [questionNaming, setQuestionNaming] = useState<'sharp' | 'flat'>('sharp');
+  // Arp reveal label: the chord name plus a slash bass when the lowest displayed note
+  // isn't the root (e.g. "B sus4 / E"). Shown only on reveal so it never gives the answer away.
+  const [arpRevealLabel, setArpRevealLabel] = useState<string>('');
   const [options, setOptions] = useState<{ root: number; type: string; label: string }[]>([]);
   const [answered, setAnswered] = useState<null | 'correct' | 'wrong'>(null);
   const [chosenIdx, setChosenIdx] = useState<number | null>(null);
@@ -348,6 +399,7 @@ export default function QuizScreen() {
   const fretboardRef = useRef<FretboardViewRef>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playPulse, setPlayPulse] = useState(0); // bumped on each strike so the listening bars react to block chords
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const stopSeqFlash = () => {
     seqFlashTimers.current.forEach(time => clearTimeout(time));
@@ -459,11 +511,11 @@ export default function QuizScreen() {
     notes.forEach((midi, idx) => {
       const pc = midi % 12;
       fbpc[pc] = f[idx] || '';
-      names.push(spellInterval(questionRoot, f[idx] || '', namingMode === 'flat'));
+      names.push(spellInterval(questionRoot, f[idx] || '', questionNaming === 'flat'));
     });
 
     return { activeMidiNotes: notes, activeRoles: r, activeFormulas: f, formulaByPC: fbpc, noteNames: names };
-  }, [activeQuizInstrument, pianoVoicing, guitarVoicing, questionVoicingTab, questionRoot, questionType, octave, namingMode, arpVoicings, safeArpSubsetIdx, safeIntervalSubsetIdx]);
+  }, [activeQuizInstrument, pianoVoicing, guitarVoicing, questionVoicingTab, questionRoot, questionType, octave, questionNaming, arpVoicings, safeArpSubsetIdx, safeIntervalSubsetIdx]);
 
 
   const getGuitarVoicingsForTab = (
@@ -523,23 +575,51 @@ export default function QuizScreen() {
     if (tab === 'scales' || tab === 'shapes') {
       const scaleIds = CHORD_SCALE_MAP[chordType] ?? [];
       const sVoicings = buildScaleVoicings(scaleIds, SCALES, rootSemi, ch.iv, nMode);
-      const shapeSvs = buildHardcodedShapeVoicings(chordType, rootSemi, nMode);
+      // Quiz shapes are self-rooted: an "E Min Shape" upper structure of a G chord is labelled
+      // AND coloured from its own root (E=R, G=♭3, …), not the parent — so the diagram matches
+      // the answer name. (Play screen keeps the default parent-relative superimposition.)
+      // Pass the GLOBAL namingMode (not nMode/qNaming) as the fallback: the shape's own root
+      // drives its spelling, and for the only roots without a key convention (C, F♯/G♭) the
+      // fallback must match the diagram (which also uses the global setting) — otherwise a
+      // flat-side parent could label an F♯/G♭ shape "G♭" while the diagram shows F♯.
+      const shapeSvs = buildHardcodedShapeVoicings(chordType, rootSemi, namingMode, false, true);
       const activeSvs = tab === 'scales' ? sVoicings : shapeSvs;
 
       const uniqueScales: UnifiedVoicing[] = [];
       const seen = new Set<string>();
 
       activeSvs.forEach(sv => {
-        const shapeQualityName = sv.scaleName.split(' ').slice(1).join(' ');
-        const nameToUse = tab === 'scales' ? sv.scaleName : shapeQualityName;
+        // Keep the full "Root Quality Shape" name for shapes (e.g. "F# Min Shape").
+        // Previously the root was stripped here, so a PIANO shapes quiz showed the
+        // correct answer rootless ("Min Shape") while every distractor — built from
+        // buildHardcodedShapeVoicings — kept its root ("F# Dim 4 Shape"). Keeping the
+        // root makes the correct answer match the distractor format and the guitar path.
+        const nameToUse = sv.scaleName;
         if (!seen.has(nameToUse)) {
           seen.add(nameToUse);
           const pcMap = new Map<number, { role: string, formula: string }>();
-          sv.notes.forEach(n => {
-            const midi = GS_MIDI[n.stringIdx] + n.fret;
-            pcMap.set(midi % 12, { role: n.role, formula: n.formula });
-          });
-          const startMidi = (octave + 1) * 12 + rootSemi;
+          if (tab === 'shapes' && sv.degreeTokens && sv.degreeTokens.length && sv.rootPc != null) {
+            // Build straight from the shape's INTENDED degree TOKENS (the canonical ≤4-note
+            // set), not the hand-authored neck frets — so altered-dominant shapes show exactly
+            // their intended tones even where the source fret data is imperfect, AND each note
+            // keeps its declared degree spelling/colour (♯9 → '#2' → F𝄪/purple, not ♭3/G/blue).
+            const TOK_IV: Record<string, number> = { 'R':0,'1':0,'b2':1,'2':2,'#2':3,'b3':3,'3':4,'b4':4,'4':5,'#4':6,'b5':6,'5':7,'#5':8,'b6':8,'6':9,'bb7':9,'b7':10,'7':11 };
+            sv.degreeTokens.forEach(tok => {
+              const iv = TOK_IV[tok];
+              if (iv === undefined) return;
+              const pc = (((sv.rootPc! + iv) % 12) + 12) % 12;
+              pcMap.set(pc, { role: tok, formula: tok });
+            });
+          } else {
+            sv.notes.forEach(n => {
+              const midi = GS_MIDI[n.stringIdx] + n.fret;
+              pcMap.set(midi % 12, { role: n.role, formula: n.formula });
+            });
+          }
+          // Shapes lay out from the shape's OWN root so the root sits lowest and the diagram
+          // reads root-up; scales stay rooted on the chord root.
+          const baseRoot = (tab === 'shapes' && sv.rootPc != null) ? sv.rootPc : rootSemi;
+          const startMidi = (octave + 1) * 12 + baseRoot;
           const pianoNotes: { note: number, role: string, formula: string }[] = [];
           for (const [pc, data] of pcMap) {
             let midi = Math.floor(startMidi / 12) * 12 + pc;
@@ -557,7 +637,8 @@ export default function QuizScreen() {
               roles: pianoNotes.map((s: any) => s.role),
               formulas: pianoNotes.map((s: any) => s.formula),
               fingerprint: JSON.stringify(sv),
-              categoryId: tab === 'scales' ? sv.scaleId : shapeQualityName,
+              categoryId: tab === 'scales' ? sv.scaleId : sv.scaleName,
+              rootPc: tab === 'shapes' ? sv.rootPc : undefined,
             });
           }
         }
@@ -622,6 +703,41 @@ export default function QuizScreen() {
       // shows "No Voicings Found" (only the fretboard does), so it starts satisfied.
       let renderableGuitar = instrument !== 'guitar';
 
+      // For shape questions: the display root is the SHAPE's own root (e.g. an "E Min Shape"
+      // upper structure of G6 displays/colors from E), not the parent chord root — so the
+      // diagram matches the answer name. Mirrors arpDisplayRoot below.
+      let shapeDisplayRoot: number | null = null;
+      // For arpeggio questions: the display root is the arpeggio's OWN identified chord
+      // root (so its notes/colors/name are self-consistent), NOT the parent chord root.
+      let arpDisplayRoot: number | null = null;
+      let arpDisplayType: string | null = null; // arp's OWN identified chord type (re-rooted)
+      let arpReveal = ''; // arp answer shown on reveal, incl. slash bass when inverted
+      // Slash-bass info for the ANSWER CHOICES: when the displayed arp is inverted (lowest
+      // shown note ≠ root) every option carries the same "/ bass" so it's quizzed on what's
+      // seen and the slash isn't a giveaway. Empty/false when the arp is in root position.
+      let arpBassName = '';
+      let arpIsInverted = false;
+      // Identify an arpeggio fragment as a COMPLETE chord and re-root its degrees to that
+      // chord's own root, so e.g. A-C#-Eb reads as "A (♭5)" (A = root, C# = 3rd, Eb = ♭5)
+      // instead of an enharmonic, ♭3-less "Eb ø7" spelled from the parent. Returns null for
+      // fragments that don't form a complete chord (those are skipped entirely).
+      const arpChordFor = (subsetIvs: number[], parentRoot: number) => {
+        const pcs = subsetIvs.map(iv => (((parentRoot + iv) % 12) + 12) % 12);
+        // Prefer naming from the parent's root so the full parent arpeggio keeps its name
+        // (e.g. "B sus4", not the enharmonic "E sus2").
+        const id = identifyCompleteChord(pcs, namingMode, undefined, parentRoot);
+        if (!id) return null;
+        const ch = CH[id.type];
+        if (!ch) return null;
+        const idxFor = (iv: number) => {
+          const interval = (((((parentRoot + iv) % 12) - id.rootPc) % 12) + 12) % 12;
+          return ch.iv.findIndex(c => (c % 12) === interval);
+        };
+        const roles = subsetIvs.map(iv => { const i = idxFor(iv); return i !== -1 ? ch.r[i] : ''; });
+        const formulas = subsetIvs.map(iv => { const i = idxFor(iv); return i !== -1 ? (ch.f?.[i] || ch.r[i]) : ''; });
+        return { rootPc: id.rootPc, type: id.type, name: id.name, roles, formulas };
+      };
+
       setScaleVoicings([]);
       setArpVoicings([]);
       setShapeVoicings([]);
@@ -659,7 +775,11 @@ export default function QuizScreen() {
       // Determine valid inversions for the current chord type + voicing tab
       const getValidInversions = (chordType: string, tab: string) => {
         if (NO_INV_TABS.includes(tab)) return ['root'];
-        if (isTriadType(chordType)) return activeInversions.filter(inv => inv !== '3rd');
+        // Exclude '3rd' for triads (no 4th tone) and for chords whose 4th tone is an
+        // extension (add9/minAdd9 have iv[3]=14, the 9th) — same rule as inversionOfBass.
+        const chDef = CH[chordType];
+        const no3rd = isTriadType(chordType) || (chDef && chDef.iv.length >= 4 && chDef.iv[3] >= 12);
+        if (no3rd) return activeInversions.filter(inv => inv !== '3rd');
         return activeInversions;
       };
 
@@ -667,6 +787,11 @@ export default function QuizScreen() {
       let finalInversion = activeInversions.length > 0
         ? (pickRandom(activeInversions) as 'root' | '1st' | '2nd' | '3rd')
         : 'root';
+
+      // Only enforce the inversion filter on voicing picks when the user has actually
+      // RESTRICTED inversions. With all four enabled (the default) we leave voicing selection
+      // exactly as before, so this change is a no-op for users who never touched the setting.
+      const allInversionsEnabled = ['root', '1st', '2nd', '3rd'].every(i => activeInversions.includes(i));
 
       let found = false;
       for (let attempt = 0; attempt < 24; attempt++) {
@@ -696,11 +821,44 @@ export default function QuizScreen() {
           });
         }
 
+        // When inversions are restricted, only accept chord types that can actually be SHOWN
+        // in an allowed inversion for this tab — otherwise we'd later fall back to a wrong
+        // inversion (e.g. "1st only" surfacing a 2nd-inversion sus4). Non-chord tabs
+        // (scales/arps/intervals/shapes) have no inversion concept, so they're left alone.
+        if (!allInversionsEnabled && !['scales', 'arps', 'intervals', 'shapes'].includes(chosenVoicingTab)) {
+          if (chosenVoicingTab === 'block') {
+            // block builds the inversion via applyInversion, but only up to (noteCount-1) — a
+            // triad has no 3rd inversion. getValidInversions encodes that, so require it to
+            // leave at least one allowed inversion for the type.
+            tempPool = tempPool.filter(t => getValidInversions(t, 'block').length > 0);
+          } else {
+            // triads/shells/drops/open/barre ship pre-inverted voicings: keep types that have
+            // one whose ACTUAL bass is an allowed inversion.
+            tempPool = tempPool.filter(t => {
+              const vcs = instrument === 'guitar'
+                ? getGuitarVoicingsForTab(chosenVoicingTab, t, root, namingMode)
+                : getPianoVoicingsForTab(chosenVoicingTab, t, root, namingMode);
+              return vcs.some((v: any) => {
+                const midis = instrument === 'guitar'
+                  ? (v.frets || []).map((fr: any, str: number) => fr.fret !== null ? GS_MIDI[str] + (fr.fret as number) : null).filter((m: any): m is number => m !== null)
+                  : (v.notes || []);
+                return activeInversions.includes(inversionOfBass(midis, root, t));
+              });
+            });
+          }
+        }
+
         if (tempPool.length > 0) {
           finalRoot = root;
           finalType = pickRandom(tempPool);
           finalPool = tempPool;
           finalVoicingTab = chosenVoicingTab;
+
+          // Spell this question by the ROOT's key (flats for A♭/E♭/… , sharps for E/A/…),
+          // not the raw global toggle, so the diagram notes AND the answer label agree and a
+          // flat-key chord/shape never shows enharmonic sharps. Used for every final build
+          // below; the diagram re-derives names from questionNaming (set to the same value).
+          const qNaming = preferredAccidentalForRoot(finalRoot, namingMode);
 
           // Filter inversion to be valid for the selected chord type + voicing tab
           const validInversions = getValidInversions(finalType, finalVoicingTab);
@@ -711,16 +869,16 @@ export default function QuizScreen() {
           found = true;
           
           if (instrument === 'guitar') {
-            const vcs = getGuitarVoicingsForTab(finalVoicingTab, finalType, finalRoot, namingMode);
+            const vcs = getGuitarVoicingsForTab(finalVoicingTab, finalType, finalRoot, qNaming);
             if (['scales', 'shapes', 'arps', 'intervals'].includes(finalVoicingTab)) {
               finalGuitarVoicing = null;
-              
-              const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
+
+              const rootNoteName = (qNaming === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
               const displayChordName = `${rootNoteName} ${CH[finalType]?.s || ''}`;
-              
+
               if (finalVoicingTab === 'scales') {
                 const scaleIds = CHORD_SCALE_MAP[finalType] || [];
-                const sVoicings = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, namingMode);
+                const sVoicings = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, qNaming);
                 if (sVoicings.length > 0) {
                   const randBox = pickRandom(sVoicings);
                   setScaleVoicings([randBox]);
@@ -736,11 +894,18 @@ export default function QuizScreen() {
                   renderableGuitar = true;
                 }
               } else if (finalVoicingTab === 'shapes') {
-                const shapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
+                // selfRooted: color/spell each shape from its own root (see getPianoVoicingsForTab).
+                // Global namingMode as fallback so F♯/G♭ + C shapes match the diagram's spelling.
+                const shapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode, false, true);
                 if (shapeSvs.length > 0) {
                   const randBox = pickRandom(shapeSvs);
                   setShapeVoicings([randBox]);
-                  const uniqueMidis = Array.from(new Set(randBox.notes.map(n => GS_MIDI[n.stringIdx] + n.fret))).sort((a,b)=>a-b);
+                  shapeDisplayRoot = randBox.rootPc ?? null;
+                  // Order the shape's notes low→high by pitch so the arpeggiated flash/audio
+                  // climbs linearly up the diagram (lowest note to highest), matching scales,
+                  // arps and intervals. (An earlier by-scale-degree sort made the sequence
+                  // jump around the neck.)
+                  const uniqueMidis = Array.from(new Set(randBox.notes.map(n => GS_MIDI[n.stringIdx] + n.fret))).sort((a, b) => a - b);
                   finalPianoVoicing = {
                     name: randBox.boxName,
                     chordLabel: displayChordName,
@@ -748,6 +913,7 @@ export default function QuizScreen() {
                     roles: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.role : ''; }),
                     formulas: uniqueMidis.map(midi => { const match = randBox.notes.find(n => GS_MIDI[n.stringIdx] + n.fret === midi); return match ? match.formula : ''; }),
                     categoryId: randBox.scaleName,
+                    rootPc: randBox.rootPc,
                   };
                   renderableGuitar = true;
                 }
@@ -756,15 +922,27 @@ export default function QuizScreen() {
                 let subsets = isArp
                   ? getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode)
                   : getIntervalSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || []);
-                // Arps: only show subsets that spell a recognizable chord (triad or 7th chord).
-                // No fallback to unnamed subsets — those produce confusing questions.
+                // Arps: only ask about fragments that form a COMPLETE chord, named + colored +
+                // spelled from their OWN root (self-consistent). Fragments that don't form a
+                // real chord are skipped — they produce ambiguous, mislabeled questions.
                 if (isArp) {
-                  subsets = subsets.filter(s => s.chordName);
+                  subsets = subsets.filter(s => arpChordFor(s.ivs, finalRoot) !== null);
                 }
 
                 if (subsets.length > 0) {
                   const subsetIdx = Math.floor(Math.random() * subsets.length);
                   const subset = subsets[subsetIdx];
+                  const arp = isArp ? arpChordFor(subset.ivs, finalRoot) : null;
+                  // Re-root the fragment to its own chord so the diagram colors/spelling match
+                  // the answer name. arpDisplayRoot drives the diagram's root (set below).
+                  const subRoles = arp ? arp.roles : subset.roles;
+                  const subFormulas = arp ? arp.formulas : subset.formulaLabels;
+                  if (arp) {
+                    arpDisplayRoot = arp.rootPc;
+                    arpDisplayType = arp.type;
+                    subset.chordName = arp.name; subset.label = arp.name;
+                    subset.roles = arp.roles; subset.formulaLabels = arp.formulas;
+                  }
                   if (isArp) {
                     setArpSubsets(subsets);
                     setSafeArpSubsetIdx(subsetIdx);
@@ -777,53 +955,102 @@ export default function QuizScreen() {
                   // scale boxes (mirrors PlayScreen) so the fretboard diagram renders.
                   const scaleIds = CHORD_SCALE_MAP[finalType] || [];
                   const parentBoxes = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, namingMode);
-                  const diagramName = isArp ? (subset.chordName || displayChordName) : `${subset.label} Interval`;
-                  const builtArps = buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subset.roles, subset.formulaLabels, diagramName);
+                  const diagramName = isArp ? (arp?.name || displayChordName) : `${subset.label} Interval`;
+                  const builtArps = buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subRoles, subFormulas, diagramName);
                   setArpVoicings(builtArps);
                   setScaleVoicings(parentBoxes);
                   // The fretboard arp/interval diagram renders from builtArps — if it
                   // came back empty (no parent scale boxes), this is not renderable.
                   renderableGuitar = builtArps.length > 0;
 
-                  // Answer = the chord the arp subset spells (root+quality); if a subset
-                  // somehow doesn't resolve, fall back to the parent chord name (never a
-                  // formula). Intervals keep their interval-name label.
-                  const answerName = isArp ? (subset.chordName || displayChordName) : (subset.label || '');
+                  // Answer = the COMPLETE chord the arp fragment spells, named from its own
+                  // root. Intervals keep their interval-name label.
+                  const answerName = isArp ? (arp?.name || displayChordName) : (subset.label || '');
                   const startMidi = (octave + 1) * 12 + finalRoot;
                   const notes = (subset.ivs || []).map((iv: number) => startMidi + iv);
                   finalPianoVoicing = {
                     name: answerName,
                     chordLabel: displayChordName,
                     notes,
-                    roles: subset.roles || [],
-                    formulas: subset.formulaLabels || subset.roles || [],
+                    roles: subRoles || [],
+                    formulas: subFormulas || subRoles || [],
                     categoryId: answerName || (isArp ? 'Arpeggio' : 'Interval'),
                   };
+                  // Reveal label: chord name + slash bass when the lowest displayed note isn't
+                  // the root (guitar uses the shown box's lowest note; piano the arp's lowest
+                  // pitch). Inversion info only — never put in the answer choices.
+                  if (isArp && arp) {
+                    const arpMidis = instrument === 'guitar'
+                      ? (builtArps[0]?.notes || []).map((n: any) => GS_MIDI[n.stringIdx] + n.fret)
+                      : notes;
+                    const rootPc = (((arp.rootPc % 12) + 12) % 12);
+                    const bassPc = arpMidis.length ? (Math.min(...arpMidis) % 12) : rootPc;
+                    arpIsInverted = bassPc !== rootPc;
+                    arpBassName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[bassPc];
+                    arpReveal = arpIsInverted ? `${arp.name} / ${arpBassName}` : arp.name;
+                  }
                 }
               }
             } else {
               let guitarVcs = vcs.length > 0 ? vcs : [];
-              // Filter by inversion if applicable
-              if (finalInversion !== 'root' && guitarVcs.length > 0) {
-                guitarVcs = filterVoicingsByInversion(guitarVcs, finalInversion);
+              // Keep only voicings whose ACTUAL bass matches an allowed inversion (root/1st/
+              // 2nd/3rd per the user's setting). This is what makes "root position only"
+              // actually exclude inverted grips — the old code only filtered when the picked
+              // inversion was non-root, so root-only let any inversion through. Fall back to
+              // the full set if nothing matches (e.g. drop voicings, which are never root).
+              if (guitarVcs.length > 0 && !allInversionsEnabled) {
+                const allowed = guitarVcs.filter(v => {
+                  const midis = (v.frets || []).map((fr: any, str: number) => fr.fret !== null ? GS_MIDI[str] + (fr.fret as number) : null).filter((m: any): m is number => m !== null);
+                  return activeInversions.includes(inversionOfBass(midis, finalRoot, finalType));
+                });
+                if (allowed.length > 0) guitarVcs = allowed;
               }
-              // Fallback to any voicing if filtered result is empty
               finalGuitarVoicing = guitarVcs.length > 0 ? pickRandom(guitarVcs) : (vcs.length > 0 ? pickRandom(vcs) : null);
               // Sync inversion to the actual voicing so the label matches the displayed bass note
               if (finalGuitarVoicing) {
-                finalInversion = bassRoleToInversion(finalGuitarVoicing.bassNote);
+                finalInversion = guitarVoicingInversion(finalGuitarVoicing.frets, finalRoot, finalType);
               }
               renderableGuitar = !!finalGuitarVoicing;
             }
           } else {
-            const vcs = getPianoVoicingsForTab(finalVoicingTab, finalType, finalRoot, namingMode);
+            let vcs = getPianoVoicingsForTab(finalVoicingTab, finalType, finalRoot, qNaming);
+            // Tabs like triads/shells/drops ship voicings that are already inverted (the bass
+            // is baked in), so honor the user's inversion setting by keeping only voicings
+            // whose ACTUAL bass matches an allowed inversion. (block builds inversions via
+            // applyInversion below, so it's left alone.) Fall back to the full set if nothing
+            // matches. This is what makes "root position only" actually exclude inverted grips.
+            if (finalVoicingTab !== 'block' && !['scales', 'arps', 'intervals', 'shapes'].includes(finalVoicingTab) && vcs.length > 0 && !allInversionsEnabled) {
+              const allowed = vcs.filter(v => activeInversions.includes(inversionOfBass(v.notes || [], finalRoot, finalType)));
+              if (allowed.length > 0) vcs = allowed;
+            }
             let pianoVc = vcs.length > 0 ? pickRandom(vcs) : null;
-            // Apply inversion to piano voicing
-            if (pianoVc && pianoVc.notes && finalInversion !== 'root') {
+            // Apply inversion ONLY for 'block', which ships a single root-position voicing that
+            // we invert here. triads/shells/drops already SHIP inverted voicings (and the filter
+            // above already selected one matching the user's inversion) — inverting those again
+            // would double-invert (e.g. a 1st-inversion triad → 2nd inversion), which is the bug
+            // that surfaced the b5 in the bass under "1st only".
+            if (pianoVc && pianoVc.notes && finalInversion !== 'root' && finalVoicingTab === 'block') {
               const invertedNotes = applyInversion(pianoVc.notes, finalInversion);
+              // CRITICAL: applyInversion REORDERS notes (moves the bass up an octave and
+              // re-sorts), so the original roles/formulas arrays — which are positional —
+              // no longer line up with notes[i]. The diagram derives each key's name from
+              // formulas[i] (spellInterval), so a stale order mislabels every key
+              // ("A" shows as "F"). Rebuild roles/formulas from each inverted note's pitch
+              // class so notes[i] ↔ roles[i] ↔ formulas[i] stay aligned.
+              const invCh = CH[finalType];
+              const invRoles = invertedNotes.map(n => {
+                const i = invCh ? invCh.iv.findIndex((iv: number) => (finalRoot + iv) % 12 === n % 12) : -1;
+                return i !== -1 ? invCh.r[i] : '';
+              });
+              const invFormulas = invertedNotes.map(n => {
+                const i = invCh ? invCh.iv.findIndex((iv: number) => (finalRoot + iv) % 12 === n % 12) : -1;
+                return i !== -1 ? (invCh.f?.[i] || invCh.r[i]) : '';
+              });
               finalPianoVoicing = {
                 ...pianoVc,
                 notes: invertedNotes,
+                roles: invRoles,
+                formulas: invFormulas,
               };
               // Sync finalInversion to the actual bass — applyInversion may silently
               // fall back to root position when shifts >= notes.length (e.g. 3rd inv
@@ -852,7 +1079,7 @@ export default function QuizScreen() {
           const vcs = getGuitarVoicingsForTab('open', finalType, finalRoot, namingMode);
           finalGuitarVoicing = vcs.length > 0 ? pickRandom(vcs) : null;
           if (finalGuitarVoicing) {
-            finalInversion = bassRoleToInversion(finalGuitarVoicing.bassNote);
+            finalInversion = guitarVoicingInversion(finalGuitarVoicing.frets, finalRoot, finalType);
           }
           renderableGuitar = !!finalGuitarVoicing;
         } else {
@@ -899,7 +1126,7 @@ export default function QuizScreen() {
           finalRoot = pickedRoot;
           finalType = pickedType;
           finalVoicingTab = pickedTab;
-          finalInversion = bassRoleToInversion(picked.bassNote);
+          finalInversion = guitarVoicingInversion(picked.frets, finalRoot, finalType);
           finalPool = [finalType];
           renderableGuitar = true;
         }
@@ -910,6 +1137,12 @@ export default function QuizScreen() {
       else if (finalVoicingTab === 'arps') category = 'arp';
       else if (finalVoicingTab === 'intervals') category = 'interval';
       else if (finalVoicingTab === 'shapes') category = 'shape';
+
+      // Shapes display/color from their OWN root (piano path carries it on the voicing; the
+      // guitar branch set it above). Falls back to finalRoot for base shapes / older paths.
+      if (category === 'shape' && finalPianoVoicing?.rootPc != null) {
+        shapeDisplayRoot = finalPianoVoicing.rootPc;
+      }
 
       const catId = finalPianoVoicing?.categoryId ?? '';
 
@@ -937,7 +1170,7 @@ export default function QuizScreen() {
           }
           if (audibleType && audibleType !== finalType) {
             finalType = audibleType;
-            const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
+            const rootNoteName = (preferredAccidentalForRoot(finalRoot, namingMode) === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
             const newLabel = `${rootNoteName} ${CH[finalType]?.s || ''}`;
             if (finalPianoVoicing) {
               finalPianoVoicing = {
@@ -956,6 +1189,41 @@ export default function QuizScreen() {
         }
       }
 
+      // Per-question spelling, driven by the root's key (see preferredAccidentalForRoot) so a
+      // flat-key chord/shape/scale reads with flats (A♭ C♭ E♭) instead of enharmonic sharps,
+      // and the diagram matches the answer label (both built with this same value above via
+      // qNaming). Arps/intervals re-root to their OWN chord and spell themselves, so they keep
+      // the user's namingMode to stay consistent with their separately-built labels.
+      const questionNaming: 'sharp' | 'flat' = (category === 'arp' || category === 'interval')
+        ? namingMode
+        : preferredAccidentalForRoot(shapeDisplayRoot ?? finalRoot, namingMode);
+
+      // Slash bass for the answer + all options, derived from the ACTUAL displayed voicing's
+      // lowest note (not the inversion enum). A drop2 voicing — or any 5+ note chord like
+      // 7#5#9 — can sit on a non-root tone, including an extension the root/1st/2nd/3rd enum
+      // can't represent; reading the real bass keeps the slash correct. null = root in bass.
+      let finalBassNote: string | null = null;
+      if (category === 'chord') {
+        let displayedMidis: number[] = [];
+        if (finalPianoVoicing?.notes?.length) {
+          displayedMidis = finalPianoVoicing.notes;
+        } else if (finalGuitarVoicing?.frets) {
+          finalGuitarVoicing.frets.forEach((fr, str) => { if (fr.fret !== null) displayedMidis.push(GS_MIDI[str] + (fr.fret as number)); });
+        }
+        if (displayedMidis.length) {
+          const bassPc = ((Math.min(...displayedMidis) % 12) + 12) % 12;
+          const rootPc = ((finalRoot % 12) + 12) % 12;
+          if (bassPc !== rootPc) {
+            const ch = CH[finalType];
+            const ivMatch = ch ? ch.iv.findIndex((iv: number) => (finalRoot + iv) % 12 === bassPc) : -1;
+            const bf = ivMatch !== -1 ? ch?.f?.[ivMatch] : undefined;
+            finalBassNote = bf
+              ? spellInterval(finalRoot, bf, questionNaming === 'flat')
+              : (questionNaming === 'flat' ? NOTE_FLAT : NOTE_SHARP)[bassPc];
+          }
+        }
+      }
+
       let opts: { root: number; type: string; label: string }[] = [];
       let cIdxs: number[] = [];
 
@@ -968,7 +1236,7 @@ export default function QuizScreen() {
           if (optsPool.length < 4) optsPool = TRIAD_KEYS;
         }
         if (optsPool.length < 4) optsPool = ALL_CHORD_KEYS;
-        opts = buildOptions(finalRoot, finalType, optsPool, quizMode, namingMode, playedNotes, finalInversion);
+        opts = buildOptions(finalRoot, finalType, optsPool, quizMode, questionNaming, playedNotes, finalInversion, finalBassNote);
         cIdxs = [opts.findIndex(o => o.root === finalRoot && o.type === finalType)];
 
         // Fallback: if correct answer not found, force it to be the first option
@@ -977,22 +1245,28 @@ export default function QuizScreen() {
           cIdxs = [0];
         }
       } else if (category === 'scale') {
+        // Prefix every scale label with its starting (root) note, e.g. "C Whole Tone",
+        // so students see the scale's root, not just its quality. Matching still keys off
+        // the scaleId (the option's `type`), so the prefix is display-only.
+        const scaleRootName = (questionNaming === 'flat' ? NOTE_FLAT : NOTE_SHARP)[finalRoot];
+        const scaleLabel = (id: string) => `${scaleRootName} ${SCALES[id]?.name || id}`;
         const scaleIds = CHORD_SCALE_MAP[finalType] || [];
-        let scalePool = scaleIds.map(id => ({ key: id, label: SCALES[id]?.name || id }));
+        let scalePool = scaleIds.map(id => ({ key: id, label: scaleLabel(id) }));
         // Ensure at least 4 options by adding other scales from the full SCALES object
         if (scalePool.length < 4) {
           const allScaleIds = Object.keys(SCALES);
           const additionalScales = allScaleIds
             .filter(id => !scalePool.some(sp => sp.key === id))
-            .map(id => ({ key: id, label: SCALES[id]?.name || id }));
+            .map(id => ({ key: id, label: scaleLabel(id) }));
           scalePool = [...scalePool, ...additionalScales];
         }
-        opts = buildCategoryOptions(catId, finalPianoVoicing?.name ?? catId, scalePool);
+        const correctScaleLabel = `${scaleRootName} ${finalPianoVoicing?.name ?? (SCALES[catId]?.name || catId)}`;
+        opts = buildCategoryOptions(catId, correctScaleLabel, scalePool);
         cIdxs = [opts.findIndex(o => o.type === catId)];
 
         // Fallback: if correct answer not found, force it to be the first option
         if (cIdxs[0] === -1) {
-          opts[0] = { root: 0, type: catId, label: finalPianoVoicing?.name ?? catId };
+          opts[0] = { root: 0, type: catId, label: correctScaleLabel };
           cIdxs = [0];
         }
       } else if (category === 'arp') {
@@ -1000,14 +1274,17 @@ export default function QuizScreen() {
         // (root + quality), never formula numbers like "3-5-7".
         const arpPool: { key: string; label: string }[] = [];
         const arpSeen = new Set<string>([catId]);
+        // When the displayed arp is inverted, every choice carries the same slash bass so
+        // the question is graded on what's shown and the slash can't give the answer away.
+        const arpSlash = arpIsInverted ? ` / ${arpBassName}` : '';
         const addName = (nm: string | null | undefined) => {
-          if (nm && !arpSeen.has(nm)) { arpSeen.add(nm); arpPool.push({ key: nm, label: nm }); }
+          if (nm && !arpSeen.has(nm)) { arpSeen.add(nm); arpPool.push({ key: nm, label: `${nm}${arpSlash}` }); }
         };
         getArpSubsets(CH[finalType].iv, CH[finalType].r, CH[finalType].f || [], finalRoot, namingMode)
-          .forEach(s => addName(s.chordName));
+          .forEach(s => addName(arpChordFor(s.ivs, finalRoot)?.name));
         for (const ct of basePool) {
           if (arpPool.length >= 15) break;
-          getArpSubsets(CH[ct].iv, CH[ct].r, CH[ct].f || [], finalRoot, namingMode).forEach(s => addName(s.chordName));
+          getArpSubsets(CH[ct].iv, CH[ct].r, CH[ct].f || [], finalRoot, namingMode).forEach(s => addName(arpChordFor(s.ivs, finalRoot)?.name));
         }
         // Pad to >=4 with plain chord-quality names at the question root (still chord names, never formulas).
         if (arpPool.length < 4) {
@@ -1017,12 +1294,12 @@ export default function QuizScreen() {
             if (arpPool.length >= 4) break;
           }
         }
-        opts = buildCategoryOptions(catId, catId, arpPool);
+        opts = buildCategoryOptions(catId, `${catId}${arpSlash}`, arpPool);
         cIdxs = [opts.findIndex(o => o.type === catId)];
 
         // Fallback: if correct answer not found, force it to be the first option
         if (cIdxs[0] === -1) {
-          opts[0] = { root: 0, type: catId, label: catId };
+          opts[0] = { root: 0, type: catId, label: `${catId}${arpSlash}` };
           cIdxs = [0];
         }
       } else if (category === 'interval') {
@@ -1060,7 +1337,7 @@ export default function QuizScreen() {
           cIdxs = [0];
         }
       } else if (category === 'shape') {
-        const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, namingMode);
+        const allShapeSvs = buildHardcodedShapeVoicings(finalType, finalRoot, questionNaming);
         const isGuitarShapes = instrument === 'guitar';
         const rawShapeNames = Array.from(new Set(allShapeSvs.map(s => s.scaleName)));
 
@@ -1075,7 +1352,7 @@ export default function QuizScreen() {
             if (optsPool.length < 4) optsPool = TRIAD_KEYS;
           }
           if (optsPool.length < 4) optsPool = ALL_CHORD_KEYS;
-          opts = buildOptions(finalRoot, finalType, optsPool, quizMode, namingMode, playedNotes, finalInversion);
+          opts = buildOptions(finalRoot, finalType, optsPool, quizMode, questionNaming, playedNotes, finalInversion, finalBassNote);
           cIdxs = [opts.findIndex(o => o.root === finalRoot && o.type === finalType)];
           if (cIdxs[0] === -1) {
             opts[0] = { root: finalRoot, type: finalType, label: CH[finalType]?.s || finalType };
@@ -1102,12 +1379,12 @@ export default function QuizScreen() {
           // there are always ≥4 choices even when only one chord type is enabled.
           for (const ct of basePool) {
             if (shapePool.length >= 12) break;
-            buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
+            buildHardcodedShapeVoicings(ct, finalRoot, questionNaming).forEach(s => addShape(s.scaleName));
           }
           if (shapePool.length < 3) {
             for (const ct of ALL_CHORD_KEYS) {
               if (shapePool.length >= 12) break;
-              buildHardcodedShapeVoicings(ct, finalRoot, namingMode).forEach(s => addShape(s.scaleName));
+              buildHardcodedShapeVoicings(ct, finalRoot, questionNaming).forEach(s => addShape(s.scaleName));
             }
           }
           opts = buildCategoryOptions(catId, correctLabel, shapePool);
@@ -1146,9 +1423,15 @@ export default function QuizScreen() {
       setPianoVoicing(finalPianoVoicing);
       setQuizCategory(category);
 
-      setQuestionRoot(finalRoot);
-      setQuestionType(finalType);
+      // Arps display from the arpeggio's own chord root, and shapes from the shape's own root,
+      // so colors/spelling are self-consistent with the answer; else the actual question root.
+      setQuestionRoot(arpDisplayRoot ?? shapeDisplayRoot ?? finalRoot);
+      // Keep type paired with the displayed root: arps spell/color from their OWN identified
+      // chord (root + type), never the parent — so any root+type fallback stays self-consistent.
+      setQuestionType(arpDisplayType ?? finalType);
       setQuestionInversion(finalInversion);
+      setQuestionNaming(questionNaming);
+      setArpRevealLabel(arpReveal);
       setOptions(opts);
       setCorrectIdxs(cIdxs);
       setAnswered(null);
@@ -1165,6 +1448,21 @@ export default function QuizScreen() {
   }, [quizMode, instrument, namingMode, activeVoicingTypes, activeInversions, nextQuestion]);
 
   const autoPlayNext = useRef(false);
+
+  // Guards Reveal / Next against spam-tapping. While a transition is in flight (the heavy
+  // nextQuestion() retry loop, or the reveal's score+replay) further taps are dropped, so a burst
+  // can't queue extra runs that keep firing after the finger lifts — and Reveal can't double-count
+  // the score or double-trigger playback. The lock is held a short time PAST the work (trailing
+  // timeout) to swallow the touch events that buffered while the JS thread was busy.
+  const advancingRef = useRef(false);
+  const advanceReleaseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const perfNextRef = useRef(0);
+  // [PERF] true press -> next-question-painted latency on-device. TEMP instrumentation.
+  useEffect(() => {
+    const p = perfNextRef.current; if (!p) return; perfNextRef.current = 0;
+    requestAnimationFrame(() => console.log('[PERF] quiz next', Math.round(performance.now() - p) + 'ms to paint'));
+  }, [options]);
 
   // Scale/Arp/Interval/Shape questions can only arpeggiate (never block), so force
   // arp playback for them regardless of the user's `arp` setting.
@@ -1186,6 +1484,7 @@ export default function QuizScreen() {
           ? [...activeMidiNotes].sort((a, b) => a - b)
           : activeMidiNotes;
         onPlay(notesToPlay, { guitar: activeQuizInstrument === 'guitar', forceArp: forceArpThisQ });
+        setPlayPulse((p) => p + 1);
         if (forceArpThisQ) {
           fireSeqFlash(notesToPlay);
         } else {
@@ -1200,11 +1499,13 @@ export default function QuizScreen() {
 
   const replay = () => {
     stopSeqFlash();
+    if (activeQuizInstrument === 'piano') pianoRef.current?.recenter();
     // Arps and intervals always play low→high so the sequence is pedagogically clear.
     const notesToPlay = (quizCategory === 'arp' || quizCategory === 'interval')
       ? [...activeMidiNotes].sort((a, b) => a - b)
       : activeMidiNotes;
     onPlay(notesToPlay, { guitar: activeQuizInstrument === 'guitar', forceArp: forceArpThisQ });
+    setPlayPulse((p) => p + 1);
     if (forceArpThisQ) {
       fireSeqFlash(notesToPlay);
     } else {
@@ -1257,7 +1558,7 @@ export default function QuizScreen() {
     });
   };
 
-  const rootName = namingMode === 'flat' ? NOTE_FLAT[questionRoot] : NOTE_SHARP[questionRoot];
+  const rootName = questionNaming === 'flat' ? NOTE_FLAT[questionRoot] : NOTE_SHARP[questionRoot];
   const accuracy = quizTotal > 0 ? Math.round((quizScore / quizTotal) * 100) : null;
 
   const fretboardGroup: any = useMemo(() => guitarVoicing ? [{
@@ -1275,7 +1576,7 @@ export default function QuizScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0, flexGrow: quizMode === 'audio' ? 1 : undefined }}>
 
         {/* Compact Score Panel */}
         <View style={[styles.compactScore, { backgroundColor: t.bg2, borderColor: t.border }]}>
@@ -1341,7 +1642,7 @@ export default function QuizScreen() {
                     </View>
                   ) : (
                     <Text style={[styles.revealAnswer, { color: t.accent }]} numberOfLines={2}>
-                      {options[correctIdxs[0]]?.label ?? ''}
+                      {(quizCategory === 'arp' && arpRevealLabel) ? arpRevealLabel : (options[correctIdxs[0]]?.label ?? '')}
                     </Text>
                   )}
                 </Animated.View>
@@ -1425,6 +1726,21 @@ export default function QuizScreen() {
           </View>
         </Animated.View>
 
+        {quizMode === 'audio' && (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16 }}>
+            <ListeningVisual
+              revealed={revealed}
+              isPlaying={isPlaying}
+              pulse={playPulse}
+              notes={activeMidiNotes}
+              roles={activeRoles}
+              formulas={activeFormulas}
+              namingMode={questionNaming}
+              theme={t}
+            />
+          </View>
+        )}
+
         {quizMode === 'visual' && (
           <View style={styles.pianoWrap}>
             {activeQuizInstrument === 'guitar' ? (
@@ -1434,7 +1750,7 @@ export default function QuizScreen() {
                 theme={t}
                 rootSemi={questionRoot}
                 labelMode={quizLabelMode}
-                namingMode={namingMode}
+                namingMode={questionNaming}
                 onNotePress={(midi: number) => onNotePress?.(midi, 80, true)}
                 hideNavigators={true}
                 colorModeOverride={!revealed ? 'theme' : undefined}
@@ -1463,7 +1779,7 @@ export default function QuizScreen() {
                 labelMode={quizLabelMode}
                 accentColor={revealed ? undefined : t.accent}
                 rootSemi={questionRoot}
-                namingMode={namingMode}
+                namingMode={questionNaming}
                 onNotePress={(midi: number) => onNotePress?.(midi, 80, false)}
                 colorModeOverride={!revealed ? 'theme' : undefined}
               />
@@ -1486,13 +1802,25 @@ export default function QuizScreen() {
           {!answered ? (
             <TouchableOpacity
               style={[styles.revealBtn, { backgroundColor: t.bg2, borderColor: t.border }]}
-              onPress={() => { setRevealed(true); setAnswered('wrong'); incrementQuiz(false); replay(); }}>
+              onPress={() => {
+                if (advancingRef.current) return;
+                advancingRef.current = true;
+                setRevealed(true); setAnswered('wrong'); incrementQuiz(false); replay();
+                if (advanceReleaseRef.current) clearTimeout(advanceReleaseRef.current);
+                advanceReleaseRef.current = setTimeout(() => { advancingRef.current = false; }, 160);
+              }}>
               <Text style={[styles.revealText, { color: t.txt2 }]}>Reveal</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={[styles.nextBtn, { backgroundColor: t.accent }]}
-              onPress={() => { autoPlayNext.current = true; nextQuestion(); }}>
+              onPress={() => {
+                if (advancingRef.current) return;
+                advancingRef.current = true;
+                perfNextRef.current = performance.now(); autoPlayNext.current = true; nextQuestion();
+                if (advanceReleaseRef.current) clearTimeout(advanceReleaseRef.current);
+                advanceReleaseRef.current = setTimeout(() => { advancingRef.current = false; }, 160);
+              }}>
               <Text style={styles.nextText}>Next</Text>
               <Ionicons name="arrow-forward" size={24} color="#fff" />
             </TouchableOpacity>

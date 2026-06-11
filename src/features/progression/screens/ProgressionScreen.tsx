@@ -4,19 +4,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { THEMES } from '@shared/ui/themes';
-import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, CHORD_PATTERN_MAP, PATTERNS, GUITAR_TUNING } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { useAudio } from '@shared/audio/AudioContext';
 import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
-import { calculateOptimalVoiceLeading, buildHardcodedShapeVoicings } from '@shared/guitar';
+import { calculateOptimalVoiceLeading, STRING_SETS_BY_TYPE, buildScaleVoicings, buildArpVoicings } from '@shared/guitar';
 
 // NOTICE: ProgressionSettings has been completely removed from this import list!
 import { ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
+import { familyForWeight } from '@shared/fonts/fonts';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -59,11 +60,11 @@ function getExtensionVoicingNotes(chord: any, octave: number): number[] | null {
 }
 
 const ProgressionCell = React.memo(function ProgressionCell({ 
-  group, gIdx, viewMode, showShapes, instrument, octave,
-  selectedCell, playingIdx, 
-  handleCellPress, handleCellLongPress, 
-  t, diagramShapes, diagramVoicings, pianoShapes, pianoVoicings, 
-  groupedCells, NOTE_FLAT, NOTE_SHARP 
+  group, gIdx, viewMode, arpView, instrument, octave,
+  selectedCell, playingIdx,
+  handleCellPress, handleCellLongPress,
+  t, diagramVoicings, pianoVoicings, diagramArps, pianoArps,
+  groupedCells, NOTE_FLAT, NOTE_SHARP
 }: any) {
   const getCellProps = (idx: number) => {
     const isSelected = selectedCell === idx;
@@ -124,9 +125,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
                 {chord && (
                   <View style={{ marginTop: 10 }}>
                     {instrument === 'piano' ? (
-                      <MiniPianoDiagram chord={chord} notes={showShapes ? pianoShapes[idx]?.notes : pianoVoicings[idx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
+                      <MiniPianoDiagram chord={chord} notes={arpView ? pianoArps[idx]?.notes : pianoVoicings[idx]?.notes} theme={t} octave={octave} />
                     ) : (
-                      <MiniChordDiagram voicing={showShapes ? undefined : diagramVoicings[idx]} shape={showShapes ? diagramShapes[idx] : undefined} theme={t} />
+                      <MiniChordDiagram voicing={diagramVoicings[idx]} arpShape={arpView ? diagramArps[idx] : undefined} theme={t} />
                     )}
                   </View>
                 )}
@@ -221,9 +222,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
                       {renderSplitText(left, pLeft.isPlaying)}
                       <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                         {instrument === 'piano' ? (
-                          <MiniPianoDiagram chord={left} notes={showShapes ? pianoShapes[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
+                          <MiniPianoDiagram chord={left} notes={arpView ? pianoArps[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} theme={t} octave={octave} />
                         ) : (
-                          <MiniChordDiagram voicing={showShapes ? undefined : diagramVoicings[leftIdx]} shape={showShapes ? diagramShapes[leftIdx] : undefined} theme={t} />
+                          <MiniChordDiagram voicing={diagramVoicings[leftIdx]} arpShape={arpView ? diagramArps[leftIdx] : undefined} theme={t} />
                         )}
                       </View>
                   </View>
@@ -231,9 +232,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
                       {renderSplitText(right, pRight.isPlaying)}
                       <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                         {instrument === 'piano' ? (
-                          <MiniPianoDiagram chord={right} notes={showShapes ? pianoShapes[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
+                          <MiniPianoDiagram chord={right} notes={arpView ? pianoArps[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} theme={t} octave={octave} />
                         ) : (
-                          <MiniChordDiagram voicing={showShapes ? undefined : diagramVoicings[rightIdx]} shape={showShapes ? diagramShapes[rightIdx] : undefined} theme={t} />
+                          <MiniChordDiagram voicing={diagramVoicings[rightIdx]} arpShape={arpView ? diagramArps[rightIdx] : undefined} theme={t} />
                         )}
                       </View>
                   </View>
@@ -258,9 +259,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
 
 export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
-  const { theme, instrument, bpm, setBpm, voiceLeading, fretCap, pianoZone, octave, arp } = useSettingsStore();
+  const { theme, instrument, bpm, setBpm, voiceLeading, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced } = useSettingsStore();
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
-  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory } = useProgressionStore();
+  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory } = useProgressionStore();
   
   const t = THEMES[theme];
   const insets = useSafeAreaInsets();
@@ -273,32 +274,40 @@ export default function ProgressionScreen() {
   
   const [selectedCell, setSelectedCell] = useState<number | null>(0);
   const [viewMode, setViewMode] = useState<'text' | 'diagram'>('text');
-  const [showShapes, setShowShapes] = useState(false);
+  const [arpView, setArpView] = useState(false);
   const lastTap = useRef<{ idx: number, time: number }>({ idx: -1, time: 0 });
 
+  // View cycles: NAME (text) → CHORDS (block voicing diagrams) → ARPS (same voicing,
+  // numbered + played note-by-note) → NAME.
   const cycleViewMode = () => {
     if (viewMode === 'text') {
       setViewMode('diagram');
-      setShowShapes(false);
-    } else if (!showShapes) {
-      setShowShapes(true);
+      setArpView(false);
+    } else if (!arpView) {
+      setArpView(true);
     } else {
       setViewMode('text');
-      setShowShapes(false);
+      setArpView(false);
     }
   };
 
-  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone), [progression, voiceLeading, fretCap, guitarNeckZone]);
+  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet]);
 
   const pianoVoicings = React.useMemo(() => {
     const result: any[] = [];
     let lastVoicing: number[] | null = null;
-    const baseMidi = 60; 
-    
+    const baseMidi = 60;
+    // ZONE is a single note that cycles WITHIN the octave set in Settings (octave 4 →
+    // C4…B4); `pianoZone` is the pitch class. Voice leading keeps every chord centred on
+    // that note (and pulls it back if it drifts out). With voice leading OFF the zone is
+    // ignored — each chord is plain root position at the settings octave.
+    const ZONE_PC = (((pianoZone % 12) + 12) % 12);
+    const ZONE_TARGET = ((octave + 1) * 12) + ZONE_PC;
+
     for (let i = 0; i < progression.length; i++) {
       const chord = progression[i];
       if (!chord || chord.spacer) { result.push(null); continue; }
-      
+
       let rawNotes = getExtensionVoicingNotes(chord, octave);
       if (!rawNotes) {
         const intervals = getChordIntervals(chord.chordType).slice(0, 4);
@@ -310,144 +319,145 @@ export default function ProgressionScreen() {
         });
       }
 
-      if (voiceLeading && lastVoicing) {
-        const prevCenter = lastVoicing.reduce((a,b) => a+b, 0) / lastVoicing.length;
-        const nextVoicing = rawNotes.map(note => {
+      if (!voiceLeading) {
+        // No voice leading → plain root position at the settings octave (root in the bass).
+        // getExtensionVoicingNotes / the fallback already build root-position note sets.
+        lastVoicing = rawNotes;
+        result.push({ notes: rawNotes });
+        continue;
+      }
+
+      {
+        // Voice-lead each pitch class to the octave nearest the previous voicing — or, for the
+        // FIRST chord (no previous), nearest the ZONE note. Using the zone as the first chord's
+        // reference means it actually re-voices (inverts) when the zone changes, instead of
+        // being frozen in root position the way a whole-voicing octave shift left it.
+        const prevCenter = lastVoicing
+          ? lastVoicing.reduce((a, b) => a + b, 0) / lastVoicing.length
+          : ZONE_TARGET;
+        let next = rawNotes.map(note => {
           const pc = note % 12;
           let closest = pc + baseMidi;
-          let minDiff = 999;
-          for (let oct = octave - 1; oct <= octave + 2; oct++) {
+          let minScore = Infinity;
+          for (let oct = octave - 2; oct <= octave + 2; oct++) {
             const test = pc + oct * 12;
-            const diff = Math.abs(test - prevCenter);
-            if (diff < minDiff) { minDiff = diff; closest = test; }
+            const score = Math.abs(test - prevCenter) + 0.6 * Math.abs(test - ZONE_TARGET);
+            if (score < minScore) { minScore = score; closest = test; }
           }
           return closest;
         });
-        nextVoicing.sort((a: number, b: number) => a - b);
-        if (nextVoicing.length >= 3 && nextVoicing[nextVoicing.length - 2] - 12 >= baseMidi) {
-           nextVoicing[nextVoicing.length - 2] -= 12;
-           nextVoicing.sort((a: number, b: number) => a - b);
-        }
-        rawNotes = nextVoicing;
+        next.sort((a: number, b: number) => a - b);
+        // Keep it centred on the zone: if the whole voicing has drifted more than a few
+        // semitones off the target, octave-shift it back — voice leading guiding it home.
+        let center = next.reduce((a, b) => a + b, 0) / next.length;
+        while (center - ZONE_TARGET > 7) { next = next.map(n => n - 12); center -= 12; }
+        while (ZONE_TARGET - center > 7) { next = next.map(n => n + 12); center += 12; }
+        next.sort((a: number, b: number) => a - b);
+        rawNotes = next;
       }
-      
+
       lastVoicing = rawNotes;
       result.push({ notes: rawNotes });
     }
     return result;
-  }, [progression, voiceLeading, octave]);
-
-  const pianoShapes = React.useMemo(() => {
-    const result: any[] = [];
-    const PIANO_ZONE_CENTER = (pianoZone + 1) * 12; 
-    
-    for (let i = 0; i < progression.length; i++) {
-      const chord = progression[i];
-      if (!chord || chord.spacer) { result.push(null); continue; }
-      
-      const rootMidi = ((octave + 1) * 12) + chord.rootSemi;
-      let baseNotes: number[] = [];
-
-      const ext = getExtensionVoicingNotes(chord, octave);
-      if (ext) {
-        baseNotes = ext;
-      } else {
-        const shapeDef = CHORD_PATTERN_MAP[chord.chordType]?.[0];
-        const pattern = shapeDef ? PATTERNS[shapeDef.pattern] : null;
-        if (pattern) {
-          baseNotes = pattern.iv.map(iv => rootMidi + shapeDef.offset + iv);
-        } else {
-          const intervals = getChordIntervals(chord.chordType).slice(0, 4);
-          baseNotes = intervals.map(iv => rootMidi + iv);
-        }
-      }
-
-      if (!voiceLeading) {
-        result.push({ notes: baseNotes });
-        continue;
-      }
-
-      const inversions: number[][] = [];
-      let currentInv = [...baseNotes].map(n => n - 24); 
-      
-      for (let inv = 0; inv < 12; inv++) { 
-        inversions.push([...currentInv]);
-        let nextInv = [...currentInv];
-        nextInv[0] += 12; 
-        nextInv.sort((a, b) => a - b);
-        currentInv = nextInv;
-      }
-      
-      let bestInv = inversions[0];
-      let minDiff = 999;
-
-      for (const inv of inversions) {
-        const center = inv.reduce((sum, val) => sum + val, 0) / inv.length;
-        const diff = Math.abs(center - PIANO_ZONE_CENTER);
-        if (diff < minDiff) {
-          minDiff = diff;
-          bestInv = inv;
-        }
-      }
-
-      result.push({ notes: bestInv });
-    }
-    return result;
   }, [progression, voiceLeading, octave, pianoZone]);
 
-  const diagramShapes = React.useMemo(() => {
+  // ── ARPS view: CAGED arpeggio shapes (same as the Play / Quiz screens) ──────────
+  // Guitar: build the chord's full arpeggio across the 5 CAGED boxes, then keep the ONE
+  // box whose fret region best fits the area we're working in — the neck zone when set,
+  // otherwise the position of the (zone-anchored) voice-led voicing. Same idea as the old
+  // shapes picker, but with real CAGED arpeggio data instead of hardcoded chord shapes.
+  const diagramArps = React.useMemo(() => {
     return progression.map((chord, idx) => {
       if (!chord || chord.spacer) return null;
-      const shapes = buildHardcodedShapeVoicings(chord.chordType, chord.rootSemi, namingMode, true);
-      if (!shapes || shapes.length === 0) return null;
+      const def = CH[chord.chordType];
+      if (!def) return null;
+      const scaleIds = CHORD_SCALE_MAP[chord.chordType] ?? [];
+      if (!scaleIds.length) return null;
+      const scaleId = scaleIds[0];
+      const boxes = buildScaleVoicings([scaleId], SCALES, chord.rootSemi, def.iv, namingMode)
+        .filter((sv: any) => sv.scaleId === scaleId);
+      if (!boxes.length) return null;
+      const arps = buildArpVoicings(boxes, chord.rootSemi, def.iv, def.r, def.f || [], chord.chordType);
+      if (!arps.length) return null;
 
-      if (guitarNeckZone !== null) {
-        let bestShape = shapes[0];
-        let minDiff = 999;
-        for (const s of shapes) {
-          const sFrets = s.notes ? s.notes.filter((n:any) => n.fret > 0).map((n:any) => n.fret) : [];
-          const sMin = sFrets.length > 0 ? Math.min(...sFrets) : 0;
-          const diff = Math.abs(sMin - guitarNeckZone);
-          if (diff < minDiff) { minDiff = diff; bestShape = s; }
-        }
-        return bestShape;
-      }
+      const isRoot = (role: string) => role === 'root' || role === '1' || role === 'R';
 
       if (!voiceLeading) {
-        const lowEShape = shapes.find(s => 
-          s.notes && s.notes.some((n: any) => n.stringIdx === 0 && (n.role === '1' || n.role === 'R' || n.role === 'root'))
-        );
-        return lowEShape || shapes[0];
-      }
-
-      const activeVoicing = diagramVoicings[idx];
-      if (activeVoicing && activeVoicing.frets) {
-        const vFrets = activeVoicing.frets.map((f: any) => f?.fret).filter((f: any) => f !== null && f > 0);
-        if (vFrets.length > 0) {
-          const vMin = Math.min(...vFrets);
-          let bestShape = shapes[0];
-          let minDiff = 999;
-          
-          for (const s of shapes) {
-            const sFrets = s.notes ? s.notes.filter((n:any) => n.fret > 0).map((n:any) => n.fret) : [];
-            const sMin = sFrets.length > 0 ? Math.min(...sFrets) : 0;
-            const diff = Math.abs(sMin - vMin);
-            if (diff < minDiff) { minDiff = diff; bestShape = s; }
-          }
-          return bestShape;
+        // No voice leading → root position: take the box with the root on the low E string at
+        // the lowest fret, then DROP any notes below that root so the arpeggio's first (lowest)
+        // note is always the root itself — even when the shape has open strings beneath it.
+        const withRoot = arps
+          .map((a: any) => ({ a, root: a.notes?.find((n: any) => n.stringIdx === 0 && isRoot(n.role)) }))
+          .filter((x: any) => x.root)
+          .sort((x: any, y: any) => x.root.fret - y.root.fret);
+        if (withRoot.length) {
+          const { a, root } = withRoot[0];
+          const rootPitch = GUITAR_TUNING[0] + root.fret;
+          // New object + filtered array — never mutate the cached arp voicing.
+          const notes = a.notes.filter((n: any) => (GUITAR_TUNING[n.stringIdx] + n.fret) >= rootPitch);
+          return { ...a, notes };
         }
       }
-      return shapes[0];
-    });
-  }, [progression, namingMode, diagramVoicings, voiceLeading, guitarNeckZone]);
 
-  const activeDiagrams = showShapes ? diagramShapes : diagramVoicings;
-  // Shapes feed playback ONLY in arpeggio mode. In block mode (even while viewing
-  // Shapes), play the chord-mode voicing so we hear the chord, not a smash of every
-  // note in the shape diagram. Mirrors playSelectedCellAudio's (showShapes && arp) gate.
-  const useShapesForAudio = showShapes && arp;
-  const audioVoicings = instrument === 'piano' ? (useShapesForAudio ? pianoShapes : pianoVoicings) : (useShapesForAudio ? diagramShapes : diagramVoicings);
-  const { playingIdx, isPlayingSystem, isLooping, toggleLooping, handlePlayProgression, stopPlayback } = useProgressionPlayer(selectedCell, audioVoicings);
+      // Voice leading → the box whose region fits the area we're in, centred on the neck
+      // zone when set, else the position of the (zone-anchored) voice-led voicing.
+      const vFrets = diagramVoicings[idx]?.frets
+        ? diagramVoicings[idx].frets.map((f: any) => f?.fret).filter((f: any) => f !== null && f > 0)
+        : [];
+      const target = guitarNeckZone !== null ? guitarNeckZone : (vFrets.length ? Math.min(...vFrets) : 3);
+
+      let best = arps[0];
+      let bestDiff = Infinity;
+      for (const a of arps) {
+        const diff = Math.abs((a.minFret ?? 0) - target);
+        if (diff < bestDiff) { bestDiff = diff; best = a; }
+      }
+      return best;
+    });
+  }, [progression, namingMode, guitarNeckZone, voiceLeading, diagramVoicings]);
+
+  // Piano arpeggio: every chord tone exactly ONCE, ascending within a SINGLE octave (compact,
+  // no repeated notes). The arp's BASS (lowest, first note) is the bass of the matching block
+  // voicing — which is already voice-led and zone-centred — so the arps INVERT and move with
+  // the voice leading instead of every one being root-position (which made them jump around).
+  // Voice-leading-off voicings are root position, so the arp is too.
+  const pianoArps = React.useMemo(() => {
+    const ZONE_PC = (((pianoZone % 12) + 12) % 12);
+    const ZONE_TARGET = ((octave + 1) * 12) + ZONE_PC;
+    return progression.map((chord, idx) => {
+      if (!chord || chord.spacer) return null;
+      const def = CH[chord.chordType];
+      if (!def) return null;
+      // All distinct chord-tone pitch classes (the "fullest" arpeggio, each tone once).
+      const pcs = Array.from(new Set(def.iv.map((iv: number) => (((chord.rootSemi + iv) % 12) + 12) % 12)));
+      // Bass = the voice-led block voicing's lowest note (its inversion). Fall back to the
+      // root near the zone when there's no voicing for this chord.
+      const vNotes = pianoVoicings[idx]?.notes;
+      let bassMidi: number;
+      if (vNotes && vNotes.length) {
+        bassMidi = Math.min(...vNotes);
+      } else {
+        const rootPc = (((chord.rootSemi % 12) + 12) % 12);
+        bassMidi = rootPc + 12 * Math.round((ZONE_TARGET - rootPc) / 12);
+      }
+      const bassPc = ((bassMidi % 12) + 12) % 12;
+      // Stack every chord tone ascending from that bass, each folded into the one octave above.
+      const notes = pcs.map(pc => bassMidi + ((((pc - bassPc) % 12) + 12) % 12)).sort((a, b) => a - b);
+      return { notes };
+    });
+  }, [progression, octave, pianoZone, pianoVoicings]);
+
+  // In ARPS view the audio/diagram come from the arpeggio shapes (arpeggiated playback);
+  // otherwise the block chord voicings. Guitar arps fall back to the chord voicing for any
+  // chord with no parent scale.
+  const audioVoicings = React.useMemo(() => {
+    if (!arpView) return instrument === 'piano' ? pianoVoicings : diagramVoicings;
+    return instrument === 'piano'
+      ? pianoArps.map((a, i) => a ?? pianoVoicings[i])
+      : diagramArps.map((a, i) => a ?? diagramVoicings[i]);
+  }, [arpView, instrument, pianoVoicings, diagramVoicings, pianoArps, diagramArps]);
+  const { playingIdx, isPlayingSystem, isLooping, queuedIdx, queueMeasure, toggleLooping, handlePlayProgression, stopPlayback } = useProgressionPlayer(selectedCell, audioVoicings, arpView);
 
   const isFocused = useIsFocused();
   useEffect(() => {
@@ -455,6 +465,14 @@ export default function ProgressionScreen() {
       stopPlayback();
     }
   }, [isFocused]);
+
+  // Drive the universal header arp toggle: ARPS view forces the header to show (and lock to)
+  // arpeggio while the user's real `arp` preference is preserved underneath. Leaving ARPS view
+  // reverts the header to that preference; the App.tsx 'blur' listener clears it off-screen.
+  // useFocusEffect (not isFocused) so it re-asserts on focus despite freezeOnBlur.
+  useFocusEffect(
+    React.useCallback(() => { setArpForced(arpView); }, [arpView, setArpForced])
+  );
 
   const [isSaveModalVisible, setIsSaveModalVisible] = useState(false);
   const [isLibModalVisible, setIsLibModalVisible] = useState(false);
@@ -493,6 +511,34 @@ export default function ProgressionScreen() {
       return count;
     });
   }, [groupedCells]);
+
+  // Diagram cells grow taller to fit the tallest diagram on screen, so a wide CAGED arp box
+  // — or two of them stacked in a split measure — never spills past the cell borders.
+  const diagramCellHeight = React.useMemo(() => {
+    if (viewMode !== 'diagram') return 66;
+    // Pixel height one MiniChordDiagram needs, mirroring its own fret-window sizing.
+    const guitarDiagHeight = (d: any): number => {
+      if (!d) return 62;
+      const frets: number[] = (d.notes
+        ? d.notes.map((n: any) => n.fret)
+        : (d.frets || []).map((f: any) => f?.fret)
+      ).filter((f: any) => f != null && f > 0);
+      if (!frets.length) return 62;
+      const minF = Math.min(...frets), maxF = Math.max(...frets);
+      let startF = minF <= 1 ? 0 : minF - 1;
+      if (maxF <= 4) startF = 0;
+      const numFrets = Math.max(4, maxF - startF);
+      return 46 + (numFrets > 4 ? (numFrets - 4) * 10 : 0) + 16; // + topY + dot radii
+    };
+    const maxDiag = instrument === 'piano'
+      ? 56 // MiniPianoDiagram is ~constant height
+      : Math.max(62, ...(arpView ? diagramArps : diagramVoicings).map(guitarDiagHeight));
+    const hasSplit = groupedCells.some((g: any) => g.type === 'split');
+    // Single cell: one full-size diagram + label. Split cell: two 0.75-scaled diagrams stacked.
+    const singleNeed = maxDiag + 56;
+    const splitNeed = hasSplit ? 2 * (16 + maxDiag * 0.75) + 28 : 0;
+    return Math.max(148, Math.ceil(singleNeed), Math.ceil(splitNeed));
+  }, [viewMode, instrument, arpView, diagramArps, diagramVoicings, groupedCells]);
 
   // Section (rehearsal) letters: each measure flagged with `section` gets the next
   // letter A, B, C… in playback order, so they relabel automatically as you add/remove.
@@ -561,7 +607,13 @@ export default function ProgressionScreen() {
   }, [isDrawerVisible, brushRoot, brushType, drawerRootHeight, drawerQualHeight]);
 
   const openDrawer = () => setIsDrawerVisible(true);
-  const closeDrawer = () => setIsDrawerVisible(false);
+  const closeDrawer = () => {
+    setIsDrawerVisible(false);
+    // During playback the editing toolbar is hidden, so a lingering "selected" cell highlight
+    // serves no purpose and competes with the playing/queued borders — clear it on close.
+    // When stopped, selection persists as usual (the toolbar acts on it).
+    if (isPlayingSystem) setSelectedCell(null);
+  };
   const sheetPixelHeightRef = useRef(sheetPixelHeight);
   sheetPixelHeightRef.current = sheetPixelHeight;
   const closeDrawerRef = useRef(closeDrawer);
@@ -623,7 +675,7 @@ export default function ProgressionScreen() {
     let notesToPlay = getChordNotes(chord.rootSemi, chord.chordType, octave);
     if (instrument === 'guitar') {
       const GS = GUITAR_TUNING;
-      const audioDiagram = (showShapes && arp) ? diagramShapes[idx] : diagramVoicings[idx] as any;
+      const audioDiagram = (arpView ? (diagramArps[idx] ?? diagramVoicings[idx]) : diagramVoicings[idx]) as any;
       if (audioDiagram) {
         let extractedMidi: number[] = [];
         if (audioDiagram.frets && Array.isArray(audioDiagram.frets)) {
@@ -655,7 +707,7 @@ export default function ProgressionScreen() {
         if (cleanMidi.length > 0) notesToPlay = cleanMidi;
       }
     } else if (instrument === 'piano') {
-      const activePianoVoicing = (showShapes && arp) ? pianoShapes[idx] : pianoVoicings[idx];
+      const activePianoVoicing = arpView ? (pianoArps[idx] ?? pianoVoicings[idx]) : pianoVoicings[idx];
       if (activePianoVoicing && activePianoVoicing.notes) {
         notesToPlay = activePianoVoicing.notes;
       } else {
@@ -673,19 +725,25 @@ export default function ProgressionScreen() {
         }
       }
     }
-    onPlay(notesToPlay, { guitar: instrument === 'guitar' });
+    // In ARPS view the preview arpeggiates the shape's notes low→high, deduped (no unison
+    // doublings) so the run is smooth and even.
+    if (arpView) notesToPlay = Array.from(new Set(notesToPlay)).sort((a, b) => a - b);
+    onPlay(notesToPlay, { guitar: instrument === 'guitar', forceArp: arpView });
   };
 
+  // A preview chord (onPlay with no durationMs) resets the engine's nextMeasureTime to 0, which
+  // derails the running progression clock — so skip the preview while playback is active. The
+  // edit itself still lands on the cell (takes effect on the next play/loop).
   const handleRootPick = (r: number) => {
     setBrushRoot(r);
     if (selectedCell !== null) setProgressionChord(selectedCell, r, brushType);
-    onPlay(getChordNotes(r, brushType, 4), { guitar: instrument === 'guitar' });
+    if (!isPlayingSystem) onPlay(getChordNotes(r, brushType, 4), { guitar: instrument === 'guitar' });
   };
 
   const handleTypePick = (type: string) => {
     setBrushType(type);
     if (selectedCell !== null) setProgressionChord(selectedCell, brushRoot, type);
-    onPlay(getChordNotes(brushRoot, type, 4), { guitar: instrument === 'guitar' });
+    if (!isPlayingSystem) onPlay(getChordNotes(brushRoot, type, 4), { guitar: instrument === 'guitar' });
   };
 
   const handlePrevCell = () => {
@@ -693,10 +751,10 @@ export default function ProgressionScreen() {
     const prevIdx = selectedCell === 0 ? progression.length - 1 : selectedCell - 1; 
     setSelectedCell(prevIdx);
     const chord = progression[prevIdx];
-    if (chord && !chord.spacer) { 
-      setBrushRoot(chord.rootSemi); setBrushType(chord.chordType); 
+    if (chord && !chord.spacer) {
+      setBrushRoot(chord.rootSemi); setBrushType(chord.chordType);
       useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
-      playSelectedCellAudio(prevIdx, chord);
+      if (!isPlayingSystem) playSelectedCellAudio(prevIdx, chord);
     }
   };
 
@@ -705,10 +763,10 @@ export default function ProgressionScreen() {
     const nextIdx = selectedCell === progression.length - 1 ? 0 : selectedCell + 1; 
     setSelectedCell(nextIdx);
     const chord = progression[nextIdx];
-    if (chord && !chord.spacer) { 
-      setBrushRoot(chord.rootSemi); setBrushType(chord.chordType); 
+    if (chord && !chord.spacer) {
+      setBrushRoot(chord.rootSemi); setBrushType(chord.chordType);
       useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
-      playSelectedCellAudio(nextIdx, chord);
+      if (!isPlayingSystem) playSelectedCellAudio(nextIdx, chord);
     }
   };
 
@@ -765,13 +823,15 @@ export default function ProgressionScreen() {
       }]}>
         {(
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 44 }} style={{ height: 44 }}>
-            <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={cycleViewMode}>
-              <Ionicons name={viewMode === 'text' ? 'text-outline' : showShapes ? 'color-filter' : 'grid-outline'} size={14} color={viewMode === 'text' ? t.txt2 : showShapes ? t.accent : t.txt2} />
-              <Text style={{ fontSize: 10, fontWeight: '800', color: viewMode === 'text' ? t.txt2 : showShapes ? t.accent : t.txt2 }}>{viewMode === 'text' ? 'TEXT' : showShapes ? 'SHAPES' : 'CHORDS'}</Text>
+            <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={cycleViewMode}>
+              {viewMode === 'text'
+                ? <MaterialCommunityIcons name="lead-pencil" size={18} color={t.txt2} />
+                : <Ionicons name={arpView ? 'musical-notes' : 'grid-outline'} size={18} color={t.accent} />}
+              <Text style={{ fontSize: 10, fontWeight: '800', color: viewMode === 'text' ? t.txt2 : t.accent }}>{viewMode === 'text' ? 'NAME' : arpView ? 'ARPS' : 'CHORDS'}</Text>
             </TouchableOpacity>
             
             {instrument === 'guitar' && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
                 <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 12 : (guitarNeckZone <= 1 ? null : guitarNeckZone - 1))} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
                   <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>-</Text>
                 </TouchableOpacity>
@@ -785,13 +845,72 @@ export default function ProgressionScreen() {
               </View>
             )}
 
+            {/* Piano zone — the note within the Settings octave the chords/arps centre on.
+                Cycles C…B inside that one octave (octave 4 → C4…B4) and wraps. */}
+            {instrument === 'piano' && (() => {
+              const zonePc = (((pianoZone % 12) + 12) % 12);
+              const noteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[zonePc];
+              const label = `${noteName}${octave}`;
+              return (
+                <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+                  <TouchableOpacity onPress={() => setPianoZone((zonePc + 11) % 12)} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>-</Text>
+                  </TouchableOpacity>
+                  <View style={{ alignItems: 'center', minWidth: 40 }}>
+                    <Text style={{ fontSize: 8, fontWeight: '800', color: t.txt3 }}>ZONE</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt1 }}>{label}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setPianoZone((zonePc + 1) % 12)} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
+
+            {/* Global guitar voicing-type override — cycles every chord diagram through one
+                family (or AUTO = voice-leading auto-pick). Highlighted when not on AUTO. */}
+            {instrument === 'guitar' && (
+              <TouchableOpacity
+                onPress={() => {
+                  const order = ['auto', 'triads', 'drop2', 'drop3', 'shells'] as const;
+                  setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
+                }}
+                style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
+              >
+                <Text style={{ fontSize: 8, fontWeight: '800', color: songVoicingType === 'auto' ? t.txt3 : t.accent }}>VOICING</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: songVoicingType === 'auto' ? t.txt1 : t.accent }}>
+                  {({ auto: 'AUTO', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Strict string-set lock — only for types with a fixed set of string sets
+                (Triads / Drop 2 / Drop 3). Cycles Any → each set, locking the whole song. */}
+            {instrument === 'guitar' && STRING_SETS_BY_TYPE[songVoicingType] && (() => {
+              const sets = STRING_SETS_BY_TYPE[songVoicingType];
+              const active = songStringSet !== null;
+              const curLabel = active ? (sets.find(s => s.key === songStringSet)?.label ?? 'ANY') : 'ANY';
+              return (
+                <TouchableOpacity
+                  onPress={() => {
+                    const keys: (string | null)[] = [...sets.map(s => s.key), null];
+                    setSongStringSet(keys[(keys.indexOf(songStringSet) + 1) % keys.length]);
+                  }}
+                  style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
+                >
+                  <Text style={{ fontSize: 8, fontWeight: '800', color: active ? t.accent : t.txt3 }}>STRINGS</Text>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: active ? t.accent : t.txt1 }}>{curLabel}</Text>
+                </TouchableOpacity>
+              );
+            })()}
+
             {/* Time Signature */}
             <TouchableOpacity disabled={selectedCell === null} onPress={() => {
               if (selectedCell === null) return;
               const current = progression[selectedCell]?.beats || 4;
               const next = (current === 4 ? 2 : current + 1) as 2 | 3 | 4;
               setChordBeats(selectedCell, next);
-            }} style={{ height: 40, minWidth: 44, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg3, borderWidth: 1, borderColor: t.border }}>
+            }} style={{ height: 40, minWidth: 44, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}>
               <View style={{ alignItems: 'center' }}>
                 <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 12, fontWeight: 'bold', color: t.txt1, lineHeight: 12 }}>{selectedCell !== null ? (progression[selectedCell]?.beats || 4) : 4}</Text>
                 <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 12, fontWeight: 'bold', color: t.txt1, lineHeight: 12 }}>4</Text>
@@ -799,7 +918,7 @@ export default function ProgressionScreen() {
             </TouchableOpacity>
 
             {/* Repeats */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
               <TouchableOpacity disabled={targetStartCell === null} onPress={() => targetStartCell !== null && toggleRepeatStart(targetStartCell)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
                 <Text style={{ fontSize: 18, fontWeight: '800', color: isRepeatStart ? t.accent : t.txt2, transform: [{ translateY: 1 }] }}>𝄆</Text>
               </TouchableOpacity>
@@ -815,7 +934,7 @@ export default function ProgressionScreen() {
                 if (!targetIsRealChord) return;
                 toggleSection(voltaTargetCell);
               }}
-              style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]}
+              style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2 }]}
             >
               <View style={{ width: 18, height: 18, borderWidth: 1.5, borderColor: selectedSection ? t.accent : t.txt2, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 11, fontWeight: 'bold', color: selectedSection ? t.accent : t.txt2, lineHeight: 13 }}>A</Text>
@@ -823,7 +942,7 @@ export default function ProgressionScreen() {
             </TouchableOpacity>
 
             {/* Volta Endings — always targets the full measure (left chord of a split pair) */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
               <TouchableOpacity
                 disabled={!targetIsRealChord}
                 onPress={() => {
@@ -855,24 +974,24 @@ export default function ProgressionScreen() {
             </View>
 
             {/* Transposition */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg3, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
               <TouchableOpacity onPress={() => transposeProgression(-1)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
-                <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt1, transform: [{ translateY: -2 }] }}>♭</Text>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt2, transform: [{ translateY: -2 }] }}>♭</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => transposeProgression(1)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt1, transform: [{ translateY: -2 }] }}>♯</Text>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt2, transform: [{ translateY: -2 }] }}>♯</Text>
               </TouchableOpacity>
             </View>
 
             {/* Measure Management */}
             <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, gap: 8 }}>
-              <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]} onPress={() => {
+              <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2 }]} onPress={() => {
                 removeMeasure(selectedCell);
                 if (selectedCell !== null && selectedCell >= progression.length - 1) setSelectedCell(Math.max(0, progression.length - 2));
               }}>
                 <Ionicons name="remove" size={18} color={t.accent} />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]} onPress={() => {
+              <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2 }]} onPress={() => {
                 addMeasure(selectedCell);
                 if (selectedCell !== null) {
                   setSelectedCell(selectedCell + 1);
@@ -882,7 +1001,7 @@ export default function ProgressionScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 disabled={selectedCell === null || indentSpaces === 0}
-                style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg3 }]}
+                style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2 }]}
                 onPress={handleIndent}
               >
                 <Ionicons name="return-down-forward-outline" size={18} color={t.accent} />
@@ -891,7 +1010,7 @@ export default function ProgressionScreen() {
 
             {/* Delete Chord */}
             <TouchableOpacity disabled={selectedCell === null} onPress={() => selectedCell !== null && removeProgressionChord(selectedCell)}
-              style={{ height: 40, width: 44, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg3, borderWidth: 1, borderColor: t.border }}>
+              style={{ height: 40, width: 44, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}>
               <MaterialCommunityIcons name="eraser" size={18} color={t.accent} />
             </TouchableOpacity>
           </ScrollView>
@@ -905,14 +1024,25 @@ export default function ProgressionScreen() {
               const getCellProps = (idx: number) => {
                 const isSelected = selectedCell === idx;
                 const isPlaying = playingIdx === idx;
+                // Queued (tap-ahead) cell: dashed accent border, distinct from the solid
+                // now-playing border. Suppressed once it becomes the playing cell.
+                const isQueued = queuedIdx === idx && !isPlaying;
                 let bgColor = t.bg3;
                 let borderColor = t.border;
                 if (isSelected) { borderColor = t.accent; bgColor = t.bg2; }
+                if (isQueued) { borderColor = t.accent; }
                 if (isPlaying) { bgColor = t.bg2; borderColor = t.accent; }
-                return { isSelected, isPlaying, bgColor, borderColor };
+                return { isSelected, isPlaying, isQueued, bgColor, borderColor };
               };
 
               const handleCellPress = (idx: number, chord: any) => {
+                // During playback a tap queues a skip-to-measure instead of previewing the chord.
+                // Re-tapping the queued cell clears it (handled in queueMeasure). Spacers/empties
+                // aren't valid jump targets. Long-press still opens the editor (handleCellLongPress).
+                if (isPlayingSystem) {
+                  if (chord && !chord.spacer) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); queueMeasure(idx); }
+                  return;
+                }
                 const now = Date.now();
                 const isDoubleTap = lastTap.current.idx === idx && (now - lastTap.current.time < 300);
                 if (isDoubleTap) {
@@ -937,7 +1067,10 @@ export default function ProgressionScreen() {
                 if (chord && !chord.spacer) {
                   setBrushRoot(chord.rootSemi); setBrushType(chord.chordType);
                   useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
-                  playSelectedCellAudio(idx, chord);
+                  // Don't fire a preview chord while the progression is playing — it injects a
+                  // competing schedule into the shared audio engine, which cuts out / glitches
+                  // the running playback. Opening the editor mid-playback is still allowed.
+                  if (!isPlayingSystem) playSelectedCellAudio(idx, chord);
                 }
                 if (!isDrawerVisible) openDrawer();
               };
@@ -981,14 +1114,14 @@ export default function ProgressionScreen() {
                       
                       {/* Left Zone: Time Sig, Start Repeat */}
                       <View style={viewMode === 'diagram' ? { position: 'absolute', left: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-start', justifyContent: 'flex-end', paddingBottom: 2, paddingLeft: 4, height: '100%', zIndex: 2 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           {!isRightHalf && showTimeSig && (
-                            <View style={{ alignItems: 'center', marginRight: 2, marginBottom: 2 }}>
-                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 11, fontWeight: 'bold', color: t.accent, lineHeight: 10 }}>{topNum}</Text>
-                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 11, fontWeight: 'bold', color: t.accent, lineHeight: 10 }}>4</Text>
+                            <View style={{ alignItems: 'center', marginRight: 4 }}>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 10, fontWeight: 'bold', color: t.accent, lineHeight: 11 }}>{topNum}</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 10, fontWeight: 'bold', color: t.accent, lineHeight: 11 }}>4</Text>
                             </View>
                           )}
-                          {!!chord?.repeatStart && ( <Text style={{ fontSize: 16, color: t.accent, fontWeight: '800', marginBottom: 1 }}>𝄆</Text> )}
+                          {!!chord?.repeatStart && ( <Text style={{ fontSize: 20, color: t.accent, fontWeight: '800', includeFontPadding: false, transform: [{ translateY: 2 }] }}>𝄆</Text> )}
                         </View>
                       </View>
 
@@ -1008,9 +1141,9 @@ export default function ProgressionScreen() {
                             {chord && (
                               <View style={{ marginTop: 10 }}>
                                 {instrument === 'piano' ? (
-                                  <MiniPianoDiagram chord={chord} notes={showShapes ? pianoShapes[idx]?.notes : pianoVoicings[idx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
+                                  <MiniPianoDiagram chord={chord} notes={arpView ? pianoArps[idx]?.notes : pianoVoicings[idx]?.notes} theme={t} octave={octave} />
                                 ) : (
-                                  <MiniChordDiagram voicing={showShapes ? undefined : diagramVoicings[idx]} shape={showShapes ? diagramShapes[idx] : undefined} theme={t} />
+                                  <MiniChordDiagram voicing={diagramVoicings[idx]} arpShape={arpView ? diagramArps[idx] : undefined} theme={t} />
                                 )}
                               </View>
                             )}
@@ -1020,18 +1153,18 @@ export default function ProgressionScreen() {
 
                       {/* Right Zone: End Repeat */}
                       <View style={viewMode === 'diagram' ? { position: 'absolute', right: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-end', justifyContent: 'flex-end', paddingBottom: 2, paddingRight: 4, height: '100%', zIndex: 2 }}>
-                        {!!chord?.repeatEnd && ( <Text style={{ fontSize: 16, color: t.accent, fontWeight: '800', marginBottom: 1 }}>𝄇</Text> )}
+                        {!!chord?.repeatEnd && ( <Text style={{ fontSize: 20, color: t.accent, fontWeight: '800', includeFontPadding: false, transform: [{ translateY: 2 }] }}>𝄇</Text> )}
                       </View>
 
                     </View>
                   );
               };
 
-              const cellHeight = viewMode === 'diagram' ? 148 : 66;
+              const cellHeight = diagramCellHeight;
 
               if (group.type === 'single') {
                 const { idx, chord } = group;
-                const { isSelected, isPlaying, bgColor, borderColor } = getCellProps(idx);
+                const { isSelected, isPlaying, isQueued, bgColor, borderColor } = getCellProps(idx);
                 // A spacer (indent padding) reads as open background — no divider lines,
                 // no content — so it looks like nothing is there. A `null` cell is still a
                 // real, empty measure: it renders normally (dash + number), as before.
@@ -1043,7 +1176,8 @@ export default function ProgressionScreen() {
                       styles.cell,
                       { backgroundColor: showEmpty ? t.bg2 : bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight },
                       showEmpty && { borderRightWidth: 0, borderBottomWidth: 0 },
-                      (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 }
+                      (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 },
+                      isQueued && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2, borderStyle: 'dashed' }
                     ]}
                     onPress={() => handleCellPress(idx, chord)} onLongPress={() => handleCellLongPress(idx, chord)} delayLongPress={300}>
                     {!isSpacerCell && renderContent(chord, idx, isPlaying, false, false)}
@@ -1055,9 +1189,11 @@ export default function ProgressionScreen() {
                 const pRight = getCellProps(rightIdx);
                 const isPlaying = pLeft.isPlaying || pRight.isPlaying;
                 const isSelected = pLeft.isSelected || pRight.isSelected;
+                const isQueued = (pLeft.isQueued || pRight.isQueued) && !isPlaying;
                 let bgColor = t.bg3;
                 let borderColor = t.border;
                 if (isSelected) { borderColor = t.accent; bgColor = t.bg2; }
+                if (isQueued) { borderColor = t.accent; }
                 if (isPlaying) { bgColor = t.bg2; borderColor = t.accent; }
 
                 const renderSplitText = (chord: any, isPlayingChord: boolean, isSelectedChord: boolean) => {
@@ -1090,7 +1226,8 @@ export default function ProgressionScreen() {
                   <View key={`split-${leftIdx}`} style={[
                     styles.cell, 
                     { backgroundColor: bgColor, borderColor: borderColor, zIndex: isPlaying ? 10 : isSelected ? 10 : 1, height: cellHeight, padding: 2, flexDirection: 'row' },
-                    (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 }
+                    (isSelected || isPlaying) && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2 },
+                    isQueued && { borderWidth: 2, borderRightWidth: 2, borderBottomWidth: 2, borderStyle: 'dashed' }
                   ]}>
                      
                      {/* Absolute Measure Number */}
@@ -1098,14 +1235,14 @@ export default function ProgressionScreen() {
 
                      {/* Left Zone */}
                      <View style={viewMode === 'diagram' ? { position: 'absolute', left: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-start', justifyContent: 'flex-end', paddingBottom: 4, paddingLeft: 4, height: '100%', zIndex: 2 }} pointerEvents="none">
-                       <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                          {showTimeSig && (
-                           <View style={{ alignItems: 'center', marginRight: 4, marginBottom: 4 }}>
-                             <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 12, fontWeight: 'bold', color: t.accent, lineHeight: 10 }}>4</Text>
-                             <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 12, fontWeight: 'bold', color: t.accent, lineHeight: 10 }}>4</Text>
+                           <View style={{ alignItems: 'center', marginRight: 4 }}>
+                             <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 10, fontWeight: 'bold', color: t.accent, lineHeight: 11 }}>4</Text>
+                             <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 10, fontWeight: 'bold', color: t.accent, lineHeight: 11 }}>4</Text>
                            </View>
                          )}
-                         {!!left?.repeatStart && ( <Text style={{ fontSize: 22, color: t.accent, fontWeight: '800', marginBottom: 1 }}>𝄆</Text> )}
+                         {!!left?.repeatStart && ( <Text style={{ fontSize: 20, color: t.accent, fontWeight: '800', includeFontPadding: false, transform: [{ translateY: 2 }] }}>𝄆</Text> )}
                        </View>
                      </View>
 
@@ -1122,9 +1259,9 @@ export default function ProgressionScreen() {
                                  {renderSplitText(left, pLeft.isPlaying, pLeft.isSelected)}
                                  <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                                    {instrument === 'piano' ? (
-                                     <MiniPianoDiagram chord={left} notes={showShapes ? pianoShapes[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
+                                     <MiniPianoDiagram chord={left} notes={arpView ? pianoArps[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} theme={t} octave={octave} />
                                    ) : (
-                                     <MiniChordDiagram voicing={showShapes ? undefined : diagramVoicings[leftIdx]} shape={showShapes ? diagramShapes[leftIdx] : undefined} theme={t} />
+                                     <MiniChordDiagram voicing={diagramVoicings[leftIdx]} arpShape={arpView ? diagramArps[leftIdx] : undefined} theme={t} />
                                    )}
                                  </View>
                               </View>
@@ -1132,9 +1269,9 @@ export default function ProgressionScreen() {
                                  {renderSplitText(right, pRight.isPlaying, pRight.isSelected)}
                                  <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                                    {instrument === 'piano' ? (
-                                     <MiniPianoDiagram chord={right} notes={showShapes ? pianoShapes[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} showShapes={showShapes} theme={t} octave={octave} />
+                                     <MiniPianoDiagram chord={right} notes={arpView ? pianoArps[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} theme={t} octave={octave} />
                                    ) : (
-                                     <MiniChordDiagram voicing={showShapes ? undefined : diagramVoicings[rightIdx]} shape={showShapes ? diagramShapes[rightIdx] : undefined} theme={t} />
+                                     <MiniChordDiagram voicing={diagramVoicings[rightIdx]} arpShape={arpView ? diagramArps[rightIdx] : undefined} theme={t} />
                                    )}
                                  </View>
                               </View>
@@ -1144,7 +1281,7 @@ export default function ProgressionScreen() {
 
                      {/* Right Zone */}
                      <View style={viewMode === 'diagram' ? { position: 'absolute', right: 4, bottom: 4, zIndex: 2 } : { alignItems: 'flex-end', justifyContent: 'flex-end', paddingBottom: 4, paddingRight: 4, height: '100%', zIndex: 2 }} pointerEvents="none">
-                        {!!right?.repeatEnd && ( <Text style={{ fontSize: 22, color: t.accent, fontWeight: '800', marginBottom: 1 }}>𝄇</Text> )}
+                        {!!right?.repeatEnd && ( <Text style={{ fontSize: 20, color: t.accent, fontWeight: '800', includeFontPadding: false, transform: [{ translateY: 2 }] }}>𝄇</Text> )}
                      </View>
 
                      {/* Section (rehearsal) letterbox — top-left corner, aligned with volta bracket */}
@@ -1298,7 +1435,7 @@ export default function ProgressionScreen() {
       <PopUpModal visible={isSaveModalVisible} onClose={() => setIsSaveModalVisible(false)}>
         <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Save Progression</Text>
-          <TextInput style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border }]} placeholder="e.g. Autumn Leaves" placeholderTextColor={t.txt3} value={songName} onChangeText={setSongName} autoFocus />
+          <TextInput style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border, fontFamily: familyForWeight(fontFamily, 400) }]} placeholder="e.g. Autumn Leaves" placeholderTextColor={t.txt3} value={songName} onChangeText={setSongName} autoFocus />
           <View style={styles.modalBtnRow}>
             <TouchableOpacity style={styles.modalBtn} onPress={() => setIsSaveModalVisible(false)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Cancel</Text></TouchableOpacity>
             <TouchableOpacity style={[styles.modalBtn, { backgroundColor: t.accent }]} onPress={() => { if (songName.trim()) { saveSong(songName.trim(), bpm); setSongName(''); setIsSaveModalVisible(false); } }}><Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Save</Text></TouchableOpacity>
@@ -1333,7 +1470,12 @@ export default function ProgressionScreen() {
 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
             {(() => {
-              const visibleSongs = savedSongs.filter((s: any) => (s.category || 'Songs') === selectedLibCategory);
+              // Filter to the selected category, then auto-arrange alphabetically by name
+              // (case-insensitive). .filter() returns a fresh array, so the sort doesn't mutate
+              // the store's saved order.
+              const visibleSongs = savedSongs
+                .filter((s: any) => (s.category || 'Songs') === selectedLibCategory)
+                .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
               if (visibleSongs.length === 0) {
                 return (
                   <View style={styles.emptyState}>
@@ -1363,7 +1505,7 @@ export default function ProgressionScreen() {
       <PopUpModal visible={isCatModalVisible} onClose={() => setIsCatModalVisible(false)}>
         <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>New Category</Text>
-          <TextInput style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border }]} placeholder="e.g. Ballads" placeholderTextColor={t.txt3} value={newCatName} onChangeText={setNewCatName} autoFocus />
+          <TextInput style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border, fontFamily: familyForWeight(fontFamily, 400) }]} placeholder="e.g. Ballads" placeholderTextColor={t.txt3} value={newCatName} onChangeText={setNewCatName} autoFocus />
           <View style={styles.modalBtnRow}>
             <TouchableOpacity style={styles.modalBtn} onPress={() => setIsCatModalVisible(false)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Cancel</Text></TouchableOpacity>
             <TouchableOpacity style={[styles.modalBtn, { backgroundColor: t.accent }]} onPress={() => { const n = newCatName.trim(); if (n) { addCategory(n); setSelectedLibCategory(n); setNewCatName(''); setIsCatModalVisible(false); } }}><Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Add</Text></TouchableOpacity>

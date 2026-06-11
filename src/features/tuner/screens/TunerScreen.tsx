@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { THEMES } from '@shared/ui/themes';
+import { familyForWeight } from '@shared/fonts/fonts';
 import { useAudio } from '@shared/audio/AudioContext';
 import { startListening, stopListening, addPitchListener } from '../../../../modules/native-tuner';
 import { Audio } from 'expo-av';
@@ -67,7 +68,8 @@ function findClosestString(midi: number, cents: number, strings: { name: string;
 export default function TunerScreen() {
   const insets = useSafeAreaInsets();
   const { playTone, stopAudio } = useAudio();
-  const { theme, referenceFrequency } = useSettingsStore();
+  const { theme, referenceFrequency, fontFamily } = useSettingsStore();
+  const svgFont = familyForWeight(fontFamily, '700');
   const t = THEMES[theme];
 
   // The mic-based pitch detector is implemented in the Android native module only;
@@ -314,11 +316,11 @@ export default function TunerScreen() {
             {isRecording && livePitchInfo && liveSmoothedHz !== null && (
               <>
                 <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 8 }}>
-                  <Text style={{ fontSize: 44, fontWeight: '800', color: t.txt1 }}>{livePitchInfo.fullName}</Text>
+                  <Text style={{ fontSize: 44, fontWeight: '700', color: t.txt1 }}>{livePitchInfo.fullName}</Text>
                   <Text style={{ fontSize: 16, fontWeight: '600', color: tuneColor }}>
                     {cents > 0 ? '+' : ''}{cents.toFixed(1)} cents
                   </Text>
-                  <Text style={{ fontSize: 13, fontWeight: '500', color: t.txt3 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: t.txt3 }}>
                     {liveSmoothedHz.toFixed(1)} Hz
                   </Text>
                 </View>
@@ -361,6 +363,7 @@ export default function TunerScreen() {
                     fontSize={13}
                     fontWeight="700"
                     textAnchor="middle"
+                    fontFamily={svgFont}
                   >
                     {line.label}
                   </SvgText>
@@ -506,15 +509,15 @@ const styles = StyleSheet.create({
   dock: { borderTopWidth: 1, paddingVertical: 12, paddingBottom: Platform.OS === 'ios' ? 24 : 12 },
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 56, borderRadius: 20, borderWidth: 1, gap: 8 },
-  actionBtnTxt: { fontWeight: '700', fontSize: 15 },
+  actionBtnTxt: { fontWeight: '700', fontSize: 16 },
   tunerActionBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   
   modalBox: { width: '100%', padding: 20, borderRadius: 16, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
-  modalTitle: { fontSize: 24, fontWeight: '800', letterSpacing: 0.5, marginBottom: 16 },
+  modalTitle: { fontSize: 24, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16 },
   modalBtnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 },
   modalBtn: { paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 },
   tuningOverlayItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16 },
-  tuningOverlayLabel: { fontSize: 15, fontWeight: '700' },
+  tuningOverlayLabel: { fontSize: 16, fontWeight: '700' },
   tuningOverlayNotes: { fontSize: 12, fontWeight: '500', marginTop: 2 },
   
   listenLayout: { width: '100%', overflow: 'hidden' },
@@ -522,11 +525,11 @@ const styles = StyleSheet.create({
   playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 32, justifyContent: 'center' },
 stringsColumn: { gap: 0 },
   stringRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },
-  stringNum: { fontSize: 13, fontWeight: '800', width: 20, textAlign: 'center' },
+  stringNum: { fontSize: 14, fontWeight: '700', width: 20, textAlign: 'center' },
   stringLineWrap: { flex: 1, height: 20, justifyContent: 'center', marginHorizontal: 10, position: 'relative' },
   stringLine: { width: '100%', borderRadius: 4 },
   stringGlow: { position: 'absolute', width: '100%', height: 14, borderRadius: 7, top: 3 },
   stringNoteBubble: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
-  stringNoteTxt: { fontSize: 16, fontWeight: '800' },
-  stringHz: { fontSize: 13, fontWeight: '700', width: 58, textAlign: 'right' },
+  stringNoteTxt: { fontSize: 16, fontWeight: '700' },
+  stringHz: { fontSize: 14, fontWeight: '700', width: 58, textAlign: 'right' },
 });

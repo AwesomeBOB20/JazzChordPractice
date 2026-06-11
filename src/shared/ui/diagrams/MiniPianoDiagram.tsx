@@ -2,44 +2,32 @@ import React from 'react';
 import { View } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
 import { ROLE_COLORS_GLOBAL, getNoteColor } from '@shared/ui/themes';
-import { CH, CHORD_PATTERN_MAP, PATTERNS } from '@shared/theory/musicTheory';
+import { CH } from '@shared/theory/musicTheory';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
 interface Props {
   chord: any;
   notes?: number[];
-  showShapes?: boolean;
   theme: any;
   octave?: number;
   isMasked?: boolean;
 }
 
-const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, showShapes, theme, octave = 4, isMasked }: Props) => {
+const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octave = 4, isMasked }: Props) => {
   const colorMode = useSettingsStore((s: any) => s.colorMode);
   const selectiveRoles = useSettingsStore((s: any) => s.selectiveRoles);
 
   if (!chord && (!providedNotes || !providedNotes.length)) return <View style={{ height: 52 }} />;
-  
+
   let activeNotes: number[] = [];
   let roles: string[] = [];
-  
+
   const def = chord ? CH[chord.chordType] : null;
 
   if (providedNotes && providedNotes.length > 0) {
     activeNotes = providedNotes;
     roles = activeNotes.map((midi: number) => {
       const pc = midi % 12;
-      
-      if (showShapes && CHORD_PATTERN_MAP[chord.chordType]) {
-        const shapeDef = CHORD_PATTERN_MAP[chord.chordType][0];
-        const pattern = PATTERNS[shapeDef.pattern];
-        if (pattern) {
-          const shapeRootPc = (chord.rootSemi + shapeDef.offset) % 12;
-          const idx = pattern.iv.findIndex((iv: number) => (shapeRootPc + iv) % 12 === pc);
-          if (idx !== -1) return pattern.roles[idx];
-        }
-      }
-      
       if (def) {
         const idx = def.iv.findIndex((iv: number) => (chord.rootSemi + iv) % 12 === pc);
         if (idx !== -1) return def.f[idx];
@@ -47,29 +35,14 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, showShapes, 
       return '';
     });
   } else if (def) {
-    // Inject the shape logic
-    if (showShapes && CHORD_PATTERN_MAP[chord.chordType]) {
-      const shapeDef = CHORD_PATTERN_MAP[chord.chordType][0]; // Grab the primary shape
-      const pattern = PATTERNS[shapeDef.pattern];
-      if (pattern) {
-        // Calculate correctly from the default piano octave
-        const baseMidi = ((octave + 1) * 12) + chord.rootSemi + shapeDef.offset;
-        activeNotes = pattern.iv.map(iv => baseMidi + iv);
-        roles = pattern.roles;
-      }
-    }
-
-    // Fallback to normal chord tones if shapes are off or missing
-    if (!activeNotes.length) {
-      const intervals = def.iv.slice(0, 4);
-      activeNotes = intervals.map((iv: number) => {
-        const pc = (chord.rootSemi + iv) % 12;
-        let midi = ((octave + 1) * 12) + pc;
-        if (midi < ((octave + 1) * 12) + chord.rootSemi) midi += 12;
-        return midi;
-      });
-      roles = def.f.slice(0, 4);
-    }
+    const intervals = def.iv.slice(0, 4);
+    activeNotes = intervals.map((iv: number) => {
+      const pc = (chord.rootSemi + iv) % 12;
+      let midi = ((octave + 1) * 12) + pc;
+      if (midi < ((octave + 1) * 12) + chord.rootSemi) midi += 12;
+      return midi;
+    });
+    roles = def.f.slice(0, 4);
   }
 
   if (!activeNotes.length) return <View style={{ height: 52 }} />;
@@ -151,12 +124,12 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, showShapes, 
            />
          ))}
          {blackKeys.map(k => (
-           <Rect 
-             key={k.midi} 
-             x={k.x} y={0} 
-             width={BLACK_WIDTH} height={BLACK_HEIGHT} 
-             fill={k.color} 
-             rx={1} 
+           <Rect
+             key={k.midi}
+             x={k.x} y={0}
+             width={BLACK_WIDTH} height={BLACK_HEIGHT}
+             fill={k.color}
+             rx={1}
            />
          ))}
          {/* Overall thin black border */}

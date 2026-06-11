@@ -2,11 +2,63 @@ import { CH, NOTE_FLAT, NOTE_SHARP } from '@shared/theory/musicTheory';
 import { buildDropVoicings, buildShellVoicings, buildTriadVoicings, buildOpenVoicings, buildBarreVoicings } from '@shared/guitar/voicings';
 import { ProgressionChord } from '@shared/types/models';
 
-export function calculateOptimalVoiceLeading(progression: (ProgressionChord | null)[], useVoiceLeading: boolean = true, fretCap: number = 5, targetZone: number | null = null) {
+// Kept as a local union (not imported from the progression store) so this shared
+// guitar module has no dependency on a feature store.
+type ForcedVoicingType = 'auto' | 'triads' | 'drop2' | 'drop3' | 'shells';
+
+// ── Idiomatic-jazz voicing character ──────────────────────────────────────────
+// Score a voicing by how well it spells the chord the way a jazz comper would:
+// guide tones (3rd + 7th) present, the chord's colour tones (9/11/13 + alterations)
+// highlighted, and the dead-weight perfect 5th / doubled root kept out. Lower = more
+// idiomatic, so it adds straight into the existing voice-leading distance score.
+const GUIDE_ROLES = new Set(['3rd', 'b3rd', '7th', 'b7th', 'bb7']);
+const COLOR_ROLES = new Set(['9th', 'b9th', '#9th', '11th', '#11th', '13th', 'b13th', 'b5th', '#5th', '6th']);
+
+const activeRoles = (v: any): string[] => v.frets.filter((f: any) => f && f.fret !== null).map((f: any) => f.role);
+
+// Canonical key for a voicing's string set = the sorted active string indices
+// (0 = low E … 5 = high E), e.g. "2,3,4,5" for the 4-3-2-1 set.
+const activeStringKey = (v: any): string =>
+  v.frets.map((f: any, i: number) => (f && f.fret !== null) ? i : null).filter((i: any) => i !== null).join(',');
+
+function jazzCharacter(v: any, def: { r: string[] }): number {
+  const roles = activeRoles(v);
+  const present = new Set(roles);
+  let s = 0;
+  // Guide tones the chord HAS but the voicing omits → ambiguous quality, un-jazzy.
+  for (const r of def.r) if (GUIDE_ROLES.has(r) && !present.has(r)) s += 14;
+  // Colour tones (extensions / alterations) the chord HAS: reward when shown,
+  // penalise when omitted — this is the "highlight the higher extensions" bias.
+  for (const r of def.r) if (COLOR_ROLES.has(r)) { if (present.has(r)) s -= 9; else s += 7; }
+  // The natural 5th is filler in a jazz voicing; gently nudge it out.
+  s += roles.filter((r: string) => r === '5th').length * 5;
+  // Avoid doubling the root.
+  const roots = roles.filter((r: string) => r === 'root').length;
+  if (roots > 1) s += (roots - 1) * 6;
+  return s;
+}
+
+const TYPE_RANK: Record<string, number> = { drop2: 0, drop3: 4, drop24: 12, shell: 25, open: 40, barre: 50, triad: 50 };
+const typeRank = (t: string): number => TYPE_RANK[t] ?? 60;
+
+// Root-position = the lowest-sounding note (lowest active string) is the root.
+const ROOT_ROLES = new Set(['root', '1', 'R']);
+function isRootBass(v: any): boolean {
+  for (let i = 0; i < v.frets.length; i++) {
+    const f = v.frets[i];
+    if (f && f.fret !== null) return ROOT_ROLES.has(f.role);
+  }
+  return false;
+}
+const minActiveFret = (v: any): number => {
+  const fs = v.frets.filter((f: any) => f && f.fret !== null && f.fret > 0).map((f: any) => f.fret as number);
+  return fs.length ? Math.min(...fs) : 0;
+};
+
+export function calculateOptimalVoiceLeading(progression: (ProgressionChord | null)[], useVoiceLeading: boolean = true, fretCap: number = 5, targetZone: number | null = null, forcedType: ForcedVoicingType = 'auto', forcedStringSet: string | null = null) {
   let lastFrets: any = null;
   let lastType: string | null = null;
-  let lastMinFret: number = 0;
-  
+
   return progression.map(chord => {
     if (!chord || chord.spacer) return null;
     const def = CH[chord.chordType];
@@ -39,24 +91,71 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
 
     if (!allVoicings.length) return null;
 
-    if (!useVoiceLeading && targetZone === null) {
-      if (drop2Voicings.length) { lastFrets = drop2Voicings[0].frets; lastType = 'drop2'; return drop2Voicings[0]; }
-      if (drop3Voicings.length) { lastFrets = drop3Voicings[0].frets; lastType = 'drop3'; return drop3Voicings[0]; }
-      if (shellVoicings.length) { lastFrets = shellVoicings[0].frets; lastType = 'shell'; return shellVoicings[0]; }
-      if (openVoicings.length) { lastFrets = openVoicings[0].frets; lastType = 'open'; return openVoicings[0]; }
-      if (barreVoicings.length) { lastFrets = barreVoicings[0].frets; lastType = 'barre'; return barreVoicings[0]; }
-      if (triadVoicings.length) { lastFrets = triadVoicings[0].frets; lastType = 'triad'; return triadVoicings[0]; }
-      lastFrets = allVoicings[0].frets;
-      lastType = allVoicings[0].type;
-      return allVoicings[0];
+    // Phase 5: a forced voicing type constrains the candidate pool to that family.
+    // Falls back to the full set when this chord has no voicing of the chosen type,
+    // so a progression never shows a blank cell just because (say) a plain triad
+    // has no drop voicing. Everything downstream scores within `pool`, so the neck
+    // zone and voice-leading still pick the smoothest option inside the chosen type.
+    const forcedSubset =
+      forcedType === 'triads' ? triadVoicings :
+      forcedType === 'drop2'  ? drop2Voicings :
+      forcedType === 'drop3'  ? drop3Voicings :
+      forcedType === 'shells' ? shellVoicings : null;
+    let pool = (forcedSubset && forcedSubset.length) ? forcedSubset : allVoicings;
+
+    // Strict string-set lock: keep every chord on the chosen set of strings so the
+    // whole progression sits in one place on the neck. Only relax (fall back to the
+    // wider pool) when this particular chord can't be voiced on that set at all.
+    if (forcedStringSet) {
+      const onSet = pool.filter((v: any) => activeStringKey(v) === forcedStringSet);
+      if (onSet.length) pool = onSet;
     }
 
-    if (!lastFrets || (!useVoiceLeading && targetZone !== null)) {
-      let best = allVoicings[0];
+    if (!useVoiceLeading) {
+      // Voice leading OFF → a plain, predictable root-position voicing (root in the
+      // bass), to match the piano and Shapes views. Among the root-position options we
+      // take the lowest playable one (or the one nearest the requested zone). Falls back
+      // to the idiomatic pick only when the chord/type/set has no root-position voicing
+      // at all (e.g. rootless shells), so no cell ever comes up blank.
+      const rootPos = pool.filter((v: any) => isRootBass(v));
+      const choose = rootPos.length ? rootPos : pool;
+      let best = choose[0];
+      let bestScore = Infinity;
+      for (const v of choose) {
+        const minF = minActiveFret(v);
+        const anchor = targetZone !== null ? Math.abs(minF - targetZone) * 10 : minF;
+        const score = anchor + typeRank(v.type) + jazzCharacter(v, def);
+        if (score < bestScore) { bestScore = score; best = v; }
+      }
+      lastFrets = best.frets;
+      lastType = best.type;
+      return best;
+    }
+
+    if (!lastFrets) {
+      // Pin the FIRST chord inside the zone window too — the same hard pre-filter the rest of
+      // the progression uses. Otherwise type/jazz penalties could pull the opening chord out
+      // of the zone while every later chord is hard-constrained to it (the first chord then
+      // visibly sat in a different position from the rest).
+      const ZONE_WINDOW = 5;
+      let firstPool = pool;
+      if (targetZone !== null) {
+        const lo = Math.max(0, targetZone - ZONE_WINDOW);
+        const hi = targetZone + ZONE_WINDOW;
+        const inZone = pool.filter((v: any) => {
+          const active = v.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
+          if (!active.length) return false;
+          const minF = Math.min(...active);
+          return minF >= lo && minF <= hi;
+        });
+        if (inZone.length > 0) firstPool = inZone;
+      }
+
+      let best = firstPool[0];
       let bestScore = Infinity;
 
       // Score every voicing to find the perfect starting anchor
-      for (const v of allVoicings) {
+      for (const v of firstPool) {
         let score = 0;
         
         // 1. Type Penalty: Strict Hierarchy
@@ -68,9 +167,12 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
         else if (v.type === 'barre' || v.type === 'triad') score += 50;
         else score += 60;
 
+        // 1b. Idiomatic-jazz character (guide tones + extensions, no filler 5th)
+        score += jazzCharacter(v, def);
+
         const activeFrets = v.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
         const minF = activeFrets.length ? Math.min(...activeFrets) : 0;
-        
+
         // 2. Anchor Penalty
         if (targetZone !== null) {
           score += Math.abs(minF - targetZone) * 15; // Strict penalty for leaving the requested zone
@@ -91,24 +193,28 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       return best;
     } else {
       let minD = Infinity;
-      let best = allVoicings[0];
+      let best = pool[0];
 
       // When a targetZone is set, pre-filter to zone-adjacent voicings so that zone
       // compliance is a hard constraint rather than a soft penalty competing against
       // voice leading. Voice leading then picks the smoothest option *within* the zone.
       // Fall back to the full set only if no voicings exist near the zone.
-      const ZONE_WINDOW = 5; // frets each side of targetZone treated as "in zone"
-      let candidates: typeof allVoicings;
+      // The zone is a symmetric ±ZONE_WINDOW band: every chord stays put near the chosen
+      // fret rather than walking up or down the neck across the progression.
+      const ZONE_WINDOW = 5;
+      let candidates: typeof pool;
       if (targetZone !== null) {
-        const inZone = allVoicings.filter((v: any) => {
+        const lo = Math.max(0, targetZone - ZONE_WINDOW);
+        const hi = targetZone + ZONE_WINDOW;
+        const inZone = pool.filter((v: any) => {
           const active = v.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
           if (!active.length) return false;
           const minF = Math.min(...active);
-          return minF >= Math.max(0, targetZone - ZONE_WINDOW) && minF <= targetZone + ZONE_WINDOW;
+          return minF >= lo && minF <= hi;
         });
-        candidates = inZone.length > 0 ? inZone : allVoicings;
+        candidates = inZone.length > 0 ? inZone : pool;
       } else {
-        candidates = allVoicings;
+        candidates = pool;
       }
 
       // Calculate last position bounds for strict position locking
@@ -136,8 +242,11 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
         } else if (v.type === 'barre' || v.type === 'triad') {
           d += 50;
         } else {
-          d += 60; 
+          d += 60;
         }
+
+        // 1b. Idiomatic-jazz character (guide tones + extensions, no filler 5th)
+        d += jazzCharacter(v, def);
 
         // 2. TYPE CONTINUITY: Stop the random jumping!
         if (lastType !== null && v.type !== lastType) {
@@ -190,13 +299,17 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
 
             d += Math.abs(centerF - lastCenter) * 1; // Let it drift smoothly.
 
-            // Greatly reduced rigid zone penalties. Smoothness > Position.
+            // Zone anchor: every chord is pinned toward the chosen fret zone so the whole
+            // progression stays in one place on the neck. The weight (×6) is firm but sits
+            // below the soprano-motion term (×15), so smoothness still chooses *among* the
+            // in-zone voicings rather than the anchor overriding good voice leading. When
+            // there's no zone (AUTO) we fall back to the soft fretCap pull.
             if (targetZone !== null) {
-              d += Math.abs(minF - targetZone) * 4; 
+              d += Math.abs(minF - targetZone) * 6;
             } else if (minF > fretCap) {
-              d += (minF - fretCap) * 4; 
+              d += (minF - fretCap) * 4;
             } else if (minF < Math.max(1, fretCap - 4)) {
-              d += (Math.max(1, fretCap - 4) - minF) * 1; 
+              d += (Math.max(1, fretCap - 4) - minF) * 1;
             }
           }
         }
@@ -205,10 +318,6 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       }
       lastFrets = best.frets;
       lastType = best.type;
-      
-      const bActive = best.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
-      if (bActive.length) lastMinFret = Math.min(...bActive);
-      
       return best;
     }
   });

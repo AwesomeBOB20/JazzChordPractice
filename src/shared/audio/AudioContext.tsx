@@ -31,6 +31,8 @@ interface AudioContextType {
   playProgression: (sequence: ProgressionMeasure[], onChordChange: (seqIdx: number, chordIdx: number) => void, onEnd: () => void, loop?: boolean) => void;
   stopProgression: () => void;
   setProgressionLooping: (loop: boolean) => void;
+  queueProgressionJump: (chordIdx: number | null) => void;
+  updateProgressionNotes: (sequence: ProgressionMeasure[]) => void;
 }
 
 const AudioContext = createContext<AudioContextType | null>(null);
@@ -99,8 +101,16 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     playerRef.current?.setProgressionLooping(loop);
   }, []);
 
+  const queueProgressionJump = useCallback((chordIdx: number | null) => {
+    playerRef.current?.queueProgressionJump(chordIdx);
+  }, []);
+
+  const updateProgressionNotes = useCallback((sequence: ProgressionMeasure[]) => {
+    playerRef.current?.updateProgressionNotes(sequence);
+  }, []);
+
   return (
-    <AudioContext.Provider value={{ playChord, playSingleNote, stopAudio, playTone, stopTone, playHoldChord, playArpLoop, playProgression, stopProgression, setProgressionLooping }}>
+    <AudioContext.Provider value={{ playChord, playSingleNote, stopAudio, playTone, stopTone, playHoldChord, playArpLoop, playProgression, stopProgression, setProgressionLooping, queueProgressionJump, updateProgressionNotes }}>
       <SoundfontPlayer ref={playerRef as any} />
       {children}
     </AudioContext.Provider>

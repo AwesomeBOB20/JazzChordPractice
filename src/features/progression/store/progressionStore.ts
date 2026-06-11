@@ -2,18 +2,38 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getChordIntervals } from '@shared/theory/musicTheory';
+import { STRING_SETS_BY_TYPE } from '@shared/guitar/voicings';
 import { ProgressionChord, SavedSong } from '@shared/types/models'; // We will create this type file next!
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+
+// Global guitar voicing-type override for the Song screen. 'auto' keeps the
+// voice-leading auto-pick; any other value constrains every chord's diagram to
+// that family (falling back to the full pool when a chord lacks it).
+export type SongVoicingType = 'auto' | 'triads' | 'drop2' | 'drop3' | 'shells';
+
+// When a type with selectable string sets is chosen, default to a concrete (middle)
+// set rather than "Any" — the Song-screen string lock should always land on a real
+// set so nothing is left to chance. Types without sets (auto / shells) → null.
+const defaultStringSetFor = (t: SongVoicingType): string | null => {
+  const sets = STRING_SETS_BY_TYPE[t];
+  return sets && sets.length ? sets[Math.floor(sets.length / 2)].key : null;
+};
 
 export interface ProgressionState {
   progression: (ProgressionChord | null)[];
   rhythm: string;
   guitarNeckZone: number | null;
+  songVoicingType: SongVoicingType;
+  // Canonical active-string-index key (e.g. "2,3,4,5") to lock every chord onto one
+  // string set, or null for "any". Only meaningful alongside a forced songVoicingType.
+  songStringSet: string | null;
   savedSongs: SavedSong[];
   categories: string[];
 
   setProgressionChord: (index: number, rootSemi: number, chordType: string, instrument?: 'piano' | 'guitar', arp?: boolean) => void;
   setGuitarNeckZone: (zone: number | null) => void;
+  setSongVoicingType: (t: SongVoicingType) => void;
+  setSongStringSet: (key: string | null) => void;
   removeProgressionChord: (index: number) => void;
   clearProgression: () => void;
   addMeasure: (insertAfterIndex?: number | null) => void;
@@ -76,8 +96,8 @@ const buildMinorCircle = (): (ProgressionChord | null)[] => {
 };
 
 export const DEFAULT_SONGS: SavedSong[] = [
-  { id: 'default-ii-v-i', name: 'Major ii-V-I (All Keys)', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMajorCircle() },
-  { id: 'minor-ii-v-i', name: 'Minor ii-V-i (All Keys)', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMinorCircle() },
+  { id: 'default-ii-v-i', name: 'Major ii-V-I', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMajorCircle() },
+  { id: 'minor-ii-v-i', name: 'Minor ii-V-i', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMinorCircle() },
   { id: 'autumn-leaves', name: 'Autumn Leaves', bpm: 110, rhythm: 'straight', progression: [
     // [ Am7 D7 Gmaj7 Cmaj7 | F#m7b5 B7 Em7 E7 ]
     { rootSemi: 9, chordType: 'min7', namingMode: 'flat', beats: 4, repeatStart: true, section: true },
@@ -155,7 +175,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
   ]},
   { id: 'take-the-a-train', name: 'Take the A Train', bpm: 160, rhythm: 'straight', progression: [
     // [ C6 C6 D7b5 D7b5
-    { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, repeatStart: true },
+    { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, repeatStart: true, section: true },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
     { rootSemi: 2, chordType: 'dom7b5', namingMode: 'flat', beats: 4 },
     { rootSemi: 2, chordType: 'dom7b5', namingMode: 'flat', beats: 4 },
@@ -173,7 +193,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     makeSpacer(), makeSpacer(), makeSpacer(),
 
     // Fmaj7 Fmaj7 Fmaj7 Fmaj7
-    { rootSemi: 5, chordType: 'maj7', namingMode: 'flat', beats: 4 },
+    { rootSemi: 5, chordType: 'maj7', namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 5, chordType: 'maj7', namingMode: 'flat', beats: 4 },
     { rootSemi: 5, chordType: 'maj7', namingMode: 'flat', beats: 4 },
     { rootSemi: 5, chordType: 'maj7', namingMode: 'flat', beats: 4 },
@@ -269,10 +289,16 @@ export const useProgressionStore = create<ProgressionState>()(
       progression: Array(8).fill(null) as (ProgressionChord | null)[],
       rhythm: 'straight',
       guitarNeckZone: null,
+      songVoicingType: 'auto',
+      songStringSet: null,
       savedSongs: DEFAULT_SONGS,
       categories: [...DEFAULT_CATEGORIES],
 
       setGuitarNeckZone: (zone) => set({ guitarNeckZone: zone }),
+      // Changing the type lands on that type's default (middle) string set — the
+      // available sets differ per type, and we always want a concrete set, not "Any".
+      setSongVoicingType: (t) => set({ songVoicingType: t, songStringSet: defaultStringSetFor(t) }),
+      setSongStringSet: (key) => set({ songStringSet: key }),
 
       setProgressionChord: (index, rootSemi, chordType, instrument = 'piano', arp = false) => set((state) => {
         const next = [...state.progression];

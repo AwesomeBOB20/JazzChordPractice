@@ -33,4 +33,5 @@ export interface UnifiedVoicing {
   frets?: { stringIdx?: number; fret: number | null; role?: string; formula?: string }[];
   fingerprint?: string;
   categoryId?: string; // scale ID, arp label, interval name, or shape box name for quiz answer
+  rootPc?: number; // shape's OWN root pitch class — quiz re-roots the diagram to this for shapes
 }
