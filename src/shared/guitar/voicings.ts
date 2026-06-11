@@ -1,4 +1,4 @@
-import { CH, PATTERNS, CHORD_PATTERN_MAP, spellInterval, NOTE_SHARP, NOTE_FLAT, SCALES, CHORD_SCALE_MAP, GUITAR_TUNING, GUITAR_TUNING_SEMITONES } from '@shared/theory/musicTheory';
+﻿import { CH, PATTERNS, CHORD_PATTERN_MAP, spellInterval, preferredAccidentalForRoot, NOTE_SHARP, NOTE_FLAT, SCALES, CHORD_SCALE_MAP, GUITAR_TUNING, GUITAR_TUNING_SEMITONES } from '@shared/theory/musicTheory';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { HARDCODED_SHAPES } from '@shared/guitar/hardcodedShapes';
 // NEW IMPORTS: Pull in the separated data dictionaries
@@ -71,8 +71,8 @@ export const buildDropVoicings = memoizeBuilder(
 );
 export const buildHardcodedShapeVoicings = memoizeBuilder(
   buildHardcodedShapeVoicingsUncached,
-  (chordType, rootSemi, namingMode = 'sharp', baseOnly = false) =>
-    `H|${chordType}|${rootSemi}|${namingMode}|${baseOnly ? 1 : 0}`
+  (chordType, rootSemi, namingMode = 'sharp', baseOnly = false, selfRooted = false) =>
+    `H|${chordType}|${rootSemi}|${namingMode}|${baseOnly ? 1 : 0}|${selfRooted ? 1 : 0}`
 );
 export const buildScaleVoicings = memoizeBuilder(
   buildScaleVoicingsUncached,
@@ -928,13 +928,41 @@ export function deriveShellToneSets(
   for (const color of colorTones) {
     toneSets.push([third, seventh, color]);   // 3-7-ext
     toneSets.push([seventh, third, color]);   // 7-3-ext
+    // Root shells that include the color tone (one guide omitted)
+    toneSets.push(['root', third, color]);     // R-3-ext
+    toneSets.push(['root', seventh, color]);   // R-7-ext
+    // Color tone as bass — rootless with the characteristic color lowest
+    toneSets.push([color, third, seventh]);  // ext-3-7
+    toneSets.push([color, seventh, third]);  // ext-7-3
   }
+  // For chords with 2+ color tones (13th, dom7alt, etc.): also voice any pair of
+  // color tones with one guide tone — e.g. 3·9·13 and 7·9·13 for dom13.
+  for (let i = 0; i < colorTones.length; i++) {
+    for (let j = i + 1; j < colorTones.length; j++) {
+      const c1 = colorTones[i], c2 = colorTones[j];
+      toneSets.push([third,   c1, c2]);   // 3-ext1-ext2
+      toneSets.push([seventh, c1, c2]);   // 7-ext1-ext2
+      toneSets.push([c1, c2,  third]);    // ext1-ext2-3
+      toneSets.push([c1, c2,  seventh]);  // ext1-ext2-7
+    }
+  }
+  // Guide-tone dyad — the foundational 2-note jazz shell (3 + 7), applies to
+  // all 7th/6th chords regardless of how many color tones they carry.
+  toneSets.push([third, seventh]);   // 3-7
+  toneSets.push([seventh, third]);   // 7-3
   return toneSets;
 }
 
 // String sets used to voice a shell, grouped by which string carries the bass
 // (the first index). 3-note sets skip an interior string (classic shell shapes);
 // 2-note sets use an adjacent pair.
+const SHELL_STRING_SETS_2: number[][] = [
+  [0, 1],  // 65
+  [1, 2],  // 54
+  [2, 3],  // 43
+  [3, 4],  // 32
+  [4, 5],  // 21
+];
 const SHELL_STRING_SETS_3: number[][] = [
   [0, 1, 2],  // 654
   [0, 2, 3],  // 643
@@ -991,15 +1019,15 @@ function formatShellLabel(roles: string[]): string {
 // Priority order — most specific / most common first
 const CHORD_ID_PRIORITY = [
   'dom13sus4', 'dom9sus4', 'dom7sus4',
-  'maj7s5', 'maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'minMaj9', 'minMaj7',
+  'maj7s5', 'maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'minMaj9', 'minMaj7', 'dimMaj7',
   'maj9', 'min9', 'dom9',
   'maj7s11', 'dom7s11',
   'maj13', 'min13', 'dom13b9', 'dom13s9', 'dom13',
-  'maj6', 'min6', 'maj69', 'min69',
-  'dom7b5b9', 'dom7b5s9', 'dom7s5b9', 'dom7s5s9', 'dom7alt',
+  'maj6', 'min6', 'maj69', 'min69', 'add9', 'minAdd9',
+  'dom7b5b9', 'dom7b5s9', 'dom7s5b9', 'dom7s5s9', 'dom7alt', 'dom7b5', 'dom7s5',
   'dom7b9', 'dom7s9', 'dom7b13',
   'maj11', 'min11', 'dom11',
-  'maj', 'min', 'aug', 'dim', 'sus4', 'sus2',
+  'maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5',
 ];
 
 // Given a set of pitch classes, identify the best matching chord name.
@@ -1098,6 +1126,50 @@ export function identifyChord(
   }
 
   return null;
+}
+
+// Like identifyChord, but ONLY returns a match when the pitch classes form a COMPLETE
+// chord (the chord's distinct-note count equals the number of notes given) — never a
+// shell/partial approximation that drops a defining tone. Returns the matched root pitch
+// class + chord type (structured), so callers can re-spell/re-color the notes relative to
+// the chord's OWN root. Used by the arp quiz so a fragment like A-C#-Eb is named "A (♭5)"
+// (a real triad) from A, rather than a ♭3-less "Eb ø7" shell spelled from the parent.
+export function identifyCompleteChord(
+  pcs: number[],
+  namingMode: 'sharp' | 'flat' = 'sharp',
+  spelledRootMap?: Record<number, string>,
+  preferRootPc?: number
+): { rootPc: number; type: string; name: string } | null {
+  if (!pcs.length) return null;
+  const pcSet = new Set(pcs.map(p => ((p % 12) + 12) % 12));
+  if (pcSet.size < 3) return null; // need at least a triad to name a chord
+  const names = namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP;
+  // When the notes are ambiguous (e.g. B-E-F# = both "B sus4" and "E sus2"), bias toward a
+  // complete chord rooted on preferRootPc (the parent chord's root) so an arpeggio of the
+  // parent chord keeps the parent's name rather than being re-spelled as an inversion.
+  const wantRoot = preferRootPc !== undefined ? (((preferRootPc % 12) + 12) % 12) : undefined;
+
+  let best: { rootPc: number; type: string; name: string; complexity: number } | null = null;
+  let preferred: { rootPc: number; type: string; name: string; complexity: number } | null = null;
+  for (const type of CHORD_ID_PRIORITY) {
+    const def = CH[type];
+    if (!def) continue;
+    const uniqueChordPCs = [...new Set(def.iv.map(iv => iv % 12))];
+    if (uniqueChordPCs.length !== pcSet.size) continue; // EXACT complete match only
+    for (let root = 0; root < 12; root++) {
+      const transposed = new Set(uniqueChordPCs.map(pc => (pc + root) % 12));
+      if ([...transposed].every(pc => pcSet.has(pc))) {
+        const nm = (spelledRootMap && spelledRootMap[root]) ? spelledRootMap[root] : names[root];
+        if (typeof nm === 'string') {
+          const cand = { rootPc: root, type, name: `${nm} ${def.s}`, complexity: def.iv.length };
+          if (!best || cand.complexity < best.complexity) best = cand;
+          if (wantRoot !== undefined && root === wantRoot && (!preferred || cand.complexity < preferred.complexity)) preferred = cand;
+        }
+      }
+    }
+  }
+  const chosen = preferred || best;
+  return chosen ? { rootPc: chosen.rootPc, type: chosen.type, name: chosen.name } : null;
 }
 
 export function getEffectiveChordLabel(
@@ -1238,7 +1310,8 @@ function buildShellVoicingsUncached(
   const groupMap = new Map<string, Voicing[]>();
 
   for (const roles of toneSets) {
-    for (const strings of SHELL_STRING_SETS_3) {
+    const stringSets = roles.length === 2 ? SHELL_STRING_SETS_2 : SHELL_STRING_SETS_3;
+    for (const strings of stringSets) {
       const placed = placeShellToneSet(roles, strings, chordDef, rootSemi);
       if (!placed) continue;
 
@@ -1315,6 +1388,9 @@ export interface ScaleVoicing {
   notes: ScaleNote[];
   minFret: number;
   maxFret: number;
+  rootPc?: number; // shape's own root pitch class (set by buildHardcodedShapeVoicings)
+  degrees?: number[]; // shape's intended scale degrees (intervals from own root), self-rooted
+  degreeTokens?: string[]; // each degree's declared token (interval-ordered): 'R','#2','b5',…
 }
 
 function buildScaleVoicingsUncached(
@@ -1659,6 +1735,16 @@ const DROP3_STRING_GROUPS = [
   { label: 'Strings 6-5-3-1', stringNums: '6 5 3 1', indices: [0, 1, 3, 5] },
 ];
 
+// Per-type string sets surfaced as the Song-screen string-set chips. The `key` is
+// the canonical active-string-index set (matches activeStringKey in voiceLeading);
+// the `label` is the guitarist-facing string numbers, e.g. "4-3-2-1". Shells are
+// omitted — their note count (and so their sets) vary per chord.
+export const STRING_SETS_BY_TYPE: Record<string, { key: string; label: string }[]> = {
+  triads: TRIAD_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
+  drop2: DROP2_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
+  drop3: DROP3_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
+};
+
 // Generates all 4-note combinations for chords with >4 notes (like 9ths or 13ths)
 function getDropCombinations(arr: string[], k: number): string[][] {
   const results: string[][] = [];
@@ -1773,14 +1859,20 @@ function buildDropVoicingsUncached(
     'min13':    { type: 'maj7',     ivOffset: 3,  roleMap: ['b3', '5th', 'b7', '9th'],       rootFormula: 'b3' },
     'dom13':    { type: 'hdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '9th'],      rootFormula: '3'  },
     'dom13b9':  { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
-    'dom13s9':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
+    // dom13s9 has NO rootless sub: the only near-borrow (min7 from the #9) yields a ♭5 and ♭9
+    // that this chord does not contain (it has a natural 5th and a #9), i.e. wrong notes. It
+    // falls back to its correct rooted dom7 drops instead. A learning app must never draw a wrong note.
     // 6/9 chords
     'maj69':    { type: 'dom7sus4', ivOffset: 9,  roleMap: ['6th', '9th', '3rd', '5th'],     rootFormula: '6'  },
     // Altered / sus dominant chords
     'dom7b9':   { type: 'fdim7',    ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', 'b9'],       rootFormula: '3'  },
     // dom7s9: borrow dimMaj7 from 3rd → E G Bb Eb = [3rd, 5th, b7, #9] (includes the #9)
     'dom7s9':   { type: 'dimMaj7',  ivOffset: 4,  roleMap: ['3rd', '5th', 'b7', '#9'],       rootFormula: '3'  },
-    'dom7alt':  { type: 'min7',     ivOffset: 3,  roleMap: ['#9', 'b5', 'b7', 'b9'],         rootFormula: '#9' },
+    // dom7alt rootless = dom7sus4 on the #9 (e.g. C7alt -> Eb7sus4 = Eb Ab Bb Db).
+    // dom7sus4 [root,4,5,b7] on the #9 spells exactly [#9, #5, b7, b9] -- every note a
+    // genuine C7alt tone, and it carries BOTH the b9 and #9 the rooted dom7s5 path omits.
+    // (The old min7 sub drew the min7's 5th = pc6/b5, a note NOT in 7alt, mislabeled 'b5'.)
+    'dom7alt':  { type: 'dom7sus4', ivOffset: 3,  roleMap: ['#9', '#5', 'b7', 'b9'],         rootFormula: '#9' },
     'dom7b13':  { type: 'dom7b5',   ivOffset: 4,  roleMap: ['3rd', 'b13', 'b7', '9th'],      rootFormula: '3'  },
     'dom7b5b9': { type: 'dom7',     ivOffset: 6,  roleMap: ['b5', 'b7', 'b9', '3rd'],        rootFormula: 'b5' },
     // 7♯5♭9 rootless upper structure = a min6 built on the ♭9 (e.g. C7♯5♭9 → D♭m6).
@@ -1943,7 +2035,13 @@ function buildHardcodedShapeVoicingsUncached(
   chordType: string,
   rootSemi: number,
   namingMode: 'sharp' | 'flat' = 'sharp',
-  baseOnly: boolean = false
+  baseOnly: boolean = false,
+  // selfRooted: label/color each shape's notes relative to the shape's OWN root (targetRoot)
+  // instead of the parent chord root. So an "E Min Shape" used as an upper structure of G6 is
+  // coloured E=R, G=♭3, A=4, B=5 (matching its name) rather than the parent-relative E=6, G=R,
+  // A=2, B=3. The default (false) keeps the superimposition coloring the Play screen relies on;
+  // the quiz passes true so "identify this shape" questions read from the shape's own root.
+  selfRooted: boolean = false
 ): ScaleVoicing[] {
   // Upper Structure Superimposition Dictionary
   const CHORD_STACKS: Record<string, { shapeKey: string, offset: number }[]> = {
@@ -1966,11 +2064,13 @@ function buildHardcodedShapeVoicingsUncached(
     'maj6': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
     'maj69': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 9 }],
     'maj7s5': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 4 }],
-    'maj7s11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }],
+    // + min_2_shape@4 (E Min 2 over Cmaj7♯11) surfaces the maj 7th, which neither maj_shape carried
+    'maj7s11': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 2 }, { shapeKey: 'min_2_shape', offset: 4 }],
 
     'minAdd9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'sus2_shape', offset: 0 }],
     'min7': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
-    'min9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
+    // + min_2_shape@0 (R-9-♭3-5) surfaces the 9th, which the min/maj shapes didn't carry
+    'min9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }, { shapeKey: 'min_2_shape', offset: 0 }],
     // Min11: Stack min at 0 + maj at 10 (C minor + Bb major) for b7, 9, 11
     'min11': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
     // Min13: Stack min at 0 + maj at 10 + min at 2 for R, b3, 5, b7, 9, 11, 13
@@ -1978,7 +2078,8 @@ function buildHardcodedShapeVoicingsUncached(
     'min6': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 9 }],
     'min69': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 9 }],
     'minMaj7': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 3 }],
-    'minMaj9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 3 }],
+    // + min_2_shape@0 (R-9-♭3-5) surfaces the 9th
+    'minMaj9': [{ shapeKey: 'min_shape', offset: 0 }, { shapeKey: 'aug_shape', offset: 3 }, { shapeKey: 'min_2_shape', offset: 0 }],
 
     'dom7': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 4 }],
     'dom9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_b5_shape', offset: 4 }],
@@ -1988,13 +2089,14 @@ function buildHardcodedShapeVoicingsUncached(
     'dom13': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }, { shapeKey: 'sus2_shape', offset: 2 }],
     'dom7sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
     'dom9sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
-    'dom13sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }],
+    'dom13sus4': [{ shapeKey: 'sus4_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 7 }, { shapeKey: 'min_shape', offset: 2 }],
 
-    'dom7b9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 4 }],
+    'dom7b9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 4 }, { shapeKey: '7b9_shape', offset: 0 }],
     // 7#9: Stack Maj on Root (C E G) + Maj on b3 (Eb G Bb) to map #9 perfectly
     'dom7s9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
     // 7alt: Stack Aug on Root (C E G#) + Min on b3 (Eb Gb Bb) to capture #5, #9, and b5
-    'dom7alt': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 3 }],
+    // + s5_b9_shape@0 (R-♭9-3-♯5) surfaces the ♭9, which neither stack grip carried
+    'dom7alt': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'min_shape', offset: 3 }, { shapeKey: 's5_b9_shape', offset: 0 }],
     'dom7b13': [{ shapeKey: 'aug_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 10 }],
     'dom13b9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'dim_4_shape', offset: 4 }],
     'dom13s9': [{ shapeKey: 'maj_shape', offset: 0 }, { shapeKey: 'maj_shape', offset: 3 }],
@@ -2061,7 +2163,21 @@ function buildHardcodedShapeVoicingsUncached(
         
         // 3. Process the entire stack
         const chordDef = CH[chordType] || { iv: [], r: [], f: [] };
-        const getParentRelativeLabels = (pc: number, shapeKey: string, offset: number) => {
+        const defaultRoles = ['root', 'b2', '2nd', 'b3', '3rd', '4th', '#4', '5th', 'b6', '6th', 'b7', '7th'];
+        const defaultFormulas = ['R', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
+        const getParentRelativeLabels = (pc: number, shapeKey: string, offset: number, tokenMap?: Map<number, string>) => {
+          // selfRooted: degrees relative to the shape's OWN root (targetRoot = rootSemi+offset),
+          // so the labels/colors match the shape's name regardless of the parent chord. Use the
+          // shape's OWN declared degree token for this interval (e.g. '#2' for a ♯9, 'b5' for a
+          // diminished fifth) — that preserves the correct enharmonic spelling AND colour family
+          // (so a ♯9 reads Fð„ª/purple, not the enharmonic ♭3/G/blue). Fall back to the generic
+          // chromatic name only if the shape didn't label this interval.
+          if (selfRooted) {
+            const selfInterval = (((pc - rootSemi - offset) % 12) + 12) % 12;
+            const tok = tokenMap?.get(selfInterval);
+            if (tok) return { role: tok, formula: tok };
+            return { role: defaultRoles[selfInterval], formula: defaultFormulas[selfInterval] };
+          }
           const interval = (pc - rootSemi + 12) % 12;
           const idx = chordDef.iv.findIndex((iv: number) => (iv % 12) === interval);
           if (idx !== -1) {
@@ -2075,16 +2191,20 @@ function buildHardcodedShapeVoicingsUncached(
           // Contextual override for b5 shapes to show 3rd for visualization
           if (shapeKey === 'maj_b5_shape' && offset === 0 && interval === 4) return { role: '3rd', formula: '3' };
 
-          const defaultRoles = ['root', 'b2', '2nd', 'b3', '3rd', '4th', '#4', '5th', 'b6', '6th', 'b7', '7th'];
-          const defaultFormulas = ['R', 'b2', '2', 'b3', '3', '4', '#4', '5', 'b6', '6', 'b7', '7'];
           return { role: defaultRoles[interval], formula: defaultFormulas[interval] };
         };
 
         stack.forEach(({ shapeKey, offset }, stackIdx) => {
           const upperShapes = (HARDCODED_SHAPES as any)[shapeKey];
           if (!upperShapes) return;
+          if ((globalThis as any).__AUDIT) console.error(`[AUDIT] type=${chordType} box=${index} stackIdx=${stackIdx} shapeKey=${shapeKey} offset=${offset}`);
           const targetRoot = (rootSemi + offset) % 12;
-          
+          // When self-rooted, spell this shape's label + note names by its OWN root's key
+          // (so a D♭ shape reads D♭, not the enharmonic C♯ inherited from a sharp-side parent).
+          const ownFlat = selfRooted
+            ? preferredAccidentalForRoot(targetRoot, namingMode) === 'flat'
+            : namingMode === 'flat';
+
           let bestUpperShape: any = null;
           let bestUpperShift = 0;
           let minDistance = 999;
@@ -2124,6 +2244,26 @@ function buildHardcodedShapeVoicingsUncached(
           });
 
           if (bestUpperShape) {
+            // The shape's INTENDED degrees, taken from its declared role labels — a clean set
+            // of (usually 4) scale degrees within R–5. Self-rooted shapes are filtered to
+            // EXACTLY these, so the hand-authored neck boxes can't leak the extra chromatic
+            // passing tones that made altered-dominant shapes (7♯5♭9 etc.) render as 5–6 notes
+            // instead of the intended 4. Also used to disambiguate the tritone (♭5 vs #4) and
+            // raised fifth (#5 vs ♭6) by what else the shape contains.
+            const TOK_IV: Record<string, number> = { '1':0,'r':0,'root':0,'b2':1,'2':2,'#2':3,'b3':3,'3':4,'b4':4,'4':5,'#4':6,'b5':6,'5':7,'#5':8,'b6':8,'6':9,'bb7':9,'b7':10,'7':11 };
+            // Map each intended interval → the shape's OWN declared degree token (e.g. 3 → '#2'
+            // for a ♯9 shape, vs 3 → 'b3' for a minor shape). Drives spelling + colour so the
+            // note reads by the degree the shape intends, not a generic chromatic guess.
+            const tokenMap = new Map<number, string>();
+            if (selfRooted) {
+              (bestUpperShape.roles || []).forEach((arr: string[]) => (arr || []).forEach((tok: string) => {
+                const norm = (tok || '').toLowerCase();
+                const iv = TOK_IV[norm];
+                if (iv === undefined || tokenMap.has(iv)) return;
+                tokenMap.set(iv, (norm === '1' || norm === 'r' || norm === 'root') ? 'R' : tok);
+              }));
+            }
+            const intendedIntervals = new Set<number>(tokenMap.keys());
             const boxNotesMap = new Map<string, ScaleNote>();
             for (let s = 0; s < 6; s++) {
               if (!bestUpperShape.frets[s]) continue;
@@ -2131,7 +2271,12 @@ function buildHardcodedShapeVoicingsUncached(
                 const actualFret = fret + bestUpperShift;
                 if (actualFret >= 0 && actualFret <= 22) {
                   const pc = (GS_PC[s] + actualFret) % 12;
-                  const relLabels = getParentRelativeLabels(pc, shapeKey, offset);
+                  // Self-rooted: keep ONLY the shape's intended degrees; drop leaked tones.
+                  if (selfRooted) {
+                    const iv = (((pc - rootSemi - offset) % 12) + 12) % 12;
+                    if (!intendedIntervals.has(iv)) return;
+                  }
+                  const relLabels = getParentRelativeLabels(pc, shapeKey, offset, tokenMap);
                   const finalRole = relLabels.role;
                   const finalFormula = relLabels.formula;
 
@@ -2141,8 +2286,10 @@ function buildHardcodedShapeVoicingsUncached(
                     fret: actualFret,
                     role: finalRole,
                     formula: finalFormula,
-                    noteName: spellInterval(rootSemi, finalFormula === 'R' ? '1' : finalFormula, namingMode === 'flat'),
-                    isChordTone: true 
+                    // When self-rooted, formulas are relative to the shape's own root, so spell
+                    // from targetRoot with its own-key accidental; otherwise parent-relative.
+                    noteName: spellInterval(selfRooted ? targetRoot : rootSemi, finalFormula === 'R' ? '1' : finalFormula, ownFlat),
+                    isChordTone: true
                   });
                 }
               });
@@ -2150,7 +2297,7 @@ function buildHardcodedShapeVoicingsUncached(
 
             const boxNotes = Array.from(boxNotesMap.values());
             if (boxNotes.length > 0) {
-              const rootLetter = spellInterval(targetRoot, 'R', namingMode === 'flat');
+              const rootLetter = spellInterval(targetRoot, 'R', ownFlat);
               
               // Clean display names with real ♭/♯ glyphs (NO underscores). Altered
               // 5/9 shapes are named by their actual 4-tone interval content. Every
@@ -2179,6 +2326,15 @@ function buildHardcodedShapeVoicingsUncached(
                 boxNumber: index + 1,
                 scaleName: `${rootLetter} ${shapeDisplayName} Shape`,
                 scaleId: `hardcoded-${stackIdx}-${shapeKey}`,
+                rootPc: targetRoot, // the shape's OWN root pitch class (parent root + offset)
+                // The shape's intended scale degrees (intervals from its own root), taken from
+                // the declared role labels — the canonical ≤4-note set. The quiz builds the
+                // displayed notes from THIS, so a shape is always its intended degrees even
+                // when the hand-authored neck frets are imperfect.
+                degrees: selfRooted ? [...intendedIntervals].sort((a, b) => a - b) : undefined,
+                // …with each degree's OWN token (interval-ordered), so the quiz spells/colours
+                // by the intended degree (♯9 → '#2' → Fð„ª/purple, not the enharmonic ♭3/G/blue).
+                degreeTokens: selfRooted ? [...tokenMap.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]) : undefined,
                 notes: boxNotes.sort((a, b) => a.stringIdx - b.stringIdx || a.fret - b.fret),
                 minFret: Math.min(...boxNotes.map(n => n.fret).filter(f => f > 0)),
                 maxFret: Math.max(...boxNotes.map(n => n.fret).filter(f => f > 0))

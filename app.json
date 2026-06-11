@@ -20,7 +20,10 @@
       "package": "com.awesomebob20.jazzchordpractice",
       "versionCode": 1,
       "minSdkVersion": 26,
-      "abiFilters": ["arm64-v8a", "armeabi-v7a"]
+      "abiFilters": [
+        "arm64-v8a",
+        "armeabi-v7a"
+      ]
     },
     "ios": {
       "bundleIdentifier": "com.awesomebob20.jazzchordpractice",
@@ -36,7 +39,8 @@
       }
     },
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      "expo-font"
     ]
   }
 }

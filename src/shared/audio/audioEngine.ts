@@ -74,6 +74,9 @@ export const getAudioEngineHtml = (assets: any) => `
 
     const buffers = { piano: {}, guitar: {}, bass: {} };
     let activeSources = [];
+    // Metronome click oscillators are tracked separately (NOT in activeSources, which the
+    // measure-boundary crossfade reads) so a STOP can silence already-scheduled future clicks.
+    let activeMetronomes = [];
     let nextMeasureTime = 0;
     let currentBatchId = 0;
     // All active + fading tone voices. Tracking every voice (not just the latest)
@@ -172,6 +175,8 @@ export const getAudioEngineHtml = (assets: any) => `
             } catch(e) {}
           });
           activeSources = [];
+          activeMetronomes.forEach(m => { try { m.gain.gain.cancelScheduledValues(now); m.gain.gain.setValueAtTime(0, now); m.source.stop(now); } catch(e) {} });
+          activeMetronomes = [];
           nextMeasureTime = 0;
           stopAllToneVoices(40);
         }
@@ -188,6 +193,8 @@ export const getAudioEngineHtml = (assets: any) => `
             } catch(e) {}
           });
           activeSources = [];
+          activeMetronomes.forEach(m => { try { m.gain.gain.cancelScheduledValues(now); m.gain.gain.setValueAtTime(0, now); m.source.stop(now); } catch(e) {} });
+          activeMetronomes = [];
           nextMeasureTime = 0;
         }
         else if (data.type === 'GENTLE_RELEASE') {
@@ -255,26 +262,34 @@ export const getAudioEngineHtml = (assets: any) => `
           // the crossfade is perfectly synchronised with the new notes' attack regardless
           // of bridge latency. Per-note voice stealing is kept only for non-measure events.
           if (data.durationMs) {
-            const XFADE = 0.06; // 60ms: fast enough to feel instant, long enough to be click-free
+            const XFADE = 0.12; // 120ms legato crossfade — lets a late last-in-bar hit (e.g. two-step's
+                                // beat-3 chord) ring smoothly into the next chord instead of being cut
+                                // short/staccato at the boundary. Long enough to feel connected, short
+                                // enough that chord changes still read cleanly.
             const now2 = audioCtx.currentTime;
+            // Hold the previous chord until THIS measure's first chord strike, then crossfade.
+            // For downbeat rhythms (straight) this is the bar line (delay 0); for backbeat rhythms
+            // (two-step/reggae) it's the offset hit, so the old chord rings through the gap instead
+            // of cutting out early. Clamp so a late bridge never schedules the fade in the past.
+            const xfadeAt = Math.max(now2 + 0.005, startTime + (data.xfadeDelayMs ? data.xfadeDelayMs / 1000 : 0));
             activeSources.forEach(existing => {
               if (existing.batchId !== thisBatchId && existing.gain && existing.source) {
                 try {
                   // Anchor at the ACTUAL current gain value, not the stored target volume.
                   // If the bridge arrived late the release ramp may have already started,
-                  // so cancelScheduledValues(startTime) won't catch it and a naive
+                  // so cancelScheduledValues(xfadeAt) won't catch it and a naive
                   // setValueAtTime(existing.volume) would snap the gain back up — the click.
                   // Cancelling from now2 and anchoring at g.value freezes any in-progress
-                  // decay at its current point. The second setValueAtTime(anchorVol, startTime)
-                  // holds the level steady until the measure boundary so chords don't
-                  // audibly fade during the 250 ms look-ahead window.
+                  // decay at its current point. The second setValueAtTime(anchorVol, xfadeAt)
+                  // holds the level steady until the new chord's strike so chords don't
+                  // audibly fade during the look-ahead/hold window.
                   const anchorVol = Math.max(0.00001, existing.gain.gain.value);
                   existing.gain.gain.cancelScheduledValues(now2);
                   existing.gain.gain.setValueAtTime(anchorVol, now2);
-                  existing.gain.gain.setValueAtTime(anchorVol, startTime);
-                  existing.gain.gain.linearRampToValueAtTime(0, startTime + XFADE);
-                  existing.source.stop(startTime + XFADE + 0.02);
-                  existing.scheduledStop = startTime + XFADE;
+                  existing.gain.gain.setValueAtTime(anchorVol, xfadeAt);
+                  existing.gain.gain.linearRampToValueAtTime(0, xfadeAt + XFADE);
+                  existing.source.stop(xfadeAt + XFADE + 0.02);
+                  existing.scheduledStop = xfadeAt + XFADE;
                 } catch(e) {}
               }
             });
@@ -305,7 +320,11 @@ export const getAudioEngineHtml = (assets: any) => `
                 filter.Q.setValueAtTime(1, time);
 
                 gainNode.gain.setValueAtTime(0, time);
-                gainNode.gain.linearRampToValueAtTime(ev.volume * (isAccent ? 1.0 : 0.75), time + 0.002);
+                // METRO_SCALE attenuates the click globally — the synthesized triangle is a sharp
+                // transient that reads much louder than its raw gain vs the sampled chord/bass, so
+                // even mixer level 2 felt too loud. 0.5 ≈ -6 dB across every level.
+                const METRO_SCALE = 0.5;
+                gainNode.gain.linearRampToValueAtTime(ev.volume * (isAccent ? 1.0 : 0.75) * METRO_SCALE, time + 0.002);
                 gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
 
                 source.start(time);
@@ -313,7 +332,12 @@ export const getAudioEngineHtml = (assets: any) => `
                 // Metronome clicks are short self-stopping oscillators. Keeping them out of
                 // activeSources prevents the measure-boundary crossfade from reading their
                 // pre-fire gain (WebAudio default 1.0), cancelling their envelope, and blasting
-                // a full-volume triangle wave for the rest of the beat.
+                // a full-volume triangle wave for the rest of the beat. They ARE tracked in
+                // activeMetronomes so a STOP can kill clicks already scheduled on the audio clock
+                // (look-ahead queues up to a measure of clicks that would otherwise keep firing).
+                const metroEntry = { source, gain: gainNode };
+                activeMetronomes.push(metroEntry);
+                source.onended = () => { const i = activeMetronomes.indexOf(metroEntry); if (i !== -1) activeMetronomes.splice(i, 1); };
               } catch (e) {
                 bridgeLog('Metronome synthesis error: ' + e.message);
               }
@@ -373,9 +397,16 @@ export const getAudioEngineHtml = (assets: any) => `
               const stopTime = eventStartTime + durationSecs;
               const releaseStartTime = Math.max(eventStartTime + 0.003, stopTime - releaseSecs);
               gainNode.gain.setValueAtTime(ev.volume, releaseStartTime);
-              const timeConstant = releaseSecs / 3;
-              gainNode.gain.setTargetAtTime(0, releaseStartTime, timeConstant);
-              source.stop(stopTime + 0.05);
+              // Exponential decay (natural-sounding, like before) but to a tiny floor that's
+              // REACHED at stopTime, then a 6ms linear glide to TRUE zero before the hard stop().
+              // The old setTargetAtTime is asymptotic — it never hit 0 — so source.stop() could cut
+              // the buffer mid-amplitude → click/pop (heard on the last measure + short bass notes,
+              // which the measure-boundary crossfade doesn't cover). exponentialRamp needs a >0
+              // start, guaranteed for any audible note; silent notes just hold at 0.
+              if (ev.volume > 0.001) gainNode.gain.exponentialRampToValueAtTime(0.001, stopTime);
+              else gainNode.gain.setValueAtTime(0, stopTime);
+              gainNode.gain.linearRampToValueAtTime(0, stopTime + 0.006);
+              source.stop(stopTime + 0.012);
             }
 
             const scheduledStop = ev.durationMs ? eventStartTime + ev.durationMs / 1000 + 0.05 : Infinity;

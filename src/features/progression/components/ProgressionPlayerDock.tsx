@@ -22,8 +22,8 @@ function MixBlocks({ label, value, accent, border, bg, txt3, onSet }: MixBlocksP
   return (
     <View style={{ marginBottom: 12 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-        <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1, color: txt3 }}>{label}</Text>
-        <Text style={{ fontSize: 11, fontWeight: '700', color: accent }}>{value}</Text>
+        <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, color: txt3 }}>{label}</Text>
+        <Text style={{ fontSize: 12, fontWeight: '700', color: accent }}>{value}</Text>
       </View>
       <View style={{ flexDirection: 'row', gap: 4 }}>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
@@ -106,7 +106,10 @@ export default function ProgressionPlayerDock({
               <Text style={[styles.enginePillTxt, { color: bassEnabled ? '#fff' : t.txt2 }]}>Bass</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setVoiceLeading(!voiceLeading); }} style={[styles.enginePill, { backgroundColor: voiceLeading ? t.accent : t.bg2, borderColor: voiceLeading ? t.accent : t.border }]}>
+            <TouchableOpacity activeOpacity={0.7} onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setVoiceLeading(!voiceLeading);
+            }} style={[styles.enginePill, { backgroundColor: voiceLeading ? t.accent : t.bg2, borderColor: voiceLeading ? t.accent : t.border }]}>
               <MaterialCommunityIcons name="transit-connection-variant" size={16} color={voiceLeading ? '#fff' : t.txt2} />
               <Text style={[styles.enginePillTxt, { color: voiceLeading ? '#fff' : t.txt2 }]}>Voice Lead</Text>
             </TouchableOpacity>
@@ -137,14 +140,14 @@ export default function ProgressionPlayerDock({
       {!isPlayingSystem && showMixer && (
         <View style={{ paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: t.border, marginBottom: 12 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 2, color: t.txt3 }}>MIXER</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: 2, color: t.txt3 }}>MIXER</Text>
             <TouchableOpacity hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }} onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setMixChordVol(70);
               setMixBassVol(100);
               setMixClickVol(30);
             }}>
-              <Text style={{ fontSize: 14, fontWeight: '800', color: t.accent }}>RESET</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: t.accent }}>RESET</Text>
             </TouchableOpacity>
           </View>
 
@@ -199,7 +202,7 @@ export default function ProgressionPlayerDock({
 
         <TouchableOpacity style={[styles.squarePlayBtn, { backgroundColor: isPlayingSystem ? '#D4537E' : '#639922' }, isPlayingSystem && { flex: 1, flexDirection: 'row' }]} onPress={isPlayingSystem ? stopPlayback : handlePlayProgression}>
           <Ionicons name={isPlayingSystem ? 'stop' : 'play'} size={26} color="#fff" />
-          {isPlayingSystem && <Text style={{ color: '#fff', fontWeight: '800', marginLeft: 8, fontSize: 16 }}>STOP</Text>}
+          {isPlayingSystem && <Text style={{ color: '#fff', fontWeight: '700', marginLeft: 8, fontSize: 16 }}>STOP</Text>}
         </TouchableOpacity>
       </View>
     </View>

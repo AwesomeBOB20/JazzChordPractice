@@ -65,8 +65,9 @@ export default function ChordCard({
 
   const panResponder = React.useRef(
     PanResponder.create({
-      // Only intercept the touch if it's an actual horizontal swipe
-      onMoveShouldSetPanResponder: (evt, gestureState) => Math.abs(gestureState.dx) > 10,
+      // Swipe-to-change-root is disabled — use the side chevrons instead. Returning false
+      // means this responder never claims horizontal drags, so swipes are ignored.
+      onMoveShouldSetPanResponder: () => false,
       onPanResponderRelease: (evt, gestureState) => {
         if (gestureState.dx > 40) {
           onSwipeRight?.();

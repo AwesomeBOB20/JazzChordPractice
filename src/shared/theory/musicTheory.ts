@@ -359,6 +359,19 @@ export function spellInterval(rootSemi: number, formula: string, useFlat = false
   return LETTERS[targetLetterIdx] + accStr(diff);
 }
 
+// The conventional accidental for something ROOTED on a given pitch class, from the root's own
+// key signature (circle of fifths). Flat-side roots (F, B♭, E♭, A♭, D♭) spell with flats — so
+// D♭ stays D♭, never C♯ — and sharp-side roots (G, D, A, E, B) spell with sharps. The two roots
+// with no strong convention (C, and the F♯/G♭ tritone) fall back to the caller's setting.
+const FLAT_ROOT_PCS = new Set([5, 10, 3, 8, 1]);   // F  B♭ E♭ A♭ D♭ → flats
+const SHARP_ROOT_PCS = new Set([7, 2, 9, 4, 11]);  // G  D  A  E  B  → sharps
+export function preferredAccidentalForRoot(rootSemi: number, fallback: 'sharp' | 'flat' = 'sharp'): 'sharp' | 'flat' {
+  const pc = (((rootSemi % 12) + 12) % 12);
+  if (FLAT_ROOT_PCS.has(pc)) return 'flat';
+  if (SHARP_ROOT_PCS.has(pc)) return 'sharp';
+  return fallback; // C (0) and F♯/G♭ (6): no strong convention → caller's setting
+}
+
 export function getChordIntervals(type: string): number[] {
   return CH[type]?.iv || [0, 4, 7];
 }

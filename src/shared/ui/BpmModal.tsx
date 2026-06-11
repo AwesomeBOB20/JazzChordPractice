@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+import { familyForWeight } from '@shared/fonts/fonts';
 import { THEMES } from '@shared/ui/themes';
 import { PopUpModal } from '@shared/ui/SharedModals';
 import { useTapTempo } from '@shared/hooks/useTapTempo';
@@ -12,7 +13,7 @@ interface BpmModalProps {
 }
 
 export default function BpmModal({ visible, onClose }: BpmModalProps) {
-  const { theme, bpm, setBpm } = useSettingsStore();
+  const { theme, bpm, setBpm, fontFamily } = useSettingsStore();
   const t = THEMES[theme];
   
   // Local state for the manual typing input
@@ -55,8 +56,8 @@ export default function BpmModal({ visible, onClose }: BpmModalProps) {
             <Ionicons name="remove" size={20} color={t.txt1} />
           </TouchableOpacity>
 
-          <TextInput 
-            style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border }]} 
+          <TextInput
+            style={[styles.textInput, { backgroundColor: t.bg, color: t.txt1, borderColor: t.border, fontFamily: familyForWeight(fontFamily, '700') }]}
             placeholder="120" 
             placeholderTextColor={t.txt3} 
             value={bpmInputValue} 
@@ -82,7 +83,7 @@ export default function BpmModal({ visible, onClose }: BpmModalProps) {
           style={[styles.tapBtn, { backgroundColor: t.bg3, borderColor: t.border }]}
         >
           <Ionicons name="hand-right-outline" size={24} color={t.accent} style={{ marginBottom: 6 }} />
-          <Text style={{ color: t.accent, fontSize: 16, fontWeight: '800', letterSpacing: 2 }}>TAP TEMPO</Text>
+          <Text style={{ color: t.accent, fontSize: 16, fontWeight: '700', letterSpacing: 2 }}>TAP TEMPO</Text>
         </TouchableOpacity>
 
         <View style={styles.modalBtnRow}>
@@ -112,7 +113,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: { 
     fontSize: 20, 
-    fontWeight: '800', 
+    fontWeight: '700', 
     letterSpacing: 0.5, 
     marginBottom: 24, 
     textAlign: 'center' 
@@ -133,8 +134,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center' 
   },
   adjText: { 
-    fontSize: 13, 
-    fontWeight: '800' 
+    fontSize: 14,
+    fontWeight: '700'
   },
   textInput: { 
     height: 52, 
@@ -142,8 +143,8 @@ const styles = StyleSheet.create({
     minWidth: 60, 
     borderRadius: 16, 
     borderWidth: 1, 
-    fontSize: 22, 
-    fontWeight: '800', 
+    fontSize: 24,
+    fontWeight: '700',
     paddingHorizontal: 8 
   },
   tapBtn: { 

@@ -63,7 +63,7 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab
             <TouchableOpacity key={tab.key} style={[styles.tabBtn, { paddingHorizontal: 16 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); startTransition(() => setVoicingTab(tab.key)); }} activeOpacity={0.7}>
               <Text style={[styles.modeBtnText, { color: isActive ? '#fff' : t.txt3 }]}>{tab.label}</Text>
               <View style={{ marginTop: 2, backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : t.bg, borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1, alignSelf: 'center' }}>
-                <Text style={{ fontSize: 9, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{tabCounts[tab.key]}</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{tabCounts[tab.key]}</Text>
               </View>
             </TouchableOpacity>
           );
@@ -76,7 +76,11 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab
 // ─── INLINE VISUAL SETTINGS ─────────────
 function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMode, activeScaleName, t }: any) {
   const { sortMode, setSortMode, scaleOverlay, setScaleOverlay } = useSettingsStore();
-  const hideSort = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals';
+  // Block hides the sort toggle: every block entry is an inversion of the SAME chord (one
+  // chord label, bottom note lifted an octave each step), so List Order (by bass scale-degree)
+  // and Voicing Order (by lowest pitch) climb in lockstep and yield the identical ascending
+  // sequence. The toggle is inert there — sortMode never changes block's output — so we hide it.
+  const hideSort = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'block';
   // Only hide overlay on scales tab since overlaying a scale onto itself is redundant
   const hideOverlay = voicingTab === 'scales'; 
 
@@ -161,6 +165,10 @@ export default function PlayScreen() {
   const isLoopingRef = useRef(false);
   const pendingPlayRef = useRef(false);
   const userInteractedRef = useRef(false);
+  // Debounce auto-play after a chord change so spamming randomize doesn't blip every
+  // intermediate chord — only the final chord (once taps stop for PLAY_DEBOUNCE_MS) sounds.
+  const playDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const PLAY_DEBOUNCE_MS = 200;
 
   const stopSeqFlash = () => { isLoopingRef.current = false; seqFlashTimers.current.forEach(t => clearTimeout(t)); seqFlashTimers.current = []; setIsPlaying(false); };
   const handleStop = () => { stopSeqFlash(); onStop?.(); };
@@ -215,16 +223,26 @@ export default function PlayScreen() {
     }
   };
 
+  // Cancel any queued auto-play and schedule a fresh one. Rapid chord changes keep
+  // resetting the timer, so only the chord that's still showing when taps stop will play.
+  const schedulePlay = () => {
+    if (playDebounceRef.current) clearTimeout(playDebounceRef.current);
+    playDebounceRef.current = setTimeout(() => { playDebounceRef.current = null; playCurrentChordRef.current(); }, PLAY_DEBOUNCE_MS);
+  };
+
   const isFocused = useIsFocused();
   React.useEffect(() => {
     if (!isFocused || !userInteractedRef.current) return;
     userInteractedRef.current = false;
+    // Stop the previous sound immediately (so spamming is silent), but DEBOUNCE the new
+    // chord's playback. Guitar still waits for its voicing to build (pendingPlayRef →
+    // the fretboard callback calls schedulePlay); piano schedules directly here.
     stopSeqFlash(); onStop?.(); setVariationLabel(undefined); setPianoVoicingIdx(0); setArpSubsetIdx(0); setIntervalSubsetIdx(0);
-    if (instrument === 'piano') playCurrentChordRef.current(); else pendingPlayRef.current = true;
+    if (instrument === 'piano') schedulePlay(); else pendingPlayRef.current = true;
   }, [rootSemi, chordType]);
 
   React.useEffect(() => {
-    if (!isFocused) handleStop();
+    if (!isFocused) { if (playDebounceRef.current) { clearTimeout(playDebounceRef.current); playDebounceRef.current = null; } handleStop(); }
   }, [isFocused]);
 
   // Intervals/Arps/Shapes/Scales can only arpeggiate (playback already forces it),
@@ -370,15 +388,27 @@ export default function PlayScreen() {
     return filtered.length > 0 ? filtered : types;
   };
 
+  const perfPressRef = React.useRef(0);
+  // Guards against spam-tapping the randomize button. While a chord change is in flight further
+  // taps are dropped, so a burst can't queue a backlog of heavy recomputes that keeps "draining"
+  // after the finger lifts. The lock is held a short time PAST the work (see the trailing timeout
+  // below) to swallow the touch events that buffered while the JS thread was busy.
+  const randomizingRef = React.useRef(false);
+  const randomReleaseRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // [PERF] Measure true press -> committed-and-painted latency on-device. The effect below
+  // fires after React commits the new chord; the rAF inside waits for paint. TEMP instrumentation.
+  React.useEffect(() => {
+    const p = perfPressRef.current; if (!p) return; perfPressRef.current = 0;
+    requestAnimationFrame(() => console.log('[PERF] randomize', Math.round(performance.now() - p) + 'ms to paint'));
+  }, [rootSemi, chordType]);
+
   const handleRandomNext = () => {
+    perfPressRef.current = performance.now();
     const { setChord, randomChord } = useChordStore.getState();
 
     if (activeTypes.length === 0) {
       userInteractedRef.current = true;
-      // Defer the heavy voicing-grid re-render so rapid taps stay responsive.
-      // The chord header and audio run off live state (see effect at ~213) so
-      // the label and sound still update instantly.
-      startTransition(() => randomChord());
+      randomChord();
       return;
     }
 
@@ -389,13 +419,13 @@ export default function PlayScreen() {
     if (finalPairs.length > 0) {
       const selected = finalPairs[Math.floor(Math.random() * finalPairs.length)];
       userInteractedRef.current = true;
-      startTransition(() => setChord(selected.r, selected.ct));
+      setChord(selected.r, selected.ct);
     } else {
       const eligibleTypes = getEligibleTypesForTab(voicingTab, instrument, activeTypes);
       const r = Math.floor(Math.random() * 12);
       const ct = eligibleTypes[Math.floor(Math.random() * eligibleTypes.length)];
       userInteractedRef.current = true;
-      startTransition(() => setChord(r, ct));
+      setChord(r, ct);
     }
   };
 
@@ -433,24 +463,33 @@ export default function PlayScreen() {
     }
   }, [voicingTab, rootSemi, chordType, instrument, currentChordDef, namingMode, rootNoteName, displayChordName]);
 
+  // Defer the tab-badge builders off the critical path of a chord change. The active tab's
+  // diagram (guitarGroups, ONE family) renders at high priority using the live rootSemi/chordType;
+  // these extra families exist only to feed the tab counts, so we key them on DEFERRED values —
+  // React paints the new fretboard first, then runs this rebuild in a follow-up low-priority
+  // render. The counts/badges update one frame later, which is imperceptible.
+  const dRootSemi = React.useDeferredValue(rootSemi);
+  const dChordType = React.useDeferredValue(chordType);
+  const dChordDef = CH[dChordType];
+
   // All six families, built ONLY to feed the tab badge counts. Counts key on
   // fingerprint / formula bracket (never on note-name spelling), so we pass fixed
   // sharp labels and exclude naming-derived deps — flat/sharp flips no longer
   // trigger a full rebuild of these six builders.
   const countGuitarGroups = React.useMemo(() => {
-    if (instrument === 'piano' || !currentChordDef) return { open: [], barre: [], triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] } as Record<string, VoicingGroup[]>;
-    const sharpRoot = NOTE_SHARP[rootSemi];
-    const sharpChordName = `${sharpRoot} ${currentChordDef.l}`;
-    const allDrops = buildDropVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp'); // triads now have drop voicings too
+    if (instrument === 'piano' || !dChordDef) return { open: [], barre: [], triads: [], shells: [], drop2: [], drop3: [], drop2and4: [] } as Record<string, VoicingGroup[]>;
+    const sharpRoot = NOTE_SHARP[dRootSemi];
+    const sharpChordName = `${sharpRoot} ${dChordDef.l}`;
+    const allDrops = buildDropVoicings(dChordType, dChordDef, dRootSemi, sharpRoot, sharpChordName, 'sharp'); // triads now have drop voicings too
     return {
-      open: buildOpenVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
-      barre: buildBarreVoicings(chordType, rootSemi, sharpRoot, sharpChordName),
-      shells: buildShellVoicings(chordType, currentChordDef, rootSemi, sharpRoot, sharpChordName, 'sharp'),
+      open: buildOpenVoicings(dChordType, dRootSemi, sharpRoot, sharpChordName),
+      barre: buildBarreVoicings(dChordType, dRootSemi, sharpRoot, sharpChordName),
+      shells: buildShellVoicings(dChordType, dChordDef, dRootSemi, sharpRoot, sharpChordName, 'sharp'),
       drop2: allDrops.filter(g => g.voicings[0]?.type === 'drop2'),
       drop3: allDrops.filter(g => g.voicings[0]?.type === 'drop3'),
       drop2and4: allDrops.filter(g => g.voicings[0]?.type === 'drop2and4'),
     } as Record<string, VoicingGroup[]>;
-  }, [rootSemi, chordType, instrument, currentChordDef]);
+  }, [dRootSemi, dChordType, instrument, dChordDef]);
 
   const guitarGroups = React.useMemo(() => {
     if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') return [];
@@ -685,14 +724,10 @@ export default function PlayScreen() {
       const subset = voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx] : intervalSubsets[safeIntervalSubsetIdx];
       if (subset && subset.ivs) {
         const startMidi = (octave + 1) * 12 + rootSemi;
-        // Build pitch-class set for this subset so we can find every instance
-        // across a ~2-octave span rather than just one occurrence per iv.
-        const pcs = subset.ivs.map((iv: number) => (rootSemi + iv) % 12);
-        const expanded: number[] = [];
-        for (let midi = startMidi - 12; midi <= startMidi + 24; midi++) {
-          if (pcs.includes(midi % 12) && midi >= 36 && midi <= 96) expanded.push(midi);
-        }
-        const notes = expanded.length > 0 ? expanded : subset.ivs.map((iv: number) => startMidi + iv);
+        // Place each interval ONCE, ascending from the root — a single-octave display
+        // rather than repeating the pitch classes across the whole keyboard. This also
+        // keeps notes aligned index-for-index with the subset's roles/formulas.
+        const notes = subset.ivs.map((iv: number) => startMidi + iv);
         return [{ name: subset.label || '', chordLabel: displayChordName, notes, roles: subset.roles || [], formulas: subset.formulaLabels || subset.roles || [] }];
       }
       return [];
@@ -702,10 +737,34 @@ export default function PlayScreen() {
     let selectedGroup: any[] = [];
 
     if (voicingTab === 'block') {
-      const notes = getChordNotes(rootSemi, chordType, octave);
-      const roles = notes.map(n => { const idx = currentChordDef.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? currentChordDef.r[idx] : ''; });
-      const formulas = notes.map(n => { const idx = currentChordDef.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? currentChordDef.f[idx] : ''; });
-      selectedGroup = [{ name: 'Root Position', chordLabel: formatChordSymbol(displayChordName), notes, roles, formulas }];
+      // Block now offers every inversion (root + one per chord tone), navigable like the
+      // other piano tabs. getChordNotes returns the chord in close root position (ascending);
+      // each inversion lifts the lowest `inv` notes up an octave. roles/formulas are recomputed
+      // per pitch class so they stay aligned to the rotated notes. The slash bass (e.g.
+      // "Cmaj7 / E") + sublabel are appended automatically by getPianoSlash from each bass.
+      const rootNotes = getChordNotes(rootSemi, chordType, octave);
+      const INV_NAMES = ['Root Position', '1st Inversion', '2nd Inversion', '3rd Inversion', '4th Inversion', '5th Inversion', '6th Inversion'];
+      const rolesFor = (ns: number[]) => ns.map(n => { const idx = currentChordDef.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? currentChordDef.r[idx] : ''; });
+      const formulasFor = (ns: number[]) => ns.map(n => { const idx = currentChordDef.iv.findIndex(iv => (rootSemi + iv) % 12 === n % 12); return idx !== -1 ? currentChordDef.f[idx] : ''; });
+      const label = formatChordSymbol(displayChordName);
+      selectedGroup = [];
+      for (let inv = 0; inv < rootNotes.length; inv++) {
+        // Start from close root position (sorted). For each inversion, take the current
+        // lowest note and raise it by octaves until it sits ABOVE the current highest note,
+        // so the NEXT chord tone becomes the bass. Raising by just +1 octave is NOT enough
+        // for chords that span more than an octave (e.g. a ♭9): the moved note can land back
+        // below the top, leaving the wrong tone — even the root — in the bass.
+        const notes = [...rootNotes].sort((a, b) => a - b);
+        for (let i = 0; i < inv; i++) {
+          const lowest = notes.shift();
+          if (lowest === undefined) break;
+          const highest = notes.length ? notes[notes.length - 1] : lowest;
+          let raised = lowest;
+          while (raised <= highest) raised += 12;
+          notes.push(raised); // removed the min and appended a new max → array stays sorted
+        }
+        selectedGroup.push({ name: INV_NAMES[inv] || `${inv}th Inversion`, chordLabel: label, notes, roles: rolesFor(notes), formulas: formulasFor(notes) });
+      }
     }
     // NOTE: copy the cached arrays before sorting below — pV.* are shared cache
     // references and must not be mutated in place.
@@ -716,6 +775,11 @@ export default function PlayScreen() {
     else if (voicingTab === 'drop2and4') selectedGroup = [...(pV.drop2and4 || [])];
 
     if (selectedGroup.length > 0) {
+      // Block inversions are generated in strict numerical order (Root → 1st → 2nd → …) — they're
+      // inversions of ONE chord, so the role/pitch sorts below don't apply. Return them as-built so
+      // the sequence is ALWAYS Root → 1st → 2nd → … regardless of sortMode (and robust to odd chord
+      // tones or unmapped roles that could otherwise reorder them). The sort toggle is hidden here anyway.
+      if (voicingTab === 'block') return selectedGroup;
       if (sortMode === 'voicings') {
         selectedGroup.sort((a: any, b: any) => {
           const minA = Math.min(...a.notes);
@@ -740,6 +804,20 @@ export default function PlayScreen() {
     }
     return [];
   }, [rootSemi, chordType, octave, currentChordDef, voicingTab, scaleVoicings, arpVoicings, intervalVoicings, sortMode, displayChordName, selectedScaleId, rootNoteName, arpSubsets, intervalSubsets, safeArpSubsetIdx, safeIntervalSubsetIdx]);
+
+  // Spelled note names for the piano keys. Memoized so it stays a STABLE array reference
+  // across renders that don't change the chord/voicing — otherwise this inline .map() made
+  // a fresh array every render and defeated PianoView's React.memo.
+  const pianoNoteNames = React.useMemo(() => {
+    const pv = pianoVoicings[pianoVoicingIdx];
+    const base = pv?.roles || currentChordDef?.r || [];
+    return base.map((role: string, i: number) => {
+      if (pv && pv.formulas && pv.formulas[i]) return spellInterval(rootSemi, pv.formulas[i], namingMode === 'flat');
+      const pcIdx = currentChordDef?.r.indexOf(role) ?? -1;
+      const formula = pcIdx !== -1 && currentChordDef?.f ? currentChordDef.f[pcIdx] : role;
+      return spellInterval(rootSemi, formula, namingMode === 'flat');
+    });
+  }, [pianoVoicings, pianoVoicingIdx, currentChordDef, rootSemi, namingMode]);
 
   const pianoGroups: { label: string; startIdx: number; count: number }[] = React.useMemo(() => {
     if (!pianoVoicings.length) return [];
@@ -787,7 +865,7 @@ export default function PlayScreen() {
     const isPiano = instrument === 'piano';
     const pV = buildPianoVoicings(rootSemi, chordType, octave, selectedScaleId, namingMode);
     return {
-      block: isPiano ? 1 : 0, open: isPiano ? 0 : countGuitar(countGuitarGroups.open), barre: isPiano ? 0 : countGuitar(countGuitarGroups.barre),
+      block: isPiano ? currentChordDef.iv.length : 0, open: isPiano ? 0 : countGuitar(countGuitarGroups.open), barre: isPiano ? 0 : countGuitar(countGuitarGroups.barre),
       triads: isPiano ? pV.triads.length : findTriads(currentChordDef).length, shells: isPiano ? countPianoByFormulaSet(pV.shells) : countByFormulaSet(countGuitarGroups.shells),
       drop2:  isPiano && pV.drop2 ? countPianoByFormulaSet(pV.drop2) : countByFormulaSet(countGuitarGroups.drop2),
       drop3:  isPiano && pV.drop3 ? countPianoByFormulaSet(pV.drop3) : countByFormulaSet(countGuitarGroups.drop3),
@@ -1054,7 +1132,7 @@ export default function PlayScreen() {
       setVariationLabel(isDifferentChord ? voicingName : undefined);
       if (activeRoles && activeIvs) { setActiveFretboardRoles(activeRoles); setActiveFretboardIvs(activeIvs); setActiveFretboardFormula(activeFormula); }
     }
-    if (pendingPlayRef.current) { pendingPlayRef.current = false; setTimeout(() => { playCurrentChordRef.current(); }, 50); }
+    if (pendingPlayRef.current) { pendingPlayRef.current = false; schedulePlay(); }
   };
 
   const combinedHeader = React.useMemo(() => (
@@ -1062,7 +1140,7 @@ export default function PlayScreen() {
   ), [voicingTab, tabCounts, t]);
 
   return (
-    <View style={[styles.safe, { backgroundColor: t.bg }]}>
+    <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
 
         <ChordCard
@@ -1117,13 +1195,7 @@ export default function PlayScreen() {
               onGroupPrev={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const prevIdx = (safeIdx - 1 + pianoGroups.length) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[prevIdx].startIdx); handleManualNavigate(); }}
               onGroupNext={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const nextIdx = (safeIdx + 1) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[nextIdx].startIdx); handleManualNavigate(); }}
               theme={t}
-              noteNames={(pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r).map((role: string, i: number) => {
-                const pv = pianoVoicings[pianoVoicingIdx];
-                if (pv && pv.formulas && pv.formulas[i]) return spellInterval(rootSemi, pv.formulas[i], namingMode === 'flat');
-                const pcIdx = currentChordDef.r.indexOf(role);
-                const formula = pcIdx !== -1 && currentChordDef.f ? currentChordDef.f[pcIdx] : role;
-                return spellInterval(rootSemi, formula, namingMode === 'flat');
-              })}
+              noteNames={pianoNoteNames}
               roles={pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r} formulas={pianoVoicings[pianoVoicingIdx]?.formulas || currentChordDef.f} formulaByPC={formulaByPC}
               onNotePress={handlePianoNotePress}
               octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
@@ -1138,6 +1210,7 @@ export default function PlayScreen() {
               overlayNotes={guitarOverlayNotes} // Explicitly pass the full-neck array down
               onArpSubsetChange={handleArpSubsetChange}
               shapesMode={voicingTab === 'shapes'} shapeVoicings={shapeVoicings} formulaByPC={formulaByPC}
+              chordAxisEnabled={voicingTab === 'triads' || voicingTab === 'shells' || voicingTab === 'drop2' || voicingTab === 'drop3' || voicingTab === 'drop2and4'}
               namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
               selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
             />
@@ -1169,14 +1242,25 @@ export default function PlayScreen() {
                 <Ionicons name="library-outline" size={24} color={t.txt2} />
                 <View style={[styles.badge, { backgroundColor: t.accent }]}><Text style={styles.badgeText}>{useChordStore.getState().activeTypes.length}</Text></View>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.wideLoopBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPressIn={() => { 
-  const now = Date.now();
-  if (now - lastRandomTimeRef.current < 150) return; // 150ms shield allows fast tapping but blocks ghost double-clicks
-  lastRandomTimeRef.current = now;
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-  stopSeqFlash(); 
-  onStop?.(); 
-  handleRandomNext(); // Executed synchronously, no more setTimeout delay
+              <TouchableOpacity style={[styles.wideLoopBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => {
+  // onPress (fires on release, no auto-repeat) instead of onPressIn: a held / spam press can no
+  // longer enqueue a backlog of touch-downs that keeps firing after the finger lifts. The guard
+  // collapses a fast burst to one change per frame; the rAF still lets the haptic flush to native
+  // before the heavy chord render (on a slow phone a synchronous handler would delay the buzz).
+  if (randomizingRef.current) return;
+  randomizingRef.current = true;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  stopSeqFlash();
+  if (playDebounceRef.current) { clearTimeout(playDebounceRef.current); playDebounceRef.current = null; }
+  onStop?.();
+  requestAnimationFrame(() => {
+    handleRandomNext();
+    // Trailing release: hold the lock ~140ms PAST the work so the burst of touch events that
+    // buffered while the JS thread was busy lands on a still-locked guard and is dropped, instead
+    // of draining into extra chord changes after the finger lifts. (A bare rAF released too early.)
+    if (randomReleaseRef.current) clearTimeout(randomReleaseRef.current);
+    randomReleaseRef.current = setTimeout(() => { randomizingRef.current = false; }, 140);
+  });
 }} delayPressIn={0} activeOpacity={0.75}>
                 <Ionicons name="dice" size={20} color={t.txt2} />
                 <Text style={[styles.wideLoopText, { color: t.txt2 }]}>Next Random</Text>
@@ -1219,7 +1303,7 @@ const styles = StyleSheet.create({
 
   visualSettingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
   miniPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  miniPillTxt: { fontSize: 11, fontWeight: '800' },
+  miniPillTxt: { fontSize: 12, fontWeight: '700' },
 
   stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
@@ -1228,7 +1312,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
   actionBtn: { width: 56, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', top: -6, right: -6, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
-  badgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   wideLoopBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 20, borderWidth: 1, height: 56 },
   wideLoopText: { fontWeight: '700', fontSize: 14 },
   squarePlayBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },

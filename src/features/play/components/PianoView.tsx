@@ -1,6 +1,10 @@
-import React, { useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { View, ScrollView, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Reanimated, { useSharedValue, useAnimatedStyle, useAnimatedScrollHandler, runOnJS, SharedValue } from 'react-native-reanimated';
+import Svg, { Rect } from 'react-native-svg';
 import { Theme } from '@shared/ui/themes';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { formatDegree, SCALES, getGlobalLabel } from '@shared/theory/musicTheory';
@@ -50,6 +54,7 @@ interface Props {
   activeParentScale?: string | null;
   onParentScaleChange?: (scaleId: string) => void;
   colorModeOverride?: 'theme' | 'roles' | 'selective';
+  showMiniMap?: boolean;
 }
 
 const ALL_NOTE_NAMES_SHARP = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
@@ -57,22 +62,173 @@ const ALL_NOTE_NAMES_FLAT  = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A
 const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
 const BLACK_PCS = [1, 3, 6, 8, 10];
 const BLACK_OFFSETS: Record<number, number> = { 1: 0.68, 3: 1.68, 6: 3.68, 8: 4.68, 10: 5.68 };
+const WHITE_PER_OCT = WHITE_PCS.length; // 7
+// Black-key geometry expressed as a PERCENT of the octave's width (octave width = 7 × keyWidth).
+// Using % lets a single width on the octave wrapper drive the entire resize: white keys flex to
+// fill it and black keys position proportionally, so zooming re-renders only the 7 octave wrappers
+// instead of all ~84 key components. The px values are identical (e.g. 0.68/7 × 7×keyWidth = 0.68×keyWidth).
+const BLACK_LEFT_PCT: Record<number, string> = Object.fromEntries(
+  BLACK_PCS.map(pc => [pc, `${(BLACK_OFFSETS[pc] / WHITE_PER_OCT) * 100}%`])
+) as Record<number, string>;
+const BLACK_WIDTH_PCT = `${(0.59 / WHITE_PER_OCT) * 100}%`;
 const WKH = 150;
 const BKH = 94;
 const MIN_WKW = 24;
 const MAX_WKW = 72;
 const DEFAULT_WKW = 24;
-// Expand the rendered area to cover the absolute full spectrum
-const OCTAVE_LIST = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+// Shared height for the two control rows that bookend the keyboard — the voicing-label nav
+// (chevrons + label stack) and the zoom bar — so they stay the same height on every platform.
+// Sized to the nav's natural height; its ~50px label stack centers comfortably within it.
+const ROW_HEIGHT = 74;
+// Rendered octaves by MIDI-octave number (oct N spans MIDI N*12 … N*12+11; e.g. oct 2 = C1–B1,
+// oct 5 = C4–B4). Starts at 2 (C1): everything below C1 is inaudible (<33 Hz) and unreachable —
+// the lowest piano octave setting is 2, and an octave-2 drop voicing bottoms out at exactly C1.
+const OCTAVE_LIST = [2, 3, 4, 5, 6, 7, 8];
 
 const DEGREE_NAMES = ['R','b2','2','b3','3','4','b5','5','b6','6','b7','7'];
 function degreeForPc(pc: number, rootSemi: number): string { return DEGREE_NAMES[(pc - rootSemi + 12) % 12]; }
+
+// ── Whole-piano minimap ──────────────────────────────────────────────────────
+// The piano analog of FretboardMiniMap. It renders every octave the keyboard can
+// scroll to (OCTAVE_LIST) in miniature on the same neutral bg3 field as the fretboard
+// minimap, lights up the current chord's keys in their role colors, and draws an accent
+// VIEWPORT box over the portion of the keyboard currently visible — so zooming and
+// scrolling the big keyboard move/resize the box live (driven by scrollX without
+// re-rendering the keys).
+const MM_W = 320;
+const MM_H = 44;
+const MM_WHITE_PER_OCT = 7;
+
+// hex (#rrggbb) → rgba string at the given alpha, for the translucent viewport fill.
+const withAlpha = (hex: string, a: number): string => {
+  const h = (hex || '').replace('#', '');
+  if (h.length < 6) return hex;
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+};
+
+const PianoMiniMap = React.memo(function PianoMiniMap({
+  midiNotes, theme, rootSemi, roles, formulas, colorMode, accentColor, selectiveRoles,
+  contentWidth, viewW, scrollSV,
+}: {
+  midiNotes: number[]; theme: Theme; rootSemi: number; roles: string[]; formulas: string[];
+  colorMode: 'theme' | 'roles' | 'selective'; accentColor?: string; selectiveRoles: any;
+  contentWidth: number; viewW: number; scrollSV: SharedValue<number>;
+}) {
+  const boxAnimStyle = useAnimatedStyle(() => {
+    const cw = contentWidth || 1;
+    let w = (MM_W * viewW) / cw;
+    w = Math.max(10, Math.min(MM_W, w));
+    let left = (MM_W / cw) * scrollSV.value;
+    left = Math.max(0, Math.min(MM_W - w, left));
+    const R = 8;
+    const lr = Math.max(0, Math.min(R, R - left));
+    const rr = Math.max(0, Math.min(R, R - (MM_W - (left + w))));
+    return {
+      width: w,
+      transform: [{ translateX: left }],
+      borderTopLeftRadius: lr, borderBottomLeftRadius: lr,
+      borderTopRightRadius: rr, borderBottomRightRadius: rr,
+    };
+  });
+
+  if (!midiNotes.length) return null;
+
+  const octs = OCTAVE_LIST;
+  const totalWhite = octs.length * MM_WHITE_PER_OCT;
+  const ww = MM_W / totalWhite;        // miniature white-key width
+  const bw = Math.max(2, ww * 0.6);    // miniature black-key width
+  const bh = MM_H * 0.6;               // miniature black-key height
+  const activeSet = new Set(midiNotes);
+
+  // Mirror the keyboard's per-note color resolution exactly so the minimap matches.
+  const colorFor = (midi: number): string => {
+    const pc = midi % 12;
+    const idx = midiNotes.indexOf(midi);
+    const role = roles[idx] ?? '';
+    const activeFormula = formulas[idx] ?? '';
+    const defaultDegree = degreeForPc(pc, rootSemi);
+    if (colorMode === 'theme') return accentColor ?? theme.accent;
+    if (colorMode === 'selective') return getNoteColor(activeFormula || role || defaultDegree, colorMode, theme, selectiveRoles);
+    const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role] ?? ROLE_COLORS_GLOBAL[defaultDegree];
+    return roleColor ? (accentColor ?? roleColor) : theme.mutedNote;
+  };
+
+  // Compute the x of any key in minimap space (same geometry as the keyboard).
+  const xForMidi = (midi: number): { x: number; w: number } => {
+    const pc = midi % 12;
+    const octIdx = Math.floor(midi / 12) - octs[0];
+    if (BLACK_PCS.includes(pc)) return { x: octIdx * MM_WHITE_PER_OCT * ww + BLACK_OFFSETS[pc] * ww, w: bw };
+    return { x: (octIdx * MM_WHITE_PER_OCT + WHITE_PCS.indexOf(pc)) * ww, w: ww };
+  };
+
+  return (
+    <View style={{ alignSelf: 'center', width: MM_W, height: MM_H, backgroundColor: theme.bg3, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, marginTop: 28, marginBottom: 28, overflow: 'hidden' }}>
+      <Svg width={MM_W} height={MM_H}>
+        {/* White keys — drawn in the fretboard minimap's background color (bg3) with thin
+            border-color dividers, so inactive keys read as a neutral field like the neck. */}
+        {octs.map(oct => WHITE_PCS.map(pc => {
+          const midi = oct * 12 + pc;
+          const { x } = xForMidi(midi);
+          const active = activeSet.has(midi);
+          return <Rect key={`w-${midi}`} x={x} y={0} width={ww} height={MM_H} fill={active ? colorFor(midi) : theme.bg3} stroke={theme.border} strokeWidth={0.5} />;
+        }))}
+        {/* Black keys — inactive ones drawn solid black so the strip reads as a piano. */}
+        {octs.map(oct => BLACK_PCS.map(pc => {
+          const midi = oct * 12 + pc;
+          const { x } = xForMidi(midi);
+          const active = activeSet.has(midi);
+          return <Rect key={`b-${midi}`} x={x} y={0} width={bw} height={bh} rx={1} fill={active ? colorFor(midi) : '#1c1c1e'} />;
+        }))}
+      </Svg>
+      {/* Live viewport highlight — accent fill, slides/resizes with scroll & zoom on the UI thread. */}
+      {contentWidth > viewW + 1 && (
+        <Reanimated.View
+          pointerEvents="none"
+          style={[{
+            position: 'absolute', top: 0, left: 0, height: MM_H,
+            backgroundColor: withAlpha(theme.accent, 0.3),
+          }, boxAnimStyle]}
+        />
+      )}
+    </View>
+  );
+});
+
+// Memoized keyboard keys. The parent computes each key's visual props every render (cheap
+// arithmetic), but React.memo skips actually re-rendering any key whose props are unchanged
+// — so on a chord change only the few keys that actually changed redraw, instead of all ~100.
+// Correctness: the props below FULLY determine the key's appearance, and `anim` is a stable
+// ref (see the reset above), so a skipped key is guaranteed identical to a re-rendered one.
+const WhiteKey = React.memo(function WhiteKey({ keyColor, keyTextColor, label, isOverlay, overlayColor, anim, isActive, borderColor }: any) {
+  // Stable interpolation so a width-only re-render (zoom) doesn't rebuild the animated node.
+  const transY = useMemo(() => anim.interpolate({ inputRange: [0, 1], outputRange: [-WKH / 2, 0] }), [anim]);
+  return (
+    // flex:1 — the key's width comes from the octave wrapper (width = 7×keyWidth), NOT a per-key
+    // prop, so zooming never changes this component's props and React.memo skips it entirely.
+    <Animated.View style={[styles.whiteKey, { backgroundColor: keyColor, borderColor, borderWidth: 1, flex: 1, transform: [{ translateY: transY }, { scaleY: anim }], shadowColor: isActive ? keyColor : '#000', shadowOpacity: isActive ? 0.3 : 0.05 }]}>
+      {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, backgroundColor: overlayColor, borderBottomLeftRadius: 5, borderBottomRightRadius: 5 }} />}
+      <View><Text style={[styles.keyName, { color: keyTextColor, zIndex: 1 }]}>{label}</Text></View>
+    </Animated.View>
+  );
+});
+
+const BlackKey = React.memo(function BlackKey({ keyColor, keyTextColor, keyBorder, label, isOverlay, overlayColor, left, width, anim, borderColor }: any) {
+  // Stable interpolation so a width-only re-render (zoom) doesn't rebuild the animated node.
+  const transY = useMemo(() => anim.interpolate({ inputRange: [0, 1], outputRange: [-BKH / 2, 0] }), [anim]);
+  return (
+    <Animated.View style={[styles.blackKeyTouch, styles.blackKey, { left, width, backgroundColor: keyColor, borderColor, borderWidth: keyBorder, transform: [{ translateY: transY }, { scaleY: anim }] }]}>
+      {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: overlayColor, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 }} />}
+      <View><Text style={[styles.blackKeyName, { color: keyTextColor, zIndex: 1 }]}>{label}</Text></View>
+    </Animated.View>
+  );
+});
 
 const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView({
   midiNotes, theme, noteNames = [], roles = [], formulas = [], formulaByPC = {}, onNotePress,
   octave = 4, labelMode = 'degrees', accentColor, rootSemi = 0, namingMode, header,
   showAllLabels = false, scaleOverlay = false, overlayNotes = [], overlayRoles = [], overlayFormulas = [], showNavigation = false, groupLabel, voicingLabel, voicingName, voicingSubName, voicingIdx = 0, totalVoicings = 0, onPrevVoicing, onNextVoicing, groups = [], onGroupPrev, onGroupNext,
-  parentScales = [], activeParentScale, onParentScaleChange, colorModeOverride,
+  parentScales = [], activeParentScale, onParentScaleChange, colorModeOverride, showMiniMap = true,
 }, ref) {
   const scrollRef = useRef<ScrollView>(null);
   const flashAnims = useRef<Record<number, Animated.Value>>({});
@@ -80,8 +236,98 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   const viewWidth = useRef(300);
   const keyWidth = useSettingsStore((s: any) => s.pianoKeyWidth);
   const setKeyWidth = useSettingsStore((s: any) => s.setPianoKeyWidth);
-  const activeSet = new Set(midiNotes);
+
+  // Single throttled + deduped commit path for BOTH the +/- buttons and the slider. Every keyWidth
+  // change now only resizes the 7 octave wrappers (the keys flex/% within them — see WhiteKey /
+  // BLACK_*_PCT), so it's cheap enough to run near frame rate. Three gates keep it smooth:
+  //   • round to whole px so sub-pixel slider ticks become no-ops (dedup),
+  //   • a ~1-frame throttle caps to ~60fps so we never queue more than one resize per frame,
+  //   • callers pass force=true for the FINAL value (button tap / slider release) so it always lands.
+  const lastCommitAtRef = useRef(0);
+  const lastWidthRef = useRef(keyWidth); // initialized to actual keyWidth so dedup never mismatches on first press
+  const commitKeyWidth = useCallback((target: number, force = false): boolean => {
+    const w = Math.max(MIN_WKW, Math.min(MAX_WKW, Math.round(target)));
+    if (w === lastWidthRef.current) return false;                       // dedup: same width, skip
+    const now = performance.now();
+    if (!force && now - lastCommitAtRef.current < 16) return false;     // throttle: at most one resize/frame
+    lastCommitAtRef.current = now;
+    lastWidthRef.current = w;
+    setKeyWidth(w);
+    return true;
+  }, [setKeyWidth]);
+  const zoomBy = useCallback((delta: number) => {
+    const oldKW = useSettingsStore.getState().pianoKeyWidth;
+    // Use the predicted scroll if a previous zoom hasn't fully landed yet (old arch: native
+    // layout lags behind JS commits, so scrollOffsetRef is stale during rapid presses).
+    // Chaining off the prediction keeps successive rapid taps centered on the same spot.
+    const baseScrollX = pendingScrollXRef.current ?? scrollOffsetRef.current;
+    const focalFrac = Math.max(0, Math.min(1,
+      (baseScrollX + viewWidth.current / 2) / (OCTAVE_LIST.length * WHITE_PER_OCT * oldKW)
+    ));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (commitKeyWidth(oldKW + delta)) {
+      pendingFocalFracRef.current = focalFrac;
+      // Predict where the scroll will land so the next rapid press has a correct base.
+      const newTotalW = OCTAVE_LIST.length * WHITE_PER_OCT * lastWidthRef.current;
+      const maxX = Math.max(0, newTotalW - viewWidth.current);
+      pendingScrollXRef.current = Math.max(0, Math.min(maxX, focalFrac * newTotalW - viewWidth.current / 2));
+      // Lock out native scroll writes for the duration of the zoom (each rapid press re-arms the
+      // timer, so it stays locked through a spam/hold and releases ~160ms after the last press,
+      // by which time onContentSizeChange has landed the final position).
+      scrollLockSV.value = 1;
+      if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current);
+      zoomSettleRef.current = setTimeout(() => { scrollLockSV.value = 0; }, 160);
+    }
+  }, [commitKeyWidth]);
+
+  const zoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const zoomIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopContinuousZoom = useCallback(() => {
+    if (zoomIntervalRef.current !== null) {
+      clearInterval(zoomIntervalRef.current);
+      zoomIntervalRef.current = null;
+    }
+  }, []);
+  const startContinuousZoom = useCallback((delta: number) => {
+    stopContinuousZoom();
+    zoomIntervalRef.current = setInterval(() => zoomBy(delta), 80);
+  }, [zoomBy, stopContinuousZoom]);
+  useEffect(() => () => { stopContinuousZoom(); if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current); }, []);
   const octaveNumbering = useSettingsStore((s: any) => s.octaveNumbering);
+
+  const [viewW, setViewW] = React.useState(300);
+
+  // Live scroll position, driving the minimap viewport box. The Reanimated scroll handler
+  // writes scrollSV on the UI THREAD every frame, so the box tracks the keyboard with zero
+  // JS-thread lag (the old Animated.event + addListener path lagged/jittered on Android).
+  const scrollSV = useSharedValue(0);   // minimap: live scroll offset, UI thread
+  const scrollOffsetRef = useRef(0);    // same value mirrored to JS for zoomBy's focal math
+  // While a zoom is in flight this is 1, and the native scroll handler stops writing scrollSV.
+  // During zoom the box is driven solely by syncScroll's predicted (focal-centered) positions,
+  // which stay consistent with contentWidth; the native onScroll events fire clamped/stale
+  // offsets on old-arch Android, which is exactly what made the highlight flicker when spammed.
+  const scrollLockSV = useSharedValue(0);
+  const setScrollOffset = useCallback((x: number) => { scrollOffsetRef.current = x; }, []);
+  const onKbScroll = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      if (scrollLockSV.value === 1) return;   // zoom in flight — ignore noisy native scroll
+      scrollSV.value = e.contentOffset.x;
+      runOnJS(setScrollOffset)(e.contentOffset.x);
+    },
+  });
+  // Viewport-center as a fraction (0..1) of the full keyboard width, captured before any zoom commit.
+  // Cleared by onContentSizeChange once the scroll has landed (safety net for old arch).
+  const pendingFocalFracRef = useRef<number | null>(null);
+  // Predicted scroll-X after the in-flight zoom lands. Rapid button presses read this instead
+  // of scrollOffsetRef (which is stale until the native layout completes), so each successive
+  // zoom chains off the correct virtual position rather than the same stale offset.
+  const pendingScrollXRef = useRef<number | null>(null);
+  // Keep both the UI-thread (scrollSV) and JS-thread (scrollOffsetRef) mirrors in sync after a
+  // programmatic scrollTo, since onScroll may not fire for animated:false jumps on old arch.
+  const syncScroll = useCallback((x: number) => { scrollSV.value = x; scrollOffsetRef.current = x; }, [scrollSV]);
+
+  const miniContentWidth = OCTAVE_LIST.length * MM_WHITE_PER_OCT * keyWidth;
 
   const computeScrollX = useCallback((kw?: number) => {
     if (!midiNotes.length) return 0;
@@ -101,14 +347,16 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
 
   const getFlashAnim = (midi: number) => { if (!flashAnims.current[midi]) { flashAnims.current[midi] = new Animated.Value(1); } return flashAnims.current[midi]; };
   const doFlashMidi = (midi: number) => { const anim = getFlashAnim(midi); Animated.sequence([ Animated.timing(anim, { toValue: 0.95, duration: 60, useNativeDriver: true }), Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }), ]).start(); };
-  // Discard stale flash-pulse values when the displayed notes change, so a key whose
+  // Reset any in-flight flash to rest when the displayed notes change, so a key whose
   // press-pulse was cut off mid-flight (left at 0.95) isn't reused stuck-pressed on the
-  // next chord. Keyed by midi and persists in the ref otherwise. Fresh values = 1.
+  // next chord. We reset the VALUES in place rather than recreating the objects, so each
+  // key's `anim` reference stays stable — that's what lets the memoized keys skip
+  // re-rendering on a chord change (only the keys whose props actually changed re-render).
   const midiKey = midiNotes.join(',');
   const prevMidiKeyRef = useRef(midiKey);
   if (prevMidiKeyRef.current !== midiKey) {
     prevMidiKeyRef.current = midiKey;
-    flashAnims.current = {};
+    Object.values(flashAnims.current).forEach((v: any) => v.setValue(1));
   }
   
   useImperativeHandle(ref, () => ({ 
@@ -117,9 +365,33 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
     recenter: () => scrollRef.current?.scrollTo({ x: computeScrollX(), animated: true }),
   }));
 
+  // Animate the horizontal scroll on chord/octave change so the keyboard glides to the new
+  // chord. We DON'T sync scrollSV here — the onScroll events fired during the animated slide
+  // drive scrollSV progressively on the UI thread, so the minimap viewport box slides in lock-step.
   useEffect(() => { if (!isReady.current) return; scrollRef.current?.scrollTo({ x: computeScrollX(), animated: true }); }, [midiNotes.join(','), octave]);
 
-  useEffect(() => { if (!isReady.current) return; scrollRef.current?.scrollTo({ x: computeScrollX(), animated: false }); }, [keyWidth]);
+  // keyWidth changed — apply zoom correction.
+  // On Fabric, native layout is computed synchronously before this effect fires, so scrollTo
+  // lands at the exact target with no clamping. onContentSizeChange re-applies as a safety net
+  // (no-op on Fabric, corrects old-arch where the first scrollTo may be clamped).
+  useLayoutEffect(() => {
+    if (!isReady.current) return;
+    const frac = pendingFocalFracRef.current;
+    if (frac !== null) {
+      const totalW = OCTAVE_LIST.length * WHITE_PER_OCT * keyWidth;
+      const maxX = Math.max(0, totalW - viewWidth.current);
+      const x = Math.max(0, Math.min(maxX, frac * totalW - viewWidth.current / 2));
+      scrollRef.current?.scrollTo({ x, animated: false });
+      syncScroll(x);
+      pendingScrollXRef.current = x; // sync prediction with post-layout value
+      // Don't clear pendingFocalFracRef — onContentSizeChange will clear and re-apply (old-arch safety net).
+    } else {
+      const x = computeScrollX();
+      scrollRef.current?.scrollTo({ x, animated: false });
+      syncScroll(x);
+      pendingScrollXRef.current = null;
+    }
+  }, [keyWidth]);
 
   const storeColorMode = useSettingsStore((s: any) => s.colorMode);
   const colorMode = colorModeOverride || storeColorMode;
@@ -165,11 +437,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
     return standardLabel;
   };
 
-  // Find exactly the root-to-root span of the current chord
-  const minMidi = midiNotes.length > 0 ? Math.min(...midiNotes) : 0;
-  const maxMidi = midiNotes.length > 0 ? Math.max(...midiNotes) : 127;
-  const lowestRoot = minMidi - ((minMidi - rootSemi + 12) % 12);
-  const highestRoot = maxMidi + ((rootSemi - maxMidi % 12 + 12) % 12);
+  // (root-to-root span for the scale-overlay window is now computed inside the keyVisuals memo)
 
   // ── True multitouch input ──────────────────────────────────────────────────
   // The keys themselves are purely visual (no touch handlers). Per-key handlers —
@@ -209,128 +477,121 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   const hitTestRef = useRef(hitTestMidi); hitTestRef.current = hitTestMidi;
   const onNotePressRef = useRef(onNotePress); onNotePressRef.current = onNotePress;
 
+  // Per-touch start positions, so we can tell a TAP (play the key) from a DRAG (scroll the
+  // keyboard, play nothing). Keyed by touch id for true multitouch.
+  const touchStartsRef = useRef<Map<number, { x: number; y: number; moved: boolean }>>(new Map());
+  const SCROLL_THRESH_SQ = 12 * 12; // px² a finger may wander and still count as a tap
+
   // Gesture.Manual never activates on its own, so it does NOT steal the gesture from the
   // surrounding ScrollView — drag-to-scroll, auto-centering and zoom all keep working.
-  // We only consume the raw touch stream: every finger that goes down plays its key.
+  // We watch the raw touch stream and play a key on finger-UP only if that finger didn't
+  // move (a tap). A finger that moves past the threshold (or the ScrollView claims it for a
+  // scroll → onTouchesCancelled) plays nothing, so you can press-and-drag to scroll silently.
   // runOnJS(true) lets the callback call onNotePress (a JS bridge call) directly.
   const keyGesture = useMemo(() =>
     Gesture.Manual()
       .runOnJS(true)
       .onTouchesDown((e) => {
         for (const t of e.changedTouches) {
-          const midi = hitTestRef.current(t.x, t.y);
+          touchStartsRef.current.set(t.id, { x: t.x, y: t.y, moved: false });
+        }
+      })
+      .onTouchesMove((e) => {
+        for (const t of e.changedTouches) {
+          const s = touchStartsRef.current.get(t.id);
+          if (s && !s.moved) {
+            const dx = t.x - s.x, dy = t.y - s.y;
+            if (dx * dx + dy * dy > SCROLL_THRESH_SQ) s.moved = true;
+          }
+        }
+      })
+      .onTouchesUp((e) => {
+        for (const t of e.changedTouches) {
+          const s = touchStartsRef.current.get(t.id);
+          touchStartsRef.current.delete(t.id);
+          if (!s || s.moved) continue;
+          const midi = hitTestRef.current(s.x, s.y);
           if (midi == null) continue;
           doFlashMidi(midi);
           onNotePressRef.current?.(midi);
         }
+      })
+      .onTouchesCancelled((e) => {
+        for (const t of e.changedTouches) touchStartsRef.current.delete(t.id);
       }),
   []);
 
+  // Per-key appearance (colors, text color, label, overlay) precomputed once and keyed on the
+  // chord/theme/settings — but NOT on keyWidth. Zooming changes only width, so renderOctave reuses
+  // this cached map instead of re-running getNoteColor/getLabelStr for all ~84 keys every step
+  // (that recompute was the bulk of the on-device zoom cost). renderOctave then only applies the
+  // width-dependent layout per key.
+  const keyVisuals = React.useMemo(() => {
+    const noteNamesArr = namingMode === 'flat' ? ALL_NOTE_NAMES_FLAT : ALL_NOTE_NAMES_SHARP;
+    const aSet = new Set(midiNotes);
+    const minM = midiNotes.length > 0 ? Math.min(...midiNotes) : 0;
+    const maxM = midiNotes.length > 0 ? Math.max(...midiNotes) : 127;
+    const loRoot = minM - ((minM - rootSemi + 12) % 12);
+    const hiRoot = maxM + ((rootSemi - maxM % 12 + 12) % 12);
+    const map = new Map<number, any>();
+    const compute = (pc: number, midi: number, isWhite: boolean) => {
+      const isActive = aSet.has(midi);
+      const role = roles[midiNotes.indexOf(midi)] ?? '';
+      const activeFormula = formulas[midiNotes.indexOf(midi)] ?? '';
+      let keyColor = isWhite ? '#ffffff' : '#1c1c1e';
+      let keyTextColor = isWhite ? theme.txt3 : '#888';
+      let keyBorder = 0;
+      if (isActive) {
+        // Ensure every active note gets a color - use degree relative to root as fallback
+        const defaultDegree = degreeForPc(pc, rootSemi);
+        const resolvedColor = getNoteColor(activeFormula || role || defaultDegree, colorMode, theme, selectiveRoles);
+        if (colorMode === 'theme') {
+          keyColor = accentColor ?? theme.accent; keyTextColor = '#fff'; keyBorder = 0;
+        } else if (colorMode === 'selective') {
+          keyColor = resolvedColor; keyTextColor = resolvedColor === theme.mutedNote ? theme.txt1 : '#fff'; keyBorder = resolvedColor === theme.mutedNote ? 1 : 0;
+        } else {
+          const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role] ?? ROLE_COLORS_GLOBAL[defaultDegree];
+          if (roleColor) { keyColor = accentColor ?? roleColor; keyTextColor = '#fff'; keyBorder = 0; }
+          else { keyColor = theme.mutedNote; keyTextColor = theme.txt1; keyBorder = 1; }
+        }
+      }
+      // Show overlay ONLY within the root-to-root octaves the current voicing spans!
+      const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= loRoot && midi < hiRoot;
+      let overlayColor = 'transparent';
+      let overlayF = '';
+      if (isOverlay) {
+        const overlayIdx = overlayNotes.indexOf(midi);
+        overlayF = overlayFormulas[overlayIdx] || overlayRoles[overlayIdx] || formulaByPC[pc] || degreeForPc(pc, rootSemi);
+        overlayColor = getNoteColor(overlayF, colorMode, theme, selectiveRoles);
+        if (overlayColor === theme.mutedNote) overlayColor = theme.accent;
+      }
+      const label = getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF);
+      map.set(midi, { isActive, keyColor, keyTextColor, keyBorder, label, isOverlay, overlayColor });
+    };
+    for (const oct of OCTAVE_LIST) {
+      const base = oct * 12;
+      for (const pc of WHITE_PCS) compute(pc, base + pc, true);
+      for (const pc of BLACK_PCS) compute(pc, base + pc, false);
+    }
+    return map;
+  }, [midiKey, roles, formulas, noteNames, colorMode, selectiveRoles, theme, accentColor, rootSemi, namingMode, labelMode, showAllLabels, octaveNumbering, scaleOverlay, overlayNotes, overlayRoles, overlayFormulas, formulaByPC]);
+
   const renderOctave = (oct: number) => {
-    const base = oct * 12; const noteNamesArr = namingMode === 'flat' ? ALL_NOTE_NAMES_FLAT : ALL_NOTE_NAMES_SHARP;
-
+    const base = oct * 12;
     return (
-      <View key={oct} style={styles.octave}>
+      <View key={oct} style={[styles.octave, { width: keyWidth * WHITE_PER_OCT }]}>
         {WHITE_PCS.map((pc) => {
-          const midi = base + pc; const isActive = activeSet.has(midi); const role = roles[midiNotes.indexOf(midi)] ?? '';
-          const activeFormula = formulas[midiNotes.indexOf(midi)] ?? '';
-          const isRoot = role === 'root' || role === 'R' || formulaByPC[pc] === 'R' || formulaByPC[pc] === '1';
-          const anim = getFlashAnim(midi); const whiteTransY = anim.interpolate({ inputRange: [0, 1], outputRange: [-WKH / 2, 0] });
-          
-          let keyColor = '#ffffff'; let keyTextColor = theme.txt3;
-          if (isActive) {
-             // Ensure every active note gets a color - use degree relative to root as fallback
-             const defaultDegree = degreeForPc(pc, rootSemi);
-             const resolvedColor = getNoteColor(activeFormula || role || defaultDegree, colorMode, theme, selectiveRoles);
-             if (colorMode === 'theme') {
-                keyColor = accentColor ?? theme.accent;
-                keyTextColor = '#fff';
-             } else if (colorMode === 'selective') {
-                keyColor = resolvedColor;
-                keyTextColor = resolvedColor === theme.mutedNote ? theme.txt1 : '#fff';
-             } else {
-                const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role] ?? ROLE_COLORS_GLOBAL[defaultDegree];
-                if (roleColor) {
-                   keyColor = accentColor ?? roleColor; keyTextColor = '#fff';
-                } else {
-                   keyColor = theme.mutedNote; keyTextColor = theme.txt1;
-                }
-             }
-          }
-          // Show overlay ONLY within the root-to-root octaves the current voicing spans!
-          const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= lowestRoot && midi < highestRoot;
-          let overlayColor = 'transparent';
-          let overlayF = '';
-          
-          if (isOverlay) {
-            const overlayIdx = overlayNotes.indexOf(midi);
-            overlayF = overlayFormulas[overlayIdx] || overlayRoles[overlayIdx] || formulaByPC[pc] || degreeForPc(pc, rootSemi);
-            
-            // Use the established helper to respect the Note Color setting (Roles, Theme, or Selective)
-            overlayColor = getNoteColor(overlayF, colorMode, theme, selectiveRoles);
-            
-            // If the color comes back as the "muted" color, fallback to accent so it's still visible
-            if (overlayColor === theme.mutedNote) overlayColor = theme.accent;
-          }
-
+          const midi = base + pc;
+          const v = keyVisuals.get(midi) || {};
           return (
-            <Animated.View key={pc} style={[styles.whiteKey, { backgroundColor: keyColor, borderColor: theme.border, borderWidth: 1, width: keyWidth, transform: [{ translateY: whiteTransY }, { scaleY: anim }], shadowColor: isActive ? keyColor : '#000', shadowOpacity: isActive ? 0.3 : 0.05 }]}>
-              {/* Bulletproof absolutely positioned tab for the scale overlay color */}
-              {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 6, backgroundColor: overlayColor, borderBottomLeftRadius: 5, borderBottomRightRadius: 5 }} />}
-              <Text style={[styles.keyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
-            </Animated.View>
+            <WhiteKey key={pc} keyColor={v.keyColor} keyTextColor={v.keyTextColor} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} anim={getFlashAnim(midi)} isActive={v.isActive} borderColor={theme.border} />
           );
         })}
         {BLACK_PCS.map(pc => {
-          const midi = base + pc; const isActive = activeSet.has(midi); const role = roles[midiNotes.indexOf(midi)] ?? '';
-          const activeFormula = formulas[midiNotes.indexOf(midi)] ?? '';
-          const isRoot = role === 'root' || role === 'R' || formulaByPC[pc] === 'R' || formulaByPC[pc] === '1';
-          const anim = getFlashAnim(midi); const blackTransY = anim.interpolate({ inputRange: [0, 1], outputRange: [-BKH / 2, 0] });
-          
-          let keyColor = '#1c1c1e'; let keyTextColor = '#888'; let keyBorder = 0;
-          if (isActive) {
-             // Ensure every active note gets a color - use degree relative to root as fallback
-             const defaultDegree = degreeForPc(pc, rootSemi);
-             const resolvedColor = getNoteColor(activeFormula || role || defaultDegree, colorMode, theme, selectiveRoles);
-             if (colorMode === 'theme') {
-                keyColor = accentColor ?? theme.accent;
-                keyTextColor = '#fff';
-                keyBorder = 0;
-             } else if (colorMode === 'selective') {
-                keyColor = resolvedColor;
-                keyTextColor = resolvedColor === theme.mutedNote ? theme.txt1 : '#fff';
-                keyBorder = resolvedColor === theme.mutedNote ? 1 : 0;
-             } else {
-                const roleColor = ROLE_COLORS_GLOBAL[activeFormula] ?? ROLE_COLORS_GLOBAL[role] ?? ROLE_COLORS_GLOBAL[defaultDegree];
-                if (roleColor) {
-                   keyColor = accentColor ?? roleColor; keyTextColor = '#fff'; keyBorder = 0;
-                } else {
-                   keyColor = theme.mutedNote; keyTextColor = theme.txt1; keyBorder = 1;
-                }
-             }
-          }
-
-          // Show overlay ONLY within the root-to-root octaves the current voicing spans!
-          const isOverlay = scaleOverlay && !isActive && overlayNotes.includes(midi) && midi >= lowestRoot && midi < highestRoot;
-          let overlayColor = 'transparent';
-          let overlayF = '';
-          
-          if (isOverlay) {
-            const overlayIdx = overlayNotes.indexOf(midi);
-            overlayF = overlayFormulas[overlayIdx] || overlayRoles[overlayIdx] || formulaByPC[pc] || degreeForPc(pc, rootSemi);
-            
-            // Use the same helper here to ensure consistency across the keyboard
-            overlayColor = getNoteColor(overlayF, colorMode, theme, selectiveRoles);
-            
-            if (overlayColor === theme.mutedNote) overlayColor = theme.accent;
-          }
-
+          const midi = base + pc;
+          const v = keyVisuals.get(midi) || {};
           return (
-            <Animated.View key={pc} style={[styles.blackKeyTouch, styles.blackKey, { left: BLACK_OFFSETS[pc] * keyWidth, width: Math.round(keyWidth * 0.59), backgroundColor: keyColor, borderColor: theme.border, borderWidth: keyBorder, transform: [{ translateY: blackTransY }, { scaleY: anim }] }]}>
-              {/* Bulletproof absolutely positioned tab for the scale overlay color */}
-              {isOverlay && <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: overlayColor, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 }} />}
-              <Text style={[styles.blackKeyName, { color: keyTextColor, zIndex: 1 }]}>{getLabelStr(midi, pc, role, activeFormula, isActive, noteNamesArr, isOverlay, overlayF)}</Text>
-            </Animated.View>
+            <BlackKey key={pc} keyColor={v.keyColor} keyTextColor={v.keyTextColor} keyBorder={v.keyBorder} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} left={BLACK_LEFT_PCT[pc]} width={BLACK_WIDTH_PCT} anim={getFlashAnim(midi)} borderColor={theme.border} />
           );
         })}
       </View>
@@ -411,16 +672,73 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={onNextVoicing}><Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text></TouchableOpacity>
         </View>
       )}
-      <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ borderTopWidth: 0, backgroundColor: theme.bg2 }} contentContainerStyle={[styles.content, { height: WKH }]} onLayout={(e) => { viewWidth.current = e.nativeEvent.layout.width; }} onContentSizeChange={() => { if (!isReady.current) { isReady.current = true; scrollRef.current?.scrollTo({ x: computeScrollX(), animated: false }); } }}>
+      {showMiniMap && (
+        <PianoMiniMap
+          midiNotes={midiNotes}
+          theme={theme}
+          rootSemi={rootSemi}
+          roles={roles}
+          formulas={formulas}
+          colorMode={colorMode}
+          accentColor={accentColor}
+          selectiveRoles={selectiveRoles}
+          contentWidth={miniContentWidth}
+          viewW={viewW}
+          scrollSV={scrollSV}
+        />
+      )}
+      <View style={{ paddingTop: 0, paddingBottom: 0, backgroundColor: theme.bg2, position: 'relative' }}>
+      <Reanimated.ScrollView ref={scrollRef as any} horizontal showsHorizontalScrollIndicator={false} scrollEventThrottle={16} onScroll={onKbScroll} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border, backgroundColor: theme.bg2 }} contentContainerStyle={[styles.content, { height: WKH }]} onLayout={(e) => { viewWidth.current = e.nativeEvent.layout.width; setViewW(e.nativeEvent.layout.width); }} onContentSizeChange={(w) => {
+        if (!isReady.current) { isReady.current = true; const x = computeScrollX(); scrollRef.current?.scrollTo({ x, animated: false }); syncScroll(x); return; }
+        // Only apply the focal-point correction when `w` matches the CURRENTLY committed key
+        // width. During rapid button presses, an intermediate onContentSizeChange (for an
+        // earlier layout) fires while pendingFocalFracRef already holds the NEXT press's frac.
+        // If we applied+cleared here, the final layout's callback would find null and skip,
+        // leaving the scroll permanently wrong. Skipping intermediate layouts is safe: the
+        // final onContentSizeChange always fires and lands at the correct position.
+        const frac = pendingFocalFracRef.current;
+        const expectedW = OCTAVE_LIST.length * WHITE_PER_OCT * lastWidthRef.current;
+        if (frac !== null && Math.abs(w - expectedW) < 2) {
+          pendingFocalFracRef.current = null;
+          const maxX = Math.max(0, w - viewWidth.current);
+          const x = Math.max(0, Math.min(maxX, frac * w - viewWidth.current / 2));
+          scrollRef.current?.scrollTo({ x, animated: false });
+          syncScroll(x);
+          pendingScrollXRef.current = null;
+        }
+      }}>
         <GestureDetector gesture={keyGesture}>
           <View style={{ flexDirection: 'row', height: WKH }}>
             {OCTAVE_LIST.map(oct => renderOctave(oct))}
           </View>
         </GestureDetector>
-      </ScrollView>
-      <View style={[styles.zoomBar, { backgroundColor: theme.bg2, borderTopColor: theme.border }]}>
-        <TouchableOpacity style={[styles.zoomBtn, { backgroundColor: theme.bg, borderWidth: 1, borderColor: theme.border }]} onPress={() => setKeyWidth(Math.max(MIN_WKW, keyWidth - 6))}><Text style={[styles.zoomBtnText, { color: theme.accent }]}>−</Text></TouchableOpacity>
-        <TouchableOpacity style={[styles.zoomBtn, { backgroundColor: theme.bg, borderWidth: 1, borderColor: theme.border }]} onPress={() => setKeyWidth(Math.min(MAX_WKW, keyWidth + 6))}><Text style={[styles.zoomBtnText, { color: theme.accent }]}>+</Text></TouchableOpacity>
+      </Reanimated.ScrollView>
+      {/* Floating zoom controls — overlaid on the top-right of the keyboard so they don't
+          consume a dedicated row. Tap = one step; hold = continuous zoom (auto-repeat). */}
+      <View style={styles.zoomFloat} pointerEvents="box-none">
+        <TouchableOpacity
+          style={[styles.zoomFloatBtn, { backgroundColor: withAlpha(theme.bg, 0.92), borderColor: theme.border }]}
+          onPress={() => zoomBy(-6)}
+          onLongPress={() => startContinuousZoom(-6)}
+          onPressOut={stopContinuousZoom}
+          delayPressIn={0}
+          delayLongPress={400}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="remove" size={20} color={theme.accent} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.zoomFloatBtn, { backgroundColor: withAlpha(theme.bg, 0.92), borderColor: theme.border }]}
+          onPress={() => zoomBy(6)}
+          onLongPress={() => startContinuousZoom(6)}
+          onPressOut={stopContinuousZoom}
+          delayPressIn={0}
+          delayLongPress={400}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="add" size={20} color={theme.accent} />
+        </TouchableOpacity>
+      </View>
       </View>
     </View>
   );
@@ -433,24 +751,24 @@ const styles = StyleSheet.create({
   navContainer: { 
   flexDirection: 'row', 
   alignItems: 'center', 
-  justifyContent: 'space-between', 
-  padding: 12,
+  justifyContent: 'space-between',
+  paddingHorizontal: 12,
+  height: ROW_HEIGHT,
   borderBottomWidth: 1, // Added line
 },
   navBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   navArrow: { fontSize: 24, fontWeight: '700', lineHeight: 28, marginTop: -2 },
   navLabelWrap: { flex: 1, alignItems: 'center' },
-  navLabelTag: { fontSize: 10, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 },
-  navLabelTop: { fontSize: 13, fontWeight: '700' },
+  navLabelTag: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 },
+  navLabelTop: { fontSize: 14, fontWeight: '700' },
   navLabelBot: { fontSize: 10, fontWeight: '600', marginTop: 2 },
-  zoomBar: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, borderTopWidth: 1 },
-  zoomBtn: { flex: 1, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  zoomBtnText: { fontSize: 24, fontWeight: '600', lineHeight: 42 },
+  zoomFloat: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', gap: 6, zIndex: 20, elevation: 8 },
+  zoomFloatBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 8 },
   content: { flexDirection: 'row', paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
   octave: { flexDirection: 'row', position: 'relative', height: WKH },
   whiteKey: { height: WKH, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, borderWidth: 1, borderTopWidth: 0, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 10, shadowOffset: { width: 0, height: 2 }, shadowRadius: 3, elevation: 2 },
   blackKeyTouch: { position: 'absolute', top: 0, height: BKH, zIndex: 2 },
   blackKey: { height: BKH, borderBottomLeftRadius: 4, borderBottomRightRadius: 4, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 4 },
-  keyName: { fontSize: 11, fontWeight: '800', height: 16, lineHeight: 16, textAlign: 'center' },
-  blackKeyName: { fontSize: 10, fontWeight: '800', height: 14, lineHeight: 14, textAlign: 'center' },
+  keyName: { fontSize: 12, fontWeight: '700', height: 16, lineHeight: 16, textAlign: 'center' },
+  blackKeyName: { fontSize: 10, fontWeight: '700', height: 14, lineHeight: 14, textAlign: 'center' },
 });

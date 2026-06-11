@@ -2,10 +2,14 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { THEMES } from '@shared/ui/themes';
+import type { FontKey } from '@shared/fonts/fonts';
 
 const DEFAULT_BPM = 120;
 const DEFAULT_PIANO_OCTAVE = 4;
-const MIN_PIANO_OCTAVE = 1;
+// Floor at octave 2 (root = C2). The piano keyboard renders from C1 up (PianoView's OCTAVE_LIST
+// starts at 2), and an octave-2 drop voicing bottoms out at exactly C1 — anything lower is both
+// inaudible (<33 Hz) and would render off the left edge of the keyboard, so we don't allow it.
+const MIN_PIANO_OCTAVE = 2;
 const MAX_PIANO_OCTAVE = 7;
 const DEFAULT_GUITAR_OCTAVE = 1;
 const MIN_GUITAR_OCTAVE = 1;
@@ -27,6 +31,11 @@ export interface SettingsState {
   bassEnabled: boolean;
   metronomeEnabled: boolean;
   voiceLeading: boolean;
+  // Directional lean for the Song-screen guitar voice leading: 'down'/'up' make the
+  // voicings drift that way along the neck; 'none' is plain smoothest-motion leading.
+  voiceLeadDir: 'up' | 'down' | 'none';
+  // App-wide UI font. 'system' keeps the OS default; others are custom-loaded.
+  fontFamily: FontKey;
   fretCap: number;
   pianoZone: number;
   scaleOverlay: boolean;
@@ -56,6 +65,8 @@ export interface SettingsState {
   setBassEnabled: (enabled: boolean) => void;
   setMetronomeEnabled: (enabled: boolean) => void;
   setVoiceLeading: (enabled: boolean) => void;
+  setVoiceLeadDir: (dir: 'up' | 'down' | 'none') => void;
+  setFontFamily: (f: FontKey) => void;
   setFretCap: (cap: number) => void;
   setPianoZone: (zone: number) => void;
   setScaleOverlay: (enabled: boolean) => void;
@@ -89,6 +100,8 @@ export const useSettingsStore = create<SettingsState>()(
       bassEnabled: false,
       metronomeEnabled: false,
       voiceLeading: true,
+      voiceLeadDir: 'down',
+      fontFamily: 'Inter',
       fretCap: 5,
       pianoZone: 4,
       scaleOverlay: false,
@@ -129,6 +142,8 @@ export const useSettingsStore = create<SettingsState>()(
       setBassEnabled: (bassEnabled) => set({ bassEnabled }),
       setMetronomeEnabled: (metronomeEnabled) => set({ metronomeEnabled }),
       setVoiceLeading: (voiceLeading) => set({ voiceLeading }),
+      setVoiceLeadDir: (voiceLeadDir) => set({ voiceLeadDir }),
+      setFontFamily: (fontFamily) => set({ fontFamily }),
       setFretCap: (fretCap) => set({ fretCap }),
       setPianoZone: (pianoZone) => set({ pianoZone }),
       setScaleOverlay: (scaleOverlay) => set({ scaleOverlay }),
@@ -166,6 +181,18 @@ export const useSettingsStore = create<SettingsState>()(
         selectiveRoles: ['root', '3', '5', '7'],
         pianoKeyWidth: 24,
         octaveNumbering: false,
+        fontFamily: 'Inter',
+        // Previously missed by the reset — added so "Restore Defaults" is complete.
+        arpForced: false,
+        voiceLeading: true,
+        voiceLeadDir: 'down',
+        fretCap: 5,
+        pianoZone: 4,
+        colorMode: 'roles',
+        referenceFrequency: 440,
+        mixChordVol: 70,
+        mixBassVol: 100,
+        mixClickVol: 21,
       }),
     }),
     {
@@ -184,6 +211,8 @@ export const useSettingsStore = create<SettingsState>()(
         bassEnabled: state.bassEnabled,
         metronomeEnabled: state.metronomeEnabled,
         voiceLeading: state.voiceLeading,
+        voiceLeadDir: state.voiceLeadDir,
+        fontFamily: state.fontFamily,
         fretCap: state.fretCap,
         pianoZone: state.pianoZone,
         scaleOverlay: state.scaleOverlay,
@@ -196,6 +225,19 @@ export const useSettingsStore = create<SettingsState>()(
         mixClickVol:  state.mixClickVol,
         octaveNumbering: state.octaveNumbering,
       }),
+      // Clamp a persisted octave into the current valid range on rehydrate. Without this, anyone
+      // who'd saved piano octave 1 (before the floor moved to 2) would reload with low voicings
+      // rendering off the trimmed keyboard's left edge until they nudged the octave control.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<SettingsState>;
+        const merged = { ...current, ...p } as SettingsState;
+        const isGuitar = merged.instrument === 'guitar';
+        const min = isGuitar ? MIN_GUITAR_OCTAVE : MIN_PIANO_OCTAVE;
+        const max = isGuitar ? MAX_GUITAR_OCTAVE : MAX_PIANO_OCTAVE;
+        const def = isGuitar ? DEFAULT_GUITAR_OCTAVE : DEFAULT_PIANO_OCTAVE;
+        merged.octave = Math.max(min, Math.min(max, merged.octave ?? def));
+        return merged;
+      },
     }
   )
 );

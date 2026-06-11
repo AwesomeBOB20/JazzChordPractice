@@ -6,21 +6,31 @@ import { useAudio } from '@shared/audio/AudioContext';
 import { getChordNotes, getChordIntervals, getBassLineMidi, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { ProgressionMeasure } from '@shared/audio/SoundfontPlayer';
 
-export function useProgressionPlayer(selectedCell: number | null, diagramVoicings: any[] = []) {
-  const { playChord: onPlay, stopAudio: onStop, playProgression, stopProgression, setProgressionLooping } = useAudio();
+export function useProgressionPlayer(selectedCell: number | null, diagramVoicings: any[] = [], forceArp: boolean = false) {
+  const { playChord: onPlay, stopAudio: onStop, playProgression, stopProgression, setProgressionLooping, queueProgressionJump, updateProgressionNotes } = useAudio();
+  // Reactive progression so chord edits during playback can patch the running sequence live.
+  const liveProgression = useProgressionStore((s: any) => s.progression);
   const resetPulse = useChordStore((s: any) => s.resetPulse);
 
   const [playingIdx, setPlayingIdx]         = useState<number | null>(null);
   const [isPlayingSystem, setIsPlayingSystem] = useState<boolean>(false);
   const [isLooping, setIsLooping]           = useState<boolean>(false);
+  // Tap-ahead queue: the progression cell index the user tapped during playback to skip to.
+  // Increment A is visual only — the scheduler jump is wired separately. null = no queue.
+  const [queuedIdx, setQueuedIdx]           = useState<number | null>(null);
 
   const isLoopingRef  = useRef(false);
   const timers        = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isPlayingRef  = useRef(false);
   const prePlaybackChord = useRef<{ rootSemi: number; chordType: string } | null>(null);
+  const playStartRef = useRef(0); // the start chord index the running sequence was built from
 
   const diagramVoicingsRef = useRef(diagramVoicings);
   useEffect(() => { diagramVoicingsRef.current = diagramVoicings; }, [diagramVoicings]);
+
+  // ARPS view forces arpeggiated playback regardless of the global `arp` setting.
+  const forceArpRef = useRef(forceArp);
+  useEffect(() => { forceArpRef.current = forceArp; }, [forceArp]);
 
   // ── Loop toggle ─────────────────────────────────────────────────────────────
   const toggleLooping = () => {
@@ -38,6 +48,19 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     }
   }, [resetPulse]);
 
+  // Tap-ahead during playback: mark a measure to skip to (re-tapping the same one clears it).
+  // The audio scheduler is told the same target so it diverts at the next measure boundary.
+  const queueMeasure = (idx: number) => setQueuedIdx(prev => {
+    const next = prev === idx ? null : idx;
+    queueProgressionJump(next);
+    return next;
+  });
+
+  // The playhead reached the queued measure on its own → drop the marker.
+  useEffect(() => {
+    if (queuedIdx !== null && playingIdx === queuedIdx) setQueuedIdx(null);
+  }, [playingIdx, queuedIdx]);
+
   // ── Stop ────────────────────────────────────────────────────────────────────
   const stopPlayback = (restoreChord = false) => {
     isPlayingRef.current = false;
@@ -45,6 +68,8 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     timers.current = [];
     setPlayingIdx(null);
     setIsPlayingSystem(false);
+    setQueuedIdx(null);
+    queueProgressionJump(null); // drop any pending tap-ahead in the scheduler
     onStop?.();
     stopProgression(); // halt the look-ahead scheduler immediately
     if (restoreChord && prePlaybackChord.current) {
@@ -239,7 +264,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
         bpm,
         volume:           mixChordVol,
         guitar:           instrument === 'guitar',
-        arp,
+        arp:              arp || forceArpRef.current,
         arpSwing,
         rhythm,
         intervals:        getChordIntervals(chord.chordType),
@@ -267,7 +292,9 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     const chordStore = useChordStore.getState();
     prePlaybackChord.current = { rootSemi: chordStore.rootSemi, chordType: chordStore.chordType };
 
-    const sequence = buildSequence(selectedCell ?? 0);
+    const startIdx = selectedCell ?? 0;
+    playStartRef.current = startIdx;
+    const sequence = buildSequence(startIdx);
     if (!sequence.length) return;
 
     isPlayingRef.current = true;
@@ -280,12 +307,15 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     const settingsStore = useSettingsStore.getState();
     const bpm = settingsStore.bpm;
     const beatSecs = 60 / bpm;
-    const countOffDurationMs = beatSecs * firstChord.beats * 1000;
+    // A split measure is beats:2 (half of a 4/4 bar). Starting playback there shouldn't give a
+    // half-length count-off — count off a full bar (4 beats). Other meters count off their own length.
+    const countOffBeats = firstChord.beats === 2 ? 4 : firstChord.beats;
+    const countOffDurationMs = beatSecs * countOffBeats * 1000;
 
     onPlay([], {
       isMeasure:   true,
       resetClock:  true,
-      beats:       firstChord.beats,
+      beats:       countOffBeats,
       countOff:    true,
     });
 
@@ -312,10 +342,23 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
     }, Math.max(0, countOffDurationMs - 100)));
   };
 
+  // Live chord edit: while playing, when the progression (or its resolved voicings) changes,
+  // rebuild the sequence and patch the running scheduler's note data so the edited chord is
+  // heard the next time that measure plays. Structure can't change mid-playback (those controls
+  // are hidden while playing), so updateProgressionNotes only swaps notes, leaving timing intact.
+  useEffect(() => {
+    if (!isPlayingRef.current) return;
+    const fresh = buildSequence(playStartRef.current);
+    if (fresh.length) updateProgressionNotes(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveProgression, diagramVoicings, forceArp]);
+
   return {
     playingIdx,
     isPlayingSystem,
     isLooping,
+    queuedIdx,
+    queueMeasure,
     toggleLooping,
     handlePlayProgression,
     stopPlayback,

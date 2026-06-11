@@ -24,6 +24,13 @@ export interface SoundfontPlayerRef {
   playProgression: (sequence: ProgressionMeasure[], onChordChange: (seqIdx: number, chordIdx: number) => void, onEnd: () => void, loop?: boolean) => void;
   stopProgression: () => void;
   setProgressionLooping: (loop: boolean) => void;
+  // Tap-ahead: queue a skip to the measure whose original progression index is chordIdx,
+  // applied at the next measure boundary. Pass null to cancel a pending queue.
+  queueProgressionJump: (chordIdx: number | null) => void;
+  // Live chord edit: patch the running sequence's NOTE data (midiNotes/bass/intervals) in
+  // place while keeping each measure's timing (beats/bpm), so an edit mid-playback is heard
+  // the next time that measure plays without disturbing the absolute-time clock.
+  updateProgressionNotes: (sequence: ProgressionMeasure[]) => void;
 }
 
 const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
@@ -40,6 +47,12 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
   const progLoopOffsetRef = useRef(0);
   const progMeasureOffsetsRef = useRef<number[]>([]);
   const bossaMeasureCounterRef = useRef(0);
+  // Tap-ahead queue: chordIdx to jump to at the next boundary (null = none), plus an
+  // accumulated timeline shift so a jumped-to measure starts exactly where the linear-next
+  // one would have. measureStartMs adds progTimeShiftRef so the absolute-time clock stays
+  // continuous across jumps. Both reset at the start of every playProgression.
+  const progQueuedChordIdxRef = useRef<number | null>(null);
+  const progTimeShiftRef = useRef(0);
   // Highlight callback for the running progression. Fired from the WebView's
   // audio-clock-anchored MEASURE_DOWNBEAT message so the highlight lands on the beat.
   const progOnChordChangeRef = useRef<((seqIdx: number, chordIdx: number) => void) | null>(null);
@@ -77,12 +90,12 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     }
   };
 
-  const sendSchedule = (events: any[], durationMs?: number, downbeat?: { seqIdx: number; chordIdx: number }) => {
+  const sendSchedule = (events: any[], durationMs?: number, downbeat?: { seqIdx: number; chordIdx: number }, xfadeDelayMs?: number) => {
     if (!isEngineReady || !webViewRef.current) {
         console.warn("Dropped audio: Engine not ready yet");
         return;
     }
-    
+
     // Log telemetry before bridging
     if (events.length > 0) {
       console.log(`Sending ${events.length} notes. First note volume: ${events[0].volume}`);
@@ -92,7 +105,11 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       type: 'PLAY_SCHEDULE',
       events: events,
       durationMs: durationMs,
-      downbeat: downbeat
+      downbeat: downbeat,
+      // Delay the previous-chord crossfade until THIS measure's first chord strike (rhythms like
+      // two-step/reggae hit on the backbeat, not the downbeat). Without it the old chord is cut at
+      // the bar line while the new chord hasn't sounded yet → an audible gap before the new hit.
+      xfadeDelayMs: xfadeDelayMs,
     }));
   };
 
@@ -300,15 +317,44 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       progTotalDurationRef.current = cumulativeMs;
       progBaseTimeRef.current = Date.now() + 100;
       progLoopOffsetRef.current = 0;
+      progQueuedChordIdxRef.current = null;
+      progTimeShiftRef.current = 0;
 
       const runNextMeasure = () => {
+        // Tap-ahead diversion: if a measure is queued, redirect the measure we're ABOUT to
+        // schedule to the queued one, so it plays right after the current (already-scheduled)
+        // measure finishes — no mid-measure interruption. progTimeShiftRef is bumped so the
+        // queued measure starts exactly where the linear-next one would have, keeping the
+        // absolute-time clock continuous. Done before the end/loop check so a jump queued on
+        // the final measure diverts instead of ending.
+        if (progQueuedChordIdxRef.current !== null) {
+          const seq = progSeqRef.current;
+          const offsets = progMeasureOffsetsRef.current;
+          const targetChordIdx = progQueuedChordIdxRef.current;
+          const from = progSeqIdxRef.current; // index the linear path is about to play
+          // Next occurrence of the queued cell at/after the linear position, wrapping to the
+          // start if needed (repeats can place one chord at several sequence positions).
+          let target = -1;
+          for (let i = from; i < seq.length; i++) { if (seq[i].chordIdx === targetChordIdx) { target = i; break; } }
+          if (target === -1) { for (let i = 0; i < from && i < seq.length; i++) { if (seq[i].chordIdx === targetChordIdx) { target = i; break; } } }
+          if (target !== -1 && target !== from) {
+            const linearStart = from < offsets.length ? offsets[from] : progTotalDurationRef.current;
+            progTimeShiftRef.current += linearStart - offsets[target];
+            progSeqIdxRef.current = target;
+          }
+          progQueuedChordIdxRef.current = null;
+        }
+
         if (progSeqIdxRef.current >= progSeqRef.current.length) {
             if (progIsLoopingRef.current) { 
                 progLoopOffsetRef.current += progTotalDurationRef.current;
                 progSeqIdxRef.current = 0; 
             } else { 
-                // Schedule onEnd so the final chord ring-out isn't cut short.
-                const onEndTargetMs = progBaseTimeRef.current + progLoopOffsetRef.current + progTotalDurationRef.current + 250;
+                // Schedule onEnd so the final chord ring-out isn't cut short. Must include
+                // progTimeShiftRef — after a tap-ahead jump the real timeline is shifted, so
+                // omitting it fired onEnd at the wrong time (late on a forward jump, leaving the
+                // UI stuck in playback mode after the audio had already stopped).
+                const onEndTargetMs = progBaseTimeRef.current + progLoopOffsetRef.current + progTimeShiftRef.current + progTotalDurationRef.current + 250;
                 const onEndDelay = Math.max(0, onEndTargetMs - Date.now());
                 progSchedulerRef.current = setTimeout(onEnd, onEndDelay); 
                 return; 
@@ -320,14 +366,18 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         const currentChordIdx = measure.chordIdx;
 
         // Wall-clock start of this measure's audio, derived from the absolute JS timeline.
-        const measureStartMs = progBaseTimeRef.current + progLoopOffsetRef.current + progMeasureOffsetsRef.current[currentIdx];
+        // progTimeShiftRef folds in any tap-ahead jumps so the clock stays continuous.
+        const measureStartMs = progBaseTimeRef.current + progLoopOffsetRef.current + progTimeShiftRef.current + progMeasureOffsetsRef.current[currentIdx];
 
         // Schedule the visual highlight from the JS side using measureStartMs directly.
         // This avoids the WebView bridge round-trip (30–80 ms) that previously made the
         // border update arrive late. We know the wall-clock target here in JS already —
         // no need to wait for MEASURE_DOWNBEAT to bounce back through the bridge.
         // RENDER_LEAD_MS compensates for setState → reconcile → native commit → GPU paint.
-        const RENDER_LEAD_MS = 150;
+        // The highlight fires this many ms BEFORE the measure's audio downbeat so the paint
+        // lands on the beat. Bumped 150 → 230: at 150 the highlight still arrived a touch
+        // late on device (paint pipeline > 150 ms), so we lead a little harder to sit on time.
+        const RENDER_LEAD_MS = 230;
         const highlightDelay = Math.max(0, measureStartMs - Date.now() - RENDER_LEAD_MS);
         const highlightTid = setTimeout(() => {
           timersRef.current = timersRef.current.filter(t => t !== highlightTid);
@@ -346,7 +396,17 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         for (let i = 0; i < currentIdx; i++) {
             cumulativeBeats += progSeqRef.current[i].beats;
         }
-        const isSecondHalf = isSplit && (cumulativeBeats % 4 === 2);
+        // Which half of a split pair is this? Pair splits by their ORDER in the run of consecutive
+        // beats:2 measures (1st = left/first-half, 2nd = right/second-half, repeating), rather than
+        // by cumulativeBeats % 4. The latter mislabels the halves when the split isn't bar-aligned
+        // — which swapped the per-half rhythm patterns (e.g. reggae's 2nd chord got the 1st-half
+        // two-hit skank instead of its single quarter-note hit). Spacers are absent from the
+        // sequence, so consecutive splits here are genuinely adjacent.
+        let splitRunPos = 0;
+        if (isSplit) {
+            for (let i = currentIdx; i >= 0 && progSeqRef.current[i].beats === 2; i--) splitRunPos++;
+        }
+        const isSecondHalf = isSplit && (splitRunPos % 2 === 0);
 
         const events: any[] = [];
         let hasCustomScheduling = false;
@@ -364,7 +424,9 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         // a 2-beat split. Notes roll low→high, echoing the play screen's hold-arp feel.
         const isArpMeasure = measure.arp && measure.midiNotes.some(n => n != null && !isNaN(n));
         if (isArpMeasure) {
-            const arpNotes = measure.midiNotes.filter(n => n != null && !isNaN(n)).slice().sort((a, b) => a - b);
+            // Dedupe exact pitches (a CAGED box doubles some notes across adjacent strings);
+            // a repeated unison would stutter the otherwise-even arp. Octaves are kept.
+            const arpNotes = Array.from(new Set(measure.midiNotes.filter(n => n != null && !isNaN(n)))).sort((a, b) => a - b);
             const slots = measure.beats * 2;              // eighth notes per measure
             const arpReleaseMs = 140;                     // gentle crossfade tail
             const useSwing = measure.arpSwing || measure.rhythm === 'swing' || measure.rhythm === 'reggae';
@@ -470,15 +532,35 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
             // Clamp: remove any strikes that fall at or beyond the measure window
             chordStrikesSecs = chordStrikesSecs.filter(t => t < beatSecs * measure.beats);
 
-            chordStrikesSecs.forEach((strikeTime) => {
-                // Each strike sustains to the end of the measure so chords ring out
-                // naturally and crossfade into the next chord via the measure-boundary
-                // RELEASE_ALL fade rather than being cut short mid-ring.
-                const remainingMs = (beatSecs * measure.beats - strikeTime) * 1000;
-                const strikeDurMs = remainingMs + 400;
+            // Straight feel: re-struck chords must NOT pile up. Previously every strike sustained
+            // to the end of the bar, so each beat stacked another ringing copy of the chord —
+            // beat 4 had 4 overlapping copies and read as a loud accent (same for the 2nd hit of
+            // each split half). In straight mode each strike now rings only until the NEXT strike,
+            // fading out right as it lands, so every beat hits at the same level. The FINAL strike
+            // rings to the end of the bar for a natural tail into the boundary crossfade. Other
+            // rhythms keep their sustained ring-out (unchanged).
+            const evenComp = (measure.rhythm === 'straight' || !measure.rhythm);
+            const barEndSecs = beatSecs * measure.beats;
+            chordStrikesSecs.forEach((strikeTime, si) => {
+                const isLast = si === chordStrikesSecs.length - 1;
+                let strikeDurMs: number, strikeReleaseMs: number;
+                if (evenComp && !isLast) {
+                    // Legato, but without the pile-up. The note sustains at FULL through its whole
+                    // beat (so beats connect smoothly — not staccato), then releases over a tail
+                    // that overlaps the next strike for a connected feel. The tail is capped at one
+                    // beat so only CONSECUTIVE strikes overlap (~2 copies) instead of every strike
+                    // ringing to the bar end and stacking 4-deep (which was the last-beat accent).
+                    const gapMs = (chordStrikesSecs[si + 1] - strikeTime) * 1000;
+                    const legatoTailMs = Math.min(400, gapMs);
+                    strikeDurMs = gapMs + legatoTailMs;
+                    strikeReleaseMs = legatoTailMs;
+                } else {
+                    strikeDurMs = (barEndSecs - strikeTime) * 1000 + 400;
+                    strikeReleaseMs = 400;
+                }
                 measure.midiNotes.forEach((midi, i) => {
                     const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                    events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, strikeTime + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: 400 });
+                    events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, strikeTime + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: strikeReleaseMs });
                 });
             });
         }
@@ -498,7 +580,13 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
         }
 
         const currentMeasureMs = (beatSecs * 1000) * measure.beats;
-        sendSchedule(events, currentMeasureMs);
+        // When this measure's first chord strike is offset from the downbeat (backbeat rhythms like
+        // two-step / reggae), tell the engine to hold the PREVIOUS chord until that strike so it
+        // doesn't cut out a beat early and leave a gap. Measured from the chord events only (not
+        // bass/metronome). 0 for straight (strikes on the downbeat) → crossfade at the bar line.
+        const chordEvts = events.filter(e => e.instrument === instrument);
+        const firstChordStrikeMs = chordEvts.length ? Math.max(0, Math.min(...chordEvts.map(e => e.timeOffset))) * 1000 : 0;
+        sendSchedule(events, currentMeasureMs, undefined, firstChordStrikeMs);
         
         // Schedule the next check at absolute time: 250ms before next measure starts.
         // 100ms was too tight — the JS→WebView bridge can add 30–80ms of latency, and the
@@ -517,7 +605,20 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
     },
 
     stopProgression: stopAll,
-    setProgressionLooping: (loop) => { progIsLoopingRef.current = loop; }
+    setProgressionLooping: (loop) => { progIsLoopingRef.current = loop; },
+    queueProgressionJump: (chordIdx) => { progQueuedChordIdxRef.current = chordIdx; },
+    updateProgressionNotes: (sequence) => {
+      // Only valid when the structure is unchanged (same length + same per-position chordIdx),
+      // which holds for a chord edit during playback. Patch note fields only; keep beats/bpm so
+      // the precomputed offsets/clock stay valid. Atomic ref swap → safe between scheduler ticks.
+      const cur = progSeqRef.current;
+      if (!sequence || sequence.length !== cur.length) return;
+      progSeqRef.current = cur.map((old, i) => {
+        const fresh = sequence[i];
+        if (!fresh || fresh.chordIdx !== old.chordIdx) return old;
+        return { ...old, midiNotes: fresh.midiNotes, rootSemi: fresh.rootSemi, intervals: fresh.intervals, bassLine: fresh.bassLine, nextRoot: fresh.nextRoot };
+      });
+    }
   }));
 
 return (

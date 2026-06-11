@@ -248,20 +248,20 @@ export default function CommandSheet({
             {isQuiz ? (
               <View style={{ flexDirection: 'row', backgroundColor: t.bg3, borderRadius: 20, padding: 4, borderWidth: 1, borderColor: t.border }}>
                 <TouchableOpacity onPress={() => setTimeout(() => setQuizSubTab('chords'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'chords' ? t.accent : 'transparent' }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: quizSubTab === 'chords' ? '#fff' : t.txt2 }}>CHORDS</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: quizSubTab === 'chords' ? '#fff' : t.txt2 }}>CHORDS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setTimeout(() => setQuizSubTab('voicings'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'voicings' ? t.accent : 'transparent' }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: quizSubTab === 'voicings' ? '#fff' : t.txt2 }}>VOICINGS</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: quizSubTab === 'voicings' ? '#fff' : t.txt2 }}>VOICINGS</Text>
                 </TouchableOpacity>
               </View>
             ) : (
               !forceMode && (
                 <View style={{ flexDirection: 'row', backgroundColor: t.bg3, borderRadius: 20, padding: 4, borderWidth: 1, borderColor: t.border }}>
                   <TouchableOpacity onPress={() => setTimeout(() => setInputMode('random'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: inputMode === 'random' ? t.accent : 'transparent' }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: inputMode === 'random' ? '#fff' : t.txt2 }}>RANDOM</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: inputMode === 'random' ? '#fff' : t.txt2 }}>RANDOM</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => setTimeout(() => setInputMode('manual'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: inputMode === 'manual' ? t.accent : 'transparent' }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: inputMode === 'manual' ? '#fff' : t.txt2 }}>MANUAL</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: inputMode === 'manual' ? '#fff' : t.txt2 }}>MANUAL</Text>
                   </TouchableOpacity>
                 </View>
               )
@@ -296,9 +296,9 @@ export default function CommandSheet({
                       }}
                     >
                       <Ionicons name={ALL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
-                      <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
                     </TouchableOpacity>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeTypes.length} Selected</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: t.txt3 }}>{activeTypes.length} Selected</Text>
                   </View>
                   <View>
                     {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
@@ -309,7 +309,7 @@ export default function CommandSheet({
                             style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
                             onPress={() => handleToggleCategory(cat.keys)} activeOpacity={0.6}>
                             <Ionicons name={allCatSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={allCatSelected ? t.accent : t.txt3} />
-                            <Text style={{ fontSize: 14, fontWeight: '800', color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
                           </TouchableOpacity>
                           
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -320,7 +320,7 @@ export default function CommandSheet({
                                 <TouchableOpacity key={key} activeOpacity={0.7}
                                   style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
                                   onPress={() => toggleType(key)}>
-                                  <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                                  <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                                 </TouchableOpacity>
                               );
                             })}
@@ -352,9 +352,9 @@ export default function CommandSheet({
                       }}
                     >
                       <Ionicons name={availableVoicingOptions.map(o => o.key).every(v => activeVoicingTypes.includes(v)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
-                      <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>ACTIVE VOICING POOL</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: 1, color: t.accent }}>ACTIVE VOICING POOL</Text>
                     </TouchableOpacity>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{availableVoicingOptions.filter(v => activeVoicingTypes.includes(v.key)).length} Selected</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: t.txt3 }}>{availableVoicingOptions.filter(v => activeVoicingTypes.includes(v.key)).length} Selected</Text>
                   </View>
                   
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -372,7 +372,7 @@ export default function CommandSheet({
                           }}
                           onPress={() => toggleVoicingType(item.key)}
                         >
-                          <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>
+                          <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>
                             {item.label}
                           </Text>
                         </TouchableOpacity>
@@ -409,9 +409,9 @@ export default function CommandSheet({
                           }}
                         >
                           <Ionicons name={isAllSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
-                          <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>INVERSIONS</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: 1, color: t.accent }}>INVERSIONS</Text>
                         </TouchableOpacity>
-                        <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeInversions.filter(i => availableInversions.includes(i)).length} Selected</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: t.txt3 }}>{activeInversions.filter(i => availableInversions.includes(i)).length} Selected</Text>
                       </View>
 
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -429,7 +429,7 @@ export default function CommandSheet({
                               }}
                               onPress={() => toggleInversion(inv)}
                             >
-                              <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>
+                              <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>
                                 {inv.charAt(0).toUpperCase() + inv.slice(1)}
                               </Text>
                             </TouchableOpacity>
@@ -446,7 +446,7 @@ export default function CommandSheet({
               
               {/* LEFT COLUMN: Sticky Roots */}
               <View style={{ width: 75, backgroundColor: t.bg3, borderRightWidth: 1, borderColor: t.border, paddingTop: 16 }}>
-                <Text style={{ color: t.accent, fontSize: 10, fontWeight: '800', textAlign: 'center', marginBottom: 16, letterSpacing: 1 }}>ROOT</Text>
+                <Text style={{ color: t.accent, fontSize: 10, fontWeight: '700', textAlign: 'center', marginBottom: 16, letterSpacing: 1 }}>ROOT</Text>
                 <View style={{ flex: 1, position: 'relative' }}>
                   {rootScrolled && <LinearGradient colors={[t.bg3, 'transparent']} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 16, zIndex: 10 }} pointerEvents="none" />}
                   <ScrollView
@@ -470,7 +470,7 @@ export default function CommandSheet({
                             onLivePreview?.(r, chordType);
                           }, 0);
                         }}>
-                          <Text style={{ fontWeight: isActive ? '800' : '600', fontSize: 16, color: isActive ? '#fff' : t.txt2 }}>{notes[r]}</Text>
+                          <Text style={{ fontWeight: isActive ? '700' : '600', fontSize: 16, color: isActive ? '#fff' : t.txt2 }}>{notes[r]}</Text>
                         </TouchableOpacity>
                       )
                     })}
@@ -481,7 +481,7 @@ export default function CommandSheet({
 
               {/* RIGHT COLUMN: Scrollable Qualities */}
               <View style={{ flex: 1, paddingTop: 16, paddingHorizontal: 16 }}>
-                <Text style={{ color: t.accent, fontSize: 10, fontWeight: '800', marginBottom: 16, letterSpacing: 1 }}>QUALITY</Text>
+                <Text style={{ color: t.accent, fontSize: 10, fontWeight: '700', marginBottom: 16, letterSpacing: 1 }}>QUALITY</Text>
                 <View style={{ flex: 1, position: 'relative' }}>
                   {qualityScrolled && <LinearGradient colors={[t.bg, 'transparent']} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 16, zIndex: 10 }} pointerEvents="none" />}
                   <ScrollView 
@@ -496,7 +496,7 @@ export default function CommandSheet({
                   >
                     {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => (
                       <View key={cat.label} style={{ marginBottom: 20 }} onLayout={(e) => qualCatY.current[cat.label] = e.nativeEvent.layout.y}>
-                        <Text style={{ fontSize: 14, fontWeight: '800', color: t.txt1, marginBottom: 12 }}>{cat.label}</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: t.txt1, marginBottom: 12 }}>{cat.label}</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} onLayout={(e) => qualRowY.current[cat.label] = e.nativeEvent.layout.y}>
                           {cat.keys.map((key: string) => {
                             if (!CH[key]) return null;
@@ -546,9 +546,9 @@ export default function CommandSheet({
                     }}
                   >
                     <Ionicons name={ALL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
-                    <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
                   </TouchableOpacity>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: t.txt3 }}>{activeTypes.length} Selected</Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: t.txt3 }}>{activeTypes.length} Selected</Text>
                 </View>
                 <View>
                   {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
@@ -559,7 +559,7 @@ export default function CommandSheet({
                           style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
                           onPress={() => handleToggleCategory(cat.keys)} activeOpacity={0.6}>
                           <Ionicons name={allCatSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={allCatSelected ? t.accent : t.txt3} />
-                          <Text style={{ fontSize: 14, fontWeight: '800', color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
                         </TouchableOpacity>
                         
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -570,7 +570,7 @@ export default function CommandSheet({
                               <TouchableOpacity key={key} activeOpacity={0.7}
                                 style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
                                 onPress={() => toggleType(key)}>
-                                <Text style={{ fontWeight: '700', fontSize: 13, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                                <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}
@@ -596,7 +596,7 @@ export default function CommandSheet({
               style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 12, backgroundColor: t.accent }}
             >
               <Ionicons name={executeIcon} size={18} color="#fff" />
-              <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff', letterSpacing: 1 }}>{executeLabel}</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff', letterSpacing: 1 }}>{executeLabel}</Text>
             </TouchableOpacity>
           </View>
         )}
