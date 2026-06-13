@@ -409,14 +409,15 @@ export default function ChordDictionary({ t }: Props) {
       )}
 
       {/* ── Collapsible sections: tap an item to reveal its diagrams. Built as a FLAT child list (each
-            open item → [header, content]) so the item headers can stick: stickyHeaderIndices docks the
-            current item's header at the top while its diagrams scroll. The category/family bars above
-            are already fixed. ── */}
+            open item → [header, content]) so ONLY an OPEN item's header sticks — it docks at the top
+            like a dropdown title while its diagrams scroll. Collapsed headers are NOT sticky, so a
+            list of closed items scrolls normally (no pinned/clipped headers). The category/family bars
+            above are already fixed. ── */}
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 32 }}
-        stickyHeaderIndices={(() => { const idx: number[] = []; let pos = 0; visibleItems.forEach(it => { idx.push(pos); pos += expanded.has(it.key) ? 2 : 1; }); return idx; })()}
+        stickyHeaderIndices={(() => { const idx: number[] = []; let pos = 0; visibleItems.forEach(it => { const open = expanded.has(it.key); if (open) idx.push(pos); pos += open ? 2 : 1; }); return idx; })()}
       >
         {visibleItems.length === 0 ? (
           <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
