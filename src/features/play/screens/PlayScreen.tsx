@@ -8,9 +8,12 @@ import * as Haptics from 'expo-haptics';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
+import { useDictionaryStore } from '@features/play/store/dictionaryStore';
+import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
-import { ChordCard, CommandSheet, PianoView, type PianoViewRef, FretboardView, type FretboardViewRef } from '@shared/ui';
+import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
+import { ChordCard, CommandSheet, PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CountChip } from '@shared/ui';
 import { buildTriadVoicings, buildShellVoicings, buildDropVoicings, buildScaleVoicings, buildArpVoicings, getArpSubsets, getIntervalSubsets, VoicingGroup, ScaleVoicing, buildOpenVoicings, buildBarreVoicings, buildHardcodedShapeVoicings, ShapeDisplayMode, OPEN_SHAPES, BARRE_SHAPES, findTriads, DROP_VOICINGS, voicingTabSupportsType } from '@shared/guitar';
 import { SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { buildPianoVoicings } from '@shared/piano';
@@ -60,11 +63,9 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab
         {TABS.map(tab => {
           const isActive = voicingTab === tab.key;
           return (
-            <TouchableOpacity key={tab.key} style={[styles.tabBtn, { paddingHorizontal: 16 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); startTransition(() => setVoicingTab(tab.key)); }} activeOpacity={0.7}>
-              <Text style={[styles.modeBtnText, { color: isActive ? '#fff' : t.txt3 }]}>{tab.label}</Text>
-              <View style={{ marginTop: 2, backgroundColor: isActive ? 'rgba(255,255,255,0.25)' : t.bg, borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1, alignSelf: 'center' }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{tabCounts[tab.key]}</Text>
-              </View>
+            <TouchableOpacity key={tab.key} style={[styles.tabBtn, { flexDirection: 'row', gap: 6, paddingHorizontal: 16 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); startTransition(() => setVoicingTab(tab.key)); }} activeOpacity={0.7}>
+              <Text style={[styles.modeBtnText, { color: isActive ? '#fff' : t.txt3, includeFontPadding: false }]}>{tab.label}</Text>
+              <CountChip count={tabCounts[tab.key]} t={t} onAccent={isActive} />
             </TouchableOpacity>
           );
         })}
@@ -117,7 +118,7 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
           }}
           style={[styles.enginePill, { backgroundColor: scaleOverlay ? t.accent : t.bg2, borderColor: scaleOverlay ? t.accent : t.border }]}
         >
-          <Ionicons name="layers" size={16} color={scaleOverlay ? '#fff' : t.txt2} />
+          <Ionicons name={scaleOverlay ? 'eye' : 'eye-outline'} size={16} color={scaleOverlay ? '#fff' : t.txt2} />
           <Text style={[styles.enginePillTxt, { color: scaleOverlay ? '#fff' : t.txt2 }]}>
             {scaleOverlay && activeScaleName ? `Scale: ${activeScaleName}` : 'Scale'}
           </Text>
@@ -128,11 +129,68 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
 }
 
 
-export default function PlayScreen() {
+// ─── EXPLORE MODE TOGGLE (Chord | Dictionary) ───────────────────────────────
+// The single entry point to version 2. Version 1 ("Chord") is always the default.
+function ExploreModeToggle({ mode, setMode, t }: { mode: 'chord' | 'dictionary'; setMode: (m: 'chord' | 'dictionary') => void; t: Theme; }) {
+  const SEGMENTS: { key: 'chord' | 'dictionary'; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { key: 'chord', label: 'Chord', icon: 'albums-outline' },
+    { key: 'dictionary', label: 'Dictionary', icon: 'book-outline' },
+  ];
+  return (
+    <View style={{ paddingTop: 8, paddingHorizontal: 12, paddingBottom: 8, backgroundColor: t.bg2, borderBottomWidth: 1, borderBottomColor: t.border, flexDirection: 'row', gap: 8 }}>
+      {SEGMENTS.map(seg => {
+        const isActive = mode === seg.key;
+        return (
+          <TouchableOpacity
+            key={seg.key}
+            activeOpacity={0.7}
+            onPress={() => { if (mode !== seg.key) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMode(seg.key); } }}
+            style={[styles.modeTab, isActive && { backgroundColor: t.accent }]}
+          >
+            <Ionicons name={seg.icon} size={16} color={isActive ? '#fff' : t.txt3} />
+            <Text style={{ fontSize: 14, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{seg.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── VOICING EXPLORER ───────────────────────────────────────────────────────
+// The shared viewer (ChordCard + fretboard/piano + engine controls + playback)
+// used by BOTH chord mode (v1, driven by chordStore) and the dictionary's own
+// independent viewer (driven by dictionaryStore). Per-mode inputs come in as
+// props; global display prefs (octave, sort, overlay, scale, audio) stay read
+// from the shared stores so both modes honour the same preferences.
+interface VoicingExplorerProps {
+  rootSemi: number;
+  chordType: string;
+  namingMode: 'sharp' | 'flat';
+  instrument: 'piano' | 'guitar';
+  setInstrument: (i: 'piano' | 'guitar') => void;
+  voicingTab: VoicingTabKey;
+  setVoicingTab: (k: VoicingTabKey) => void;
+  shiftRoot: (direction: 'up' | 'down') => void;
+  cycleType: (direction: 'next' | 'prev') => void;
+  // chord mode shows randomize/edit + the chord library sheet; the dictionary
+  // viewer hides them (you got here by browsing) and shows an instrument toggle.
+  showChordChrome: boolean;
+  showInstrumentToggle: boolean;
+  sheetVisible: boolean;
+  setSheetVisible: (v: boolean) => void;
+  playRef?: React.MutableRefObject<() => void>;
+}
+
+function VoicingExplorer({
+  rootSemi, chordType, namingMode, instrument, setInstrument,
+  voicingTab, setVoicingTab, shiftRoot, cycleType,
+  showChordChrome, showInstrumentToggle,
+  sheetVisible, setSheetVisible, playRef,
+}: VoicingExplorerProps) {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
-  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, instrument, setInstrument, sortMode, scaleOverlay } = useSettingsStore();
-  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
+  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, sortMode, scaleOverlay } = useSettingsStore();
+  const { inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -146,8 +204,6 @@ export default function PlayScreen() {
     setIntervalSubsetIdx(0);
   }, [instrument, octave]);
   
-  const [sheetVisible, setSheetVisible] = React.useState(false);
-  const [voicingTab, setVoicingTab] = React.useState<VoicingTabKey>('block');
   const [arpSubsetIdx, setArpSubsetIdx] = React.useState(0);
   const [intervalSubsetIdx, setIntervalSubsetIdx] = React.useState(0);
   const [variationLabel, setVariationLabel] = React.useState<string | undefined>();
@@ -173,6 +229,10 @@ export default function PlayScreen() {
   const stopSeqFlash = () => { isLoopingRef.current = false; seqFlashTimers.current.forEach(t => clearTimeout(t)); seqFlashTimers.current = []; setIsPlaying(false); };
   const handleStop = () => { stopSeqFlash(); onStop?.(); };
 
+  // Toggling Explore mode or leaving the dictionary viewer swaps this component
+  // out without a navigation blur, so stop any sound on unmount explicitly.
+  React.useEffect(() => () => { isLoopingRef.current = false; seqFlashTimers.current.forEach(clearTimeout); seqFlashTimers.current = []; onStop?.(); }, []);
+
   const fireSeqFlash = (midiNotes: number[], loop = false) => {
     stopSeqFlash(); isLoopingRef.current = loop;
     const AUDIO_LATENCY = 60; // Sync visual to audio bridge latency
@@ -194,6 +254,7 @@ export default function PlayScreen() {
   };
 
   const playCurrentChordRef = useRef<() => void>(() => {});
+  if (playRef) playRef.current = () => playCurrentChordRef.current();
   playCurrentChordRef.current = () => {
     const isScaleOrArp = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes';
     if (instrument === 'guitar') {
@@ -932,17 +993,15 @@ export default function PlayScreen() {
   const ALL_VOICING_TABS: { key: VoicingTabKey; label: string }[] = [ { key: 'block', label: 'Block' }, { key: 'open', label: 'Open' }, { key: 'barre', label: 'Barre' }, { key: 'triads', label: 'Triads' }, { key: 'shells', label: 'Shells' }, { key: 'drop2',  label: 'Drop 2' }, { key: 'drop3',  label: 'Drop 3' }, { key: 'drop2and4', label: 'Drop 2 & 4' }, { key: 'intervals', label: 'Intervals' }, { key: 'arps',   label: 'Arps' }, { key: 'shapes', label: 'Shapes' }, { key: 'scales', label: 'Scales' } ];
   const VOICING_TABS = ALL_VOICING_TABS.filter(tab => tabCounts[tab.key] > 0);
 
-  // If the current voicing tab isn't valid for the current chord/instrument (count 0
-  // — e.g. 'block' right after switching to guitar, or 'open' after switching to
-  // piano), correct it DURING render rather than in an effect. A useEffect runs AFTER
-  // paint, so the diagram would flash its "No Voicings Found" empty state for one frame
-  // before the fix — that's the glitch when switching instruments. Setting state during
-  // render makes React re-render synchronously with the valid tab BEFORE committing, so
-  // the bad frame never paints. The `!==` guard makes it converge in one pass
-  // (VOICING_TABS[0] always has count > 0, and tabCounts doesn't depend on voicingTab).
-  if (tabCounts[voicingTab] === 0 && VOICING_TABS.length > 0 && voicingTab !== VOICING_TABS[0].key) {
-    setVoicingTab(VOICING_TABS[0].key);
-  }
+  // If the current voicing tab has no voicings for the current chord/instrument, snap
+  // to the first valid tab. useLayoutEffect runs synchronously before paint (same as the
+  // old render-phase setState) so the "No Voicings Found" frame never shows, but it
+  // doesn't trigger the "Cannot update a component while rendering" warning.
+  React.useLayoutEffect(() => {
+    if (tabCounts[voicingTab] === 0 && VOICING_TABS.length > 0 && voicingTab !== VOICING_TABS[0].key) {
+      setVoicingTab(VOICING_TABS[0].key);
+    }
+  });
 
   React.useLayoutEffect(() => {
     if (instrument !== 'piano') return;
@@ -1226,6 +1285,13 @@ export default function PlayScreen() {
         <View style={{ marginBottom: 12 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
             
+            {showInstrumentToggle && (
+              <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setInstrument(instrument === 'piano' ? 'guitar' : 'piano'); }} style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border }]}>
+                <Ionicons name={instrument === 'piano' ? 'musical-notes' : 'musical-note'} size={16} color={t.txt2} />
+                <Text style={[styles.enginePillTxt, { color: t.txt2 }]}>{instrument === 'piano' ? 'Piano' : 'Guitar'}</Text>
+              </TouchableOpacity>
+            )}
+
             <VisualDisplaySettings voicingTab={voicingTab} shapeDisplayMode={shapeDisplayMode} setShapeDisplayMode={setShapeDisplayMode} activeScaleName={SCALES[activeScaleIdForGuitar]?.name} t={t} />
 
             <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPlayMode(playMode === 'once' ? 'hold' : 'once'); }} style={[styles.enginePill, { backgroundColor: playMode === 'hold' ? t.accent : t.bg2, borderColor: playMode === 'hold' ? t.accent : t.border }]}>
@@ -1236,10 +1302,11 @@ export default function PlayScreen() {
         </View>
 
         <View style={styles.actionRow}>
-          {inputMode === 'random' ? (
+          {!showChordChrome && <View style={{ flex: 1 }} />}
+          {showChordChrome && (inputMode === 'random' ? (
             <>
               <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => setSheetVisible(true)}>
-                <Ionicons name="library-outline" size={24} color={t.txt2} />
+                <Ionicons name="layers" size={24} color={t.txt2} />
                 <View style={[styles.badge, { backgroundColor: t.accent }]}><Text style={styles.badgeText}>{useChordStore.getState().activeTypes.length}</Text></View>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.wideLoopBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => {
@@ -1271,7 +1338,7 @@ export default function PlayScreen() {
               <Ionicons name="create" size={20} color={t.txt2} />
               <Text style={[styles.wideLoopText, { color: t.txt2 }]}>Edit Chord</Text>
             </TouchableOpacity>
-          )}
+          ))}
           <Animated.View style={[{ transform: [{ scale: playAnim }] }]}>
             <TouchableOpacity style={[styles.squarePlayBtn, { backgroundColor: isPlaying ? '#D4537E' : '#639922' }]} onPress={isPlaying ? handleStop : handlePlay} activeOpacity={0.85}>
               <Ionicons name={isPlaying ? "stop" : "play"} size={26} color="#fff" />
@@ -1280,40 +1347,76 @@ export default function PlayScreen() {
         </View>
       </View>
 
-      <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { 
-          // Give the state a tiny moment to update, then fire the main play function
-          // so it respects the current voicing tab, shapes, inversions, and octave
-          setTimeout(() => { playCurrentChordRef.current(); }, 50); 
-        }} 
-        onExecute={() => {}} />
+    </View>
+  );
+}
 
+// ─── PLAY SCREEN SHELL ──────────────────────────────────────────────────────
+// The Explore screen container. Renders the Chord/Dictionary toggle and routes
+// to either chord mode (v1 — VoicingExplorer driven by chordStore) or the
+// dictionary (the self-contained mini-diagram grid).
+export default function PlayScreen() {
+  const { theme, instrument, setInstrument } = useSettingsStore();
+  const { rootSemi, chordType, namingMode, shiftRoot, cycleType } = useChordStore();
+  const dict = useDictionaryStore();
+  const t = THEMES[theme];
+
+  // Chord mode's voicing tab lives here (not in chordStore) so it survives
+  // Chord⇄Dictionary toggles.
+  const [chordVoicingTab, setChordVoicingTab] = React.useState<VoicingTabKey>('block');
+  const [sheetVisible, setSheetVisible] = React.useState(false);
+  const livePlayRef = React.useRef<() => void>(() => {});
+
+  if (dict.mode === 'dictionary') {
+    return (
+      <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
+        <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} t={t} />
+        <ChordDictionary t={t} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
+      <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} t={t} />
+      <VoicingExplorer
+        rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
+        instrument={instrument} setInstrument={setInstrument}
+        voicingTab={chordVoicingTab} setVoicingTab={setChordVoicingTab}
+        shiftRoot={shiftRoot} cycleType={cycleType}
+        showChordChrome={true} showInstrumentToggle={false}
+        sheetVisible={sheetVisible} setSheetVisible={setSheetVisible}
+        playRef={livePlayRef}
+      />
+      <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  modeTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderRadius: 10 },
   scroll: { paddingVertical: 16, paddingBottom: 32, gap: 12 },
   modeToggleRow: { flexDirection: 'row', marginHorizontal: 16, borderRadius: 20, padding: 12, borderWidth: 1 },
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 10 },
-  modeBtnText: { fontWeight: '700', fontSize: 14 },
+  modeBtnText: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   
   tabBarOuter: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
   tabBtn: { height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 
   visualSettingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
   miniPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
-  miniPillTxt: { fontSize: 12, fontWeight: '700' },
+  miniPillTxt: { ...TYPE.label, fontWeight: FONT_WEIGHT.bold },
 
   stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
-  enginePillTxt: { fontSize: 14, fontWeight: '700' },
+  enginePillTxt: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
   actionBtn: { width: 56, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', top: -6, right: -6, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  badgeText: { color: '#fff', ...TYPE.caption },
   wideLoopBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 20, borderWidth: 1, height: 56 },
-  wideLoopText: { fontWeight: '700', fontSize: 14 },
+  wideLoopText: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   squarePlayBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 });

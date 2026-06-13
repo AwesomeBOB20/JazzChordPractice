@@ -19,7 +19,8 @@ export interface SavedSong {
   progression: (ProgressionChord | null)[];
   bpm: number;
   rhythm: string;
-  category?: string; // library category bucket; defaults to 'Songs' when unset
+  category?: string; // library category bucket; defaults to 'Standards' when unset
+  pro?: boolean;
 }
 
 export interface UnifiedVoicing {

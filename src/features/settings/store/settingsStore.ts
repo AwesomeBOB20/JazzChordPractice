@@ -31,9 +31,9 @@ export interface SettingsState {
   bassEnabled: boolean;
   metronomeEnabled: boolean;
   voiceLeading: boolean;
-  // Directional lean for the Song-screen guitar voice leading: 'down'/'up' make the
-  // voicings drift that way along the neck; 'none' is plain smoothest-motion leading.
-  voiceLeadDir: 'up' | 'down' | 'none';
+  // Directional mode for the Song-screen guitar voice leading.
+  // 'zone' = stay near the fret zone; 'up'/'down' = drift that way; 'bounce' = ping-pong.
+  voiceLeadDir: 'zone' | 'up' | 'down' | 'bounce';
   // App-wide UI font. 'system' keeps the OS default; others are custom-loaded.
   fontFamily: FontKey;
   fretCap: number;
@@ -48,6 +48,7 @@ export interface SettingsState {
   referenceFrequency: number;
   isSettingsOpen: boolean;
   octaveNumbering: boolean;
+  isPro: boolean;
 
   // Mixer
   mixChordVol:  number; // 0-100  chord instrument level         (default 80)
@@ -65,7 +66,7 @@ export interface SettingsState {
   setBassEnabled: (enabled: boolean) => void;
   setMetronomeEnabled: (enabled: boolean) => void;
   setVoiceLeading: (enabled: boolean) => void;
-  setVoiceLeadDir: (dir: 'up' | 'down' | 'none') => void;
+  setVoiceLeadDir: (dir: 'zone' | 'up' | 'down' | 'bounce') => void;
   setFontFamily: (f: FontKey) => void;
   setFretCap: (cap: number) => void;
   setPianoZone: (zone: number) => void;
@@ -83,6 +84,7 @@ export interface SettingsState {
   setMixBassVol:   (v: number) => void;
   setMixClickVol:  (v: number) => void;
   setOctaveNumbering: (enabled: boolean) => void;
+  setIsPro: (isPro: boolean) => void;
   factoryReset: () => void;
 }
 
@@ -114,6 +116,7 @@ export const useSettingsStore = create<SettingsState>()(
       referenceFrequency: 440,
       isSettingsOpen: false,
       octaveNumbering: false,
+      isPro: false,
 
       // Mixer defaults
       mixChordVol:  70,
@@ -164,6 +167,7 @@ export const useSettingsStore = create<SettingsState>()(
       setMixBassVol:   (mixBassVol)   => set({ mixBassVol }),
       setMixClickVol:  (mixClickVol)  => set({ mixClickVol }),
       setOctaveNumbering: (octaveNumbering) => set({ octaveNumbering }),
+      setIsPro: (isPro) => set({ isPro }),
 
       factoryReset: () => set({
         bpm: DEFAULT_BPM,
@@ -185,7 +189,7 @@ export const useSettingsStore = create<SettingsState>()(
         // Previously missed by the reset — added so "Restore Defaults" is complete.
         arpForced: false,
         voiceLeading: true,
-        voiceLeadDir: 'down',
+        voiceLeadDir: 'zone',
         fretCap: 5,
         pianoZone: 4,
         colorMode: 'roles',
@@ -224,6 +228,7 @@ export const useSettingsStore = create<SettingsState>()(
         mixBassVol:   state.mixBassVol,
         mixClickVol:  state.mixClickVol,
         octaveNumbering: state.octaveNumbering,
+        isPro: state.isPro,
       }),
       // Clamp a persisted octave into the current valid range on rehydrate. Without this, anyone
       // who'd saved piano octave 1 (before the floor moved to 2) would reload with low voicings
@@ -236,6 +241,7 @@ export const useSettingsStore = create<SettingsState>()(
         const max = isGuitar ? MAX_GUITAR_OCTAVE : MAX_PIANO_OCTAVE;
         const def = isGuitar ? DEFAULT_GUITAR_OCTAVE : DEFAULT_PIANO_OCTAVE;
         merged.octave = Math.max(min, Math.min(max, merged.octave ?? def));
+        merged.isPro = true; // dev override — remove when shipping real paywall
         return merged;
       },
     }

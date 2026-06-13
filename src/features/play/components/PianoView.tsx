@@ -162,16 +162,24 @@ const PianoMiniMap = React.memo(function PianoMiniMap({
     return { x: (octIdx * MM_WHITE_PER_OCT + WHITE_PCS.indexOf(pc)) * ww, w: ww };
   };
 
+  // In dark themes the inactive keys default to bg3 (dark) and the strip reads as a grey
+  // field. Make them the SAME white (#FFFFFF) as the guitar neck minimap's dots/frets so
+  // the two minimaps match; a faint dark divider keeps individual keys distinguishable on
+  // the now-white strip. Light themes keep the original neutral bg3 fill.
+  const isDark = theme.bg2 !== '#FFFFFF';
+  const inactiveWhite = isDark ? '#FFFFFF' : theme.bg3;
+  const whiteDivider = isDark ? 'rgba(0,0,0,0.22)' : theme.border;
+
   return (
     <View style={{ alignSelf: 'center', width: MM_W, height: MM_H, backgroundColor: theme.bg3, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, marginTop: 28, marginBottom: 28, overflow: 'hidden' }}>
       <Svg width={MM_W} height={MM_H}>
-        {/* White keys — drawn in the fretboard minimap's background color (bg3) with thin
-            border-color dividers, so inactive keys read as a neutral field like the neck. */}
+        {/* White keys — white in dark themes (matching the guitar neck minimap), neutral bg3
+            in light themes; thin dividers keep adjacent keys readable. */}
         {octs.map(oct => WHITE_PCS.map(pc => {
           const midi = oct * 12 + pc;
           const { x } = xForMidi(midi);
           const active = activeSet.has(midi);
-          return <Rect key={`w-${midi}`} x={x} y={0} width={ww} height={MM_H} fill={active ? colorFor(midi) : theme.bg3} stroke={theme.border} strokeWidth={0.5} />;
+          return <Rect key={`w-${midi}`} x={x} y={0} width={ww} height={MM_H} fill={active ? colorFor(midi) : inactiveWhite} stroke={active ? theme.border : whiteDivider} strokeWidth={0.5} />;
         }))}
         {/* Black keys — inactive ones drawn solid black so the strip reads as a piano. */}
         {octs.map(oct => BLACK_PCS.map(pc => {

@@ -105,14 +105,18 @@ const MODE_DERIVATIONS: Record<string, { parent: string, offset: number }> = {
   
   'harm_min':     { parent: 'harm_min', offset: 0 },
   'phryg_dom':    { parent: 'harm_min', offset: 7 },
-  
+  'ionian_aug':   { parent: 'harm_min', offset: 3 },  // 3rd mode of harmonic minor
+
+  'aeolian_dom':  { parent: 'mel_min', offset: 7 },   // 5th mode of melodic minor (Mixolydian ♭6)
+
   'dim_wh':       { parent: 'dim_wh', offset: 0 },
   'dim_hw':       { parent: 'dim_wh', offset: 2 },
-  
+
   'whole_tone':   { parent: 'whole_tone', offset: 0 },
   'bebop_maj':    { parent: 'bebop_maj', offset: 0 },
   'bebop_dom':    { parent: 'bebop_dom', offset: 0 },
-  'blues':        { parent: 'blues', offset: 0 }
+  'blues':        { parent: 'blues', offset: 0 },
+  'blues_maj':    { parent: 'blues', offset: 3 }       // major blues = minor blues up a ♭3
 };
 
 // ─── 4. THE DERIVATION ENGINE ───────────────────────────────────────
@@ -160,12 +164,68 @@ function deriveModeTemplates(modeId: string, parentId: string, offset: number) {
   return modeTemplates;
 }
 
+// ─── 4b. GENERATIVE FALLBACK ────────────────────────────────────────
+// Hand-authored parents + mode derivation only cover the common scales. Any other
+// scale (Hungarian, Neapolitan, Byzantine, the 8-note bebops, the symmetric augmented…)
+// has no parent to derive from, so it would render BLANK. This builds 5 CAGED-position
+// boxes for ANY scale straight from its interval set, anchored to E (pitch class 4) —
+// the same convention the hand templates use — so every scale is fully playable and
+// every note carries its correct formula (→ correct colour). It NEVER overrides a
+// hand/derived template; it only fills the gaps.
+const GEN_BOX_NAMES = ['Box 1 (E Shape)', 'Box 2 (D Shape)', 'Box 3 (C Shape)', 'Box 4 (A Shape)', 'Box 5 (G Shape)'];
+const GEN_BOX_STARTS = [0, 2, 4, 7, 9]; // low fret of each position window (E root); each spans 5 frets
+const GEN_WINDOW = 4;
+
+function generateTemplate(def: { iv: number[]; f: string[] } | undefined): Record<string, [number, number, string][]> {
+  const out: Record<string, [number, number, string][]> = {};
+  if (!def) return out;
+  GEN_BOX_STARTS.forEach((lo, bi) => {
+    const box: [number, number, string][] = [];
+    for (let s = 0; s < 6; s++) {
+      for (let f = lo; f <= lo + GEN_WINDOW; f++) {
+        const interval = (TUNING[s] + f) % 12; // semitones above the E root on this string/fret
+        const idx = def.iv.indexOf(interval);
+        if (idx !== -1) box.push([s, f, def.f[idx]]);
+      }
+    }
+    out[GEN_BOX_NAMES[bi]] = box;
+  });
+  return out;
+}
+
 // ─── 5. BOOTSTRAP ───────────────────────────────────────────────────
-// Run derivation once on startup to populate all 22 scales
+// Run derivation once on startup to populate the hand-anchored scale families…
 Object.keys(MODE_DERIVATIONS).forEach(modeId => {
   const { parent, offset } = MODE_DERIVATIONS[modeId];
   CAGED_SCALE_TEMPLATES[modeId] = deriveModeTemplates(modeId, parent, offset);
 });
+// …then generatively fill every remaining scale so NONE render blank.
+Object.keys(SCALES).forEach(scaleId => {
+  const t = CAGED_SCALE_TEMPLATES[scaleId];
+  const empty = !t || Object.keys(t).length === 0 || Object.values(t).every(box => box.length === 0);
+  if (empty) CAGED_SCALE_TEMPLATES[scaleId] = generateTemplate(SCALES[scaleId]);
+});
+
+// ─── INTERVALS AS 2-NOTE "SCALES" ───────────────────────────────────
+// Each interval is treated as a tiny scale (root + the interval note) so it flows through
+// the exact same CAGED box pipeline as real scales — giving full-neck CAGED diagrams for
+// the Intervals tab on guitar. Keys are `iv-1`..`iv-12`, matching the dictionary item keys.
+const IV_DEF: Record<number, { f: string; r: string; name: string }> = {
+  1: { f: 'b2', r: 'b2nd', name: 'Minor 2nd' }, 2: { f: '2', r: '2nd', name: 'Major 2nd' },
+  3: { f: 'b3', r: 'b3rd', name: 'Minor 3rd' }, 4: { f: '3', r: '3rd', name: 'Major 3rd' },
+  5: { f: '4', r: '4th', name: 'Perfect 4th' }, 6: { f: 'b5', r: 'b5th', name: 'Tritone' },
+  7: { f: '5', r: '5th', name: 'Perfect 5th' }, 8: { f: 'b6', r: 'b6th', name: 'Minor 6th' },
+  9: { f: '6', r: '6th', name: 'Major 6th' }, 10: { f: 'b7', r: 'b7th', name: 'Minor 7th' },
+  11: { f: '7', r: '7th', name: 'Major 7th' }, 12: { f: 'R', r: 'root', name: 'Octave' },
+};
+export const INTERVAL_SCALES: Record<string, { name: string; iv: number[]; r: string[]; f: string[] }> = {};
+for (let n = 1; n <= 12; n++) {
+  const x = IV_DEF[n];
+  INTERVAL_SCALES[`iv-${n}`] = n === 12
+    ? { name: x.name, iv: [0], r: ['root'], f: ['R'] }                 // octave → root positions
+    : { name: x.name, iv: [0, n], r: ['root', x.r], f: ['R', x.f] };
+  CAGED_SCALE_TEMPLATES[`iv-${n}`] = generateTemplate(INTERVAL_SCALES[`iv-${n}`]);
+}
 
 export type ShapeDisplayMode = 'list' | 'voicing';
 

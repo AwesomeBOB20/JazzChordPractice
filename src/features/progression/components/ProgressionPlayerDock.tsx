@@ -67,11 +67,28 @@ export default function ProgressionPlayerDock({
 }: Props) {
   const {
     theme, metronomeEnabled, setMetronomeEnabled, bassEnabled, setBassEnabled,
-    voiceLeading, setVoiceLeading,
+    voiceLeading, setVoiceLeading, voiceLeadDir, setVoiceLeadDir,
     mixChordVol, setMixChordVol,
     mixBassVol,  setMixBassVol,
     mixClickVol, setMixClickVol,
   } = useSettingsStore();
+
+  // Tap cycles: OFF → Zone → Bounce → Down → Up → OFF
+  const VL_CYCLE: Array<{ dir: 'zone' | 'up' | 'down' | 'bounce' | null; label: string; icon: string }> = [
+    { dir: null,     label: 'Voice Lead', icon: 'transit-connection-variant' },
+    { dir: 'zone',   label: 'Zone',       icon: 'map-marker-radius-outline'  },
+    { dir: 'bounce', label: 'Bounce',     icon: 'swap-vertical-bold'         },
+    { dir: 'down',   label: 'Down',       icon: 'arrow-down-bold-outline'    },
+    { dir: 'up',     label: 'Up',         icon: 'arrow-up-bold-outline'      },
+  ];
+  const vlIdx = !voiceLeading ? 0 : Math.max(1, VL_CYCLE.findIndex(x => x.dir === voiceLeadDir));
+  const vlItem = VL_CYCLE[vlIdx];
+  const handleVLPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = VL_CYCLE[(vlIdx + 1) % VL_CYCLE.length];
+    if (!next.dir) { setVoiceLeading(false); }
+    else { setVoiceLeading(true); setVoiceLeadDir(next.dir); }
+  };
   const { rhythm, setRhythm } = useProgressionStore();
   const t = THEMES[theme];
 
@@ -106,12 +123,9 @@ export default function ProgressionPlayerDock({
               <Text style={[styles.enginePillTxt, { color: bassEnabled ? '#fff' : t.txt2 }]}>Bass</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={0.7} onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setVoiceLeading(!voiceLeading);
-            }} style={[styles.enginePill, { backgroundColor: voiceLeading ? t.accent : t.bg2, borderColor: voiceLeading ? t.accent : t.border }]}>
-              <MaterialCommunityIcons name="transit-connection-variant" size={16} color={voiceLeading ? '#fff' : t.txt2} />
-              <Text style={[styles.enginePillTxt, { color: voiceLeading ? '#fff' : t.txt2 }]}>Voice Lead</Text>
+            <TouchableOpacity activeOpacity={0.7} onPress={handleVLPress} style={[styles.enginePill, { backgroundColor: voiceLeading ? t.accent : t.bg2, borderColor: voiceLeading ? t.accent : t.border }]}>
+              <MaterialCommunityIcons name={vlItem.icon as any} size={16} color={voiceLeading ? '#fff' : t.txt2} />
+              <Text style={[styles.enginePillTxt, { color: voiceLeading ? '#fff' : t.txt2 }]}>{vlItem.label}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity activeOpacity={0.7} onPress={() => {

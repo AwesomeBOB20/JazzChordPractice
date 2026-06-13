@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { CH, NOTE_SHARP, NOTE_FLAT, spellInterval, formatDegree, ROLE_SHORT, getGlobalLabel } from '@shared/theory/musicTheory';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { Theme, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
+import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
 interface Props {
@@ -294,10 +295,10 @@ const styles = StyleSheet.create({
   pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
   
   nameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center', gap: 4, marginBottom: 4 },
-  root: { fontSize: 40, fontWeight: '700', lineHeight: 44, textAlign: 'center' },
-  type: { fontSize: 18, fontWeight: '600', textAlign: 'center', marginBottom: 4 },
-  subLabel: { fontSize: 11, fontWeight: '600', textAlign: 'center', marginBottom: 4 },
-  formula: { fontSize: 11, letterSpacing: 1, textAlign: 'center' },
+  root: { ...TYPE.display, lineHeight: 44, textAlign: 'center' },
+  type: { ...TYPE.subtitle, fontWeight: FONT_WEIGHT.semibold, textAlign: 'center', marginBottom: 4 },
+  subLabel: { ...TYPE.label, textAlign: 'center', marginBottom: 4 },
+  formula: { ...TYPE.caption, letterSpacing: 1, textAlign: 'center' },
   
   pillContainer: { alignItems: 'center', gap: 0 },
   pill: { 

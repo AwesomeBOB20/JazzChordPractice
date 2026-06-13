@@ -234,6 +234,11 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
 
   const fillPath = buildMiniMapRoundedRect(boxLeft, 0, boxWidth, MAP_H, rtl, rtr, rbr, rbl);
 
+  // In dark themes the hardcoded #1c1c1e lines are invisible on the dark bg3 background.
+  // Flip to white (#FFFFFF) — matches the piano white-key colour used in MiniPianoDiagram.
+  const isDark = theme.bg2 !== '#FFFFFF';
+  const neckWhite = '#FFFFFF';
+
   // Dedupe note dots by string+fret.
   const seen = new Set<string>();
   const dots = notes.filter((n: any) => {
@@ -247,27 +252,26 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
   return (
     <View style={{ alignSelf: 'center', width: MAP_W, height: MAP_H, backgroundColor: theme.bg3, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, overflow: 'hidden', marginTop: 12, marginBottom: 12 }}>
       <Svg width={MAP_W} height={MAP_H}>
-        {/* Six string lines — same black as the piano black keys for consistency */}
+        {/* Six string lines */}
         {Array.from({ length: STR_COUNT }).map((_, s) => (
-          <Line key={`ms-${s}`} x1={0} y1={yForString(s)} x2={MAP_W} y2={yForString(s)} stroke="#1c1c1e" strokeWidth={0.5} opacity={0.5} />
+          <Line key={`ms-${s}`} x1={0} y1={yForString(s)} x2={MAP_W} y2={yForString(s)} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={0.5} opacity={isDark ? 0.4 : 0.5} />
         ))}
 
-        {/* Nut — thick black line. Fret dividers + inlay markers use the SAME black as the
-            piano's black keys (#1c1c1e) for color consistency across the two minimaps. */}
-        <Line x1={NUT_X} y1={0} x2={NUT_X} y2={MAP_H} stroke="#1c1c1e" strokeWidth={2} />
+        {/* Nut — thick line. Fret dividers + inlay markers match the nut colour. */}
+        <Line x1={NUT_X} y1={0} x2={NUT_X} y2={MAP_H} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={2} opacity={isDark ? 0.75 : 1} />
         {Array.from({ length: TOTAL_FRETS - 1 }).map((_, i) => (
-          <Line key={`mf-${i}`} x1={NUT_X + (i + 1) * fretW} y1={0} x2={NUT_X + (i + 1) * fretW} y2={MAP_H} stroke="#1c1c1e" strokeWidth={1} opacity={0.5} />
+          <Line key={`mf-${i}`} x1={NUT_X + (i + 1) * fretW} y1={0} x2={NUT_X + (i + 1) * fretW} y2={MAP_H} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={1} opacity={isDark ? 0.35 : 0.5} />
         ))}
 
-        {/* Inlay markers — same black as the piano black keys */}
+        {/* Inlay markers */}
         {MARKERS.map(m => (
-          <Circle key={`mm-${m}`} cx={NUT_X + (m - 0.5) * fretW} cy={MAP_H / 2} r={1.5} fill="#1c1c1e" opacity={0.55} />
+          <Circle key={`mm-${m}`} cx={NUT_X + (m - 0.5) * fretW} cy={MAP_H / 2} r={1.5} fill={isDark ? neckWhite : '#1c1c1e'} opacity={0.55} />
         ))}
-        {/* Octave markers (12th & 24th frets) as double dots, same black */}
+        {/* Octave markers (12th & 24th frets) as double dots */}
         {[12, 24].map(m => (
           <React.Fragment key={`mm2-${m}`}>
-            <Circle cx={NUT_X + (m - 0.5) * fretW} cy={MAP_H * 0.3} r={1.5} fill="#1c1c1e" opacity={0.55} />
-            <Circle cx={NUT_X + (m - 0.5) * fretW} cy={MAP_H * 0.7} r={1.5} fill="#1c1c1e" opacity={0.55} />
+            <Circle cx={NUT_X + (m - 0.5) * fretW} cy={MAP_H * 0.3} r={1.5} fill={isDark ? neckWhite : '#1c1c1e'} opacity={0.55} />
+            <Circle cx={NUT_X + (m - 0.5) * fretW} cy={MAP_H * 0.7} r={1.5} fill={isDark ? neckWhite : '#1c1c1e'} opacity={0.55} />
           </React.Fragment>
         ))}
 
@@ -666,7 +670,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
           const color = colorMode === 'roles' ? (fretObj.role ? (ROLE_COLORS_GLOBAL[normRoleTop] ?? theme.accent) : theme.accent) : theme.accent;
           return (
             <React.Fragment key={`top-${strIdx}`}>
-              {fretObj.fret === null ? ( <SvgText x={cx} y={MARGIN_TOP - 13} fontSize={16} fill={theme.txt3} textAnchor="middle" fontWeight="700" fontFamily={svgFont}>×</SvgText> ) :
+              {fretObj.fret === null ? ( <SvgText x={cx} y={MARGIN_TOP - 14.4} fontSize={16} fill={theme.txt3} textAnchor="middle" fontWeight="700" fontFamily={svgFont}>×</SvgText> ) :
                fretObj.fret === 0 ? null :
                ( <SvgText x={cx} y={MARGIN_TOP - 15} fontSize={13} fill={theme.txt2} textAnchor="middle" fontWeight="600" fontFamily={svgFont}>{STRING_LABELS[strIdx]}</SvgText> )}
             </React.Fragment>

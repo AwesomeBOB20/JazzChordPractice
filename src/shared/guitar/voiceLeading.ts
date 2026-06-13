@@ -55,9 +55,18 @@ const minActiveFret = (v: any): number => {
   return fs.length ? Math.min(...fs) : 0;
 };
 
-export function calculateOptimalVoiceLeading(progression: (ProgressionChord | null)[], useVoiceLeading: boolean = true, fretCap: number = 5, targetZone: number | null = null, forcedType: ForcedVoicingType = 'auto', forcedStringSet: string | null = null) {
+export function calculateOptimalVoiceLeading(progression: (ProgressionChord | null)[], useVoiceLeading: boolean = true, fretCap: number = 5, targetZone: number | null = null, forcedType: ForcedVoicingType = 'auto', forcedStringSet: string | null = null, voiceLeadDir: 'zone' | 'up' | 'down' | 'bounce' = 'zone') {
   let lastFrets: any = null;
   let lastType: string | null = null;
+  let bounceDir: 'up' | 'down' = 'up';   // current travel direction for bounce mode
+  let wrapResetNext = false;             // up/down: next chord snaps back to the far end (staircase)
+
+  // Up/Down deliberately WALK the neck, so a fixed neck zone is contradictory with them —
+  // the zone is ignored for those two modes (and its button is hidden in the UI). Zone and
+  // Bounce both keep the zone: Zone stays anchored to it, Bounce ping-pongs across its window.
+  const effectiveZone = (voiceLeadDir === 'up' || voiceLeadDir === 'down') ? null : targetZone;
+  // Neck extremes used by the staircase wrap and the bounce turnarounds.
+  const NECK_CEIL = 9, NECK_FLOOR = 2;
 
   return progression.map(chord => {
     if (!chord || chord.spacer) return null;
@@ -139,9 +148,9 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       // visibly sat in a different position from the rest).
       const ZONE_WINDOW = 5;
       let firstPool = pool;
-      if (targetZone !== null) {
-        const lo = Math.max(0, targetZone - ZONE_WINDOW);
-        const hi = targetZone + ZONE_WINDOW;
+      if (effectiveZone !== null) {
+        const lo = Math.max(0, effectiveZone - ZONE_WINDOW);
+        const hi = effectiveZone + ZONE_WINDOW;
         const inZone = pool.filter((v: any) => {
           const active = v.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
           if (!active.length) return false;
@@ -174,8 +183,14 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
         const minF = activeFrets.length ? Math.min(...activeFrets) : 0;
 
         // 2. Anchor Penalty
-        if (targetZone !== null) {
-          score += Math.abs(minF - targetZone) * 15; // Strict penalty for leaving the requested zone
+        if (effectiveZone !== null) {
+          score += Math.abs(minF - effectiveZone) * 15; // Strict penalty for leaving the requested zone
+        } else if (voiceLeadDir === 'down') {
+          // DOWN: start high on the neck so there's room to descend
+          score += Math.max(0, NECK_CEIL - minF) * 6;
+        } else if (voiceLeadDir === 'up' || voiceLeadDir === 'bounce') {
+          // UP / BOUNCE: start low so there's room to climb
+          score += Math.max(0, minF - (NECK_FLOOR + 2)) * 6;
         } else if (minF > fretCap) {
           score += (minF - fretCap) * 10; // Heavy penalty for exceeding the zone
         } else {
@@ -203,9 +218,9 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       // fret rather than walking up or down the neck across the progression.
       const ZONE_WINDOW = 5;
       let candidates: typeof pool;
-      if (targetZone !== null) {
-        const lo = Math.max(0, targetZone - ZONE_WINDOW);
-        const hi = targetZone + ZONE_WINDOW;
+      if (effectiveZone !== null) {
+        const lo = Math.max(0, effectiveZone - ZONE_WINDOW);
+        const hi = effectiveZone + ZONE_WINDOW;
         const inZone = pool.filter((v: any) => {
           const active = v.frets.filter((f: any) => f.fret !== null && f.fret > 0).map((f: any) => f.fret);
           if (!active.length) return false;
@@ -224,6 +239,11 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       
       // Pre-calculate the highest active string of the previous chord for Soprano weighting
       const lastHighestStr = [0, 1, 2, 3, 4, 5].find(s => lastFrets[s] && lastFrets[s].fret !== null && lastFrets[s].fret > 0);
+
+      // Staircase wrap chord (Up/Down only): on this one chord we IGNORE smoothness so the
+      // hand snaps cleanly to the far end of the neck, then the walk resumes. Without gating
+      // smoothness off, the ×15 soprano term would pin it near the top and it'd never reset.
+      const inWrap = wrapResetNext && (voiceLeadDir === 'up' || voiceLeadDir === 'down');
 
       for (const v of candidates) {
         let d = 0;
@@ -267,19 +287,19 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
             vMelodyPitch = TUNING[vHighestStr] + v.frets[vHighestStr].fret;
         }
 
-        if (lastMelodyPitch !== null && vMelodyPitch !== null) {
+        if (lastMelodyPitch !== null && vMelodyPitch !== null && !inWrap) {
             // INCREASED to 15: The top voice is the most critical part of jazz voice leading
-            d += Math.abs(vMelodyPitch - lastMelodyPitch) * 15; 
+            d += Math.abs(vMelodyPitch - lastMelodyPitch) * 15;
         }
 
-        // Standard physical finger travel penalty for remaining voices
-        for (let i = 0; i < 6; i++) {
+        // Standard physical finger travel penalty for remaining voices (skipped on a wrap chord).
+        if (!inWrap) for (let i = 0; i < 6; i++) {
           const f1 = lastFrets[i]?.fret;
           const f2 = v.frets[i]?.fret;
-          
+
           if (f1 !== null && f1 !== undefined && f2 !== null && f2 !== undefined) {
               // Exact common tone (same string, same fret) costs 0. Small moves cost little.
-              d += Math.abs(f1 - f2); 
+              d += Math.abs(f1 - f2);
           } else if ((f1 !== null && f1 !== undefined) || (f2 !== null && f2 !== undefined)) {
               d += 5; // Slight bump to strongly discourage dropping/adding strings mid-phrase
           }
@@ -292,30 +312,71 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
           const centerF = activeFrets.reduce((sum: number, val: number) => sum + val, 0) / activeFrets.length;
           
           if (useVoiceLeading) {
-            const shiftDiff = Math.abs(minF - lastMin);
-            if (shiftDiff > 2) {
-              d += (shiftDiff * 3); // Let the hand move if the melody demands it.
+            if (!inWrap) {
+              const shiftDiff = Math.abs(minF - lastMin);
+              if (shiftDiff > 2) {
+                d += (shiftDiff * 3); // Let the hand move if the melody demands it.
+              }
+
+              d += Math.abs(centerF - lastCenter) * 1; // Let it drift smoothly.
             }
 
-            d += Math.abs(centerF - lastCenter) * 1; // Let it drift smoothly.
-
-            // Zone anchor: every chord is pinned toward the chosen fret zone so the whole
-            // progression stays in one place on the neck. The weight (×6) is firm but sits
-            // below the soprano-motion term (×15), so smoothness still chooses *among* the
-            // in-zone voicings rather than the anchor overriding good voice leading. When
-            // there's no zone (AUTO) we fall back to the soft fretCap pull.
-            if (targetZone !== null) {
-              d += Math.abs(minF - targetZone) * 6;
+            // Zone anchor: pin toward the chosen fret zone so the progression stays put. The
+            // weight (×6) is firm but below the soprano-motion term (×15), so smoothness still
+            // chooses *among* the in-zone voicings. Skipped for Bounce, which deliberately
+            // swings to the edges of the zone window (the ±window pre-filter keeps it in range).
+            // With no zone (AUTO / Up / Down) we fall back to the soft fretCap pull.
+            if (effectiveZone !== null) {
+              if (voiceLeadDir !== 'bounce') d += Math.abs(minF - effectiveZone) * 6;
             } else if (minF > fretCap) {
               d += (minF - fretCap) * 4;
             } else if (minF < Math.max(1, fretCap - 4)) {
               d += (Math.max(1, fretCap - 4) - minF) * 1;
             }
+
+            // ── Directional modes (UP / DOWN / BOUNCE) ──────────────────────
+            // The walk is driven by a firm non-advance PENALTY (not a soft reward): any voicing
+            // that doesn't continue in the current direction is taxed enough to overcome the
+            // smoothness terms, so the hand actually moves — while smoothness still chooses the
+            // best voicing *among* those that do advance. Bounce flips its direction at the ends
+            // (a smooth triangle); Up/Down snap back via the smoothness-gated wrap chord above.
+            if (voiceLeadDir === 'up' || voiceLeadDir === 'down' || voiceLeadDir === 'bounce') {
+              if (inWrap) {
+                // Wrap chord: snap to the far end (smoothness already gated off for this chord).
+                if (voiceLeadDir === 'up') d += minF * 8;             // pull to the lowest voicing
+                else if (voiceLeadDir === 'down') d += (12 - minF) * 8; // pull to the highest voicing
+              } else {
+                const curDir = voiceLeadDir === 'bounce' ? bounceDir : voiceLeadDir;
+                if (curDir === 'up' && minF <= lastMin) d += 40;   // must climb
+                else if (curDir === 'down' && minF >= lastMin) d += 40; // must descend
+              }
+            }
           }
         }
-        
+
         if (d < minD) { minD = d; best = v; }
       }
+
+      // Advance the neck-walk state from the chosen voicing for the next chord.
+      const bestActive = best.frets.filter((f: any) => f && f.fret !== null && f.fret > 0).map((f: any) => f.fret as number);
+      const newMinF = bestActive.length ? Math.min(...bestActive) : 0;
+      if (voiceLeadDir === 'bounce') {
+        // Turn around near the neck extremes — or near the zone-window edges when a zone is set.
+        if (effectiveZone !== null) {
+          if (bounceDir === 'up' && newMinF >= effectiveZone + 3) bounceDir = 'down';
+          else if (bounceDir === 'down' && newMinF <= effectiveZone - 3) bounceDir = 'up';
+        } else {
+          if (bounceDir === 'up' && newMinF >= NECK_CEIL) bounceDir = 'down';
+          else if (bounceDir === 'down' && newMinF <= NECK_FLOOR) bounceDir = 'up';
+        }
+      } else if (voiceLeadDir === 'up') {
+        if (wrapResetNext) wrapResetNext = false;             // just reset — resume climbing
+        else if (newMinF >= NECK_CEIL) wrapResetNext = true;  // hit the top → wrap on the next chord
+      } else if (voiceLeadDir === 'down') {
+        if (wrapResetNext) wrapResetNext = false;
+        else if (newMinF <= NECK_FLOOR) wrapResetNext = true;
+      }
+
       lastFrets = best.frets;
       lastType = best.type;
       return best;

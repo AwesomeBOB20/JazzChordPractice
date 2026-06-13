@@ -7,6 +7,7 @@ import { familyForWeight } from '@shared/fonts/fonts';
 import { useProgressionStore, DEFAULT_SONGS } from '@features/progression/store/progressionStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
 import { useChordStore } from '@features/play/store/chordStore';
+import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import { THEMES, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
 import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { SharedSettingsPanel } from '@shared/ui';
@@ -14,10 +15,12 @@ import { PopUpModal } from '@shared/ui/SharedModals';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-// Inline help icons render on the text baseline, which sits them too high. Aligning to
-// the line-box bottom centers them with the surrounding 13px / 19px line. (translateY is
-// ignored here because the icon renders as inline text, which drops transforms.)
-const INLINE_ICON_STYLE = { verticalAlign: 'bottom' } as const;
+// Inline help icons render on the text baseline, which sits them too high — and
+// react-native-web silently drops `verticalAlign`, so that alone doesn't move them.
+// Relative positioning DOES apply to inline elements (unlike transforms, which inline
+// text drops), so nudge the glyph down a couple px to sit on the 14px / 19px text line.
+// `verticalAlign: 'bottom'` is kept for native, where it is honored.
+const INLINE_ICON_STYLE = { verticalAlign: 'bottom', position: 'relative', top: 2 } as const;
 
 // ── Help & Tutorial content ───────────────────────────────────────────────────
 // Static guide text shown in the collapsible Help card. Kept module-level (no theme
@@ -41,15 +44,15 @@ const HELP_SECTIONS: HelpSection[] = [
         'Most of the app is about seeing, hearing, and choosing voicings — tight ones, wide ones, guitar shapes, and more.',
       ] },
       { h: 'Screens (bottom tabs)', b: [
-        'Explore — study one chord in depth.',
-        'Song — build and play a progression.',
-        'Quiz — test yourself by sight and ear.',
-        'Tuner — tune your instrument.',
+        [I('compass-outline'), ' Explore — study one chord in depth, or browse the whole Dictionary.'],
+        [I('musical-notes-outline'), ' Song — build and play a progression.'],
+        [I('puzzle-outline', 'mci'), ' Quiz — test yourself by sight and ear.'],
+        [I('guitar-pick-outline', 'mci'), ' Tuner — tune your instrument.'],
       ] },
       { h: 'Top Bar (on every screen)', b: [
-        'Switch between Piano and Guitar.',
-        'Toggle Block (all notes at once) vs Arpeggio (one at a time) playback.',
-        'Tap the tempo to set the speed (BPM).',
+        ['Switch between ', I('piano', 'mci'), ' Piano and ', I('guitar-acoustic', 'mci'), ' Guitar.'],
+        ['Toggle ', I('music-note-quarter', 'mci'), ' Block (all notes at once) vs ', I('musical-notes'), ' Arpeggio (one at a time) playback.'],
+        [I('metronome', 'mci'), ' Tap the tempo to set the speed (BPM).'],
         ['Open ', I('settings-outline'), ' Settings for display and audio options.'],
       ] },
     ],
@@ -58,6 +61,11 @@ const HELP_SECTIONS: HelpSection[] = [
     key: 'play', icon: 'compass-outline', title: 'Explore Screen',
     paras: [
       { t: 'Pick any chord and explore every way to play it — for learning fingerings, comparing voicings, and drilling one chord at a time.' },
+      { h: 'Two Ways to Browse', b: [
+        ['A toggle at the top switches between ', I('albums-outline'), ' Chord and ', I('book-outline'), ' Dictionary.'],
+        'Chord puts one chord on a big diagram to study and drill (the controls just below).',
+        'Dictionary is a scrollable reference grid of every voicing, scale, and shape (covered further down).',
+      ] },
       { h: 'Chord Card', b: [
         'The card at the top is the current chord; the colored dots are its notes.',
         'Side chevrons change the root (the letter, like C or F).',
@@ -84,6 +92,26 @@ const HELP_SECTIONS: HelpSection[] = [
         ['Switch the sheet to Manual to pick a specific chord by hand (the dice becomes the ', I('create'), ' Edit Chord button).'],
         [I('play'), ' plays the current chord.'],
       ] },
+      { h: 'Dictionary — Browse Everything', b: [
+        'The top tabs choose what to show: Block, Open, Barre, Triads, Shells, Drop 2 / 3 / 2&4, Intervals, Arps, Shapes, and Scales. Each badge counts how many fit the current root.',
+        'When a tab has sub-groups, a second row of family tabs narrows it (e.g. 7th Chords vs 9th Chords).',
+        'Tap a row — like "Maj 7" or "Major" — to open it and reveal its diagrams; tap again to close.',
+        'When you open a rootless shell/drop/triad or a scale, a row lists the chords it works for: "Comp with" on a voicing (the chords you\'d play it for, e.g. a 3·7·13 grip belongs to Dom13) and "Solo with" on a scale (the chords you\'d improvise over, e.g. Dorian fits Min 7, Min 9, and Min 6).',
+        'Tap any diagram to hear it.',
+        'The 1 / 2 / 3 buttons at the bottom-right set how many diagrams fit per row.',
+      ] },
+      { h: 'Picking the Root (Dictionary)', b: [
+        'The ‹ › stepper at the bottom moves the root up or down a half step.',
+        'Tap the letter in the middle to pop up a strip of 12 circles — tap one to jump straight to that root.',
+        [I('grid-outline'), ' All (guitar) shows every shape across all 12 roots, each only once — great for learning a movable shape that slides up the neck.'],
+      ] },
+      { h: 'The Four Corner Labels (Dictionary)', b: [
+        'Each guitar diagram tags its corners so you can read it at a glance.',
+        'Top-left — the root (the letter), or ANY for movable shapes.',
+        'Top-right — the string set (like 4-3-2-1) for Triads, Shells, and Drops, or the shape name (like "Box 3 (C Shape)") for Arps, Scales, and Shapes.',
+        'Bottom-left — the formula: which scale degrees are in it (e.g. 1 3 5 7).',
+        'Bottom-right — which note is in the bass ("Root in bass", "3rd in bass"…).',
+      ] },
     ],
   },
   {
@@ -95,11 +123,26 @@ const HELP_SECTIONS: HelpSection[] = [
         'Tap a cell to select and hear it.',
         'Long-press or double-tap to open its editor.',
       ] },
+      { h: 'Three Views: Name · Chords · Arps', b: [
+        'The view button at the start of the toolbar cycles how each bar is shown.',
+        [I('lead-pencil', 'mci'), ' NAME shows just the chord letters — the quickest read.'],
+        [I('grid-outline'), ' CHORDS shows a playable diagram (piano or guitar) for every bar.'],
+        [I('musical-notes'), ' ARPS shows those same notes as an arpeggio — a shape you play one note at a time.'],
+      ] },
       { h: 'Editing a Measure', b: [
         'Set the chord for the bar.',
         'Change how many beats the bar lasts (e.g. 3/4).',
         'Split one bar into two chords.',
-        'The toolbar above adds or removes measures and transposes the whole song.',
+        'The toolbar above adds or removes measures and transposes the whole song (♭ / ♯).',
+      ] },
+      { h: 'Smart Voicings (Zone & Voice Leading)', b: [
+        'The app picks voicings that flow smoothly from one chord to the next instead of jumping around.',
+        'ZONE sets where they sit — a fret area on guitar, or a register like C4 on piano. Use − / + to move it, or AUTO to let the app choose.',
+        'The Voice Lead pill changes how they move: Zone (stay put, smooth), Bounce (drift up and down), or Up / Down (walk the neck). Turn it off for plain root-position chords.',
+      ] },
+      { h: 'Lock the Voicing (guitar)', b: [
+        'VOICING forces a family — AUTO, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style.',
+        'With a family set, STRINGS pins the shapes to one string set (or leave it ANY).',
       ] },
       { h: 'Chart Marks (like real sheet music)', b: [
         'Repeat signs (𝄆 𝄇) to loop a section.',
@@ -107,13 +150,15 @@ const HELP_SECTIONS: HelpSection[] = [
         'Letters (A, B…) to label sections.',
       ] },
       { h: 'Playback (bottom dock)', b: [
-        'Set the tempo, the rhythm feel (Straight, Swing, Bossa…), and toggle bass and metronome.',
+        'Set the tempo, the rhythm feel (Straight, Swing, Bossa, Two-Step, Reggae), and toggle bass and metronome.',
         [I('options-outline'), ' Mix sets their volumes.'],
+        [I('repeat'), ' Loop replays the whole progression until you stop.'],
         ['Press ', I('play'), ' for a count-in, then the song plays in that feel.'],
         'While it plays, tap a measure ahead to jump straight there at the next bar.',
       ] },
       { h: 'Saving', b: [
-        'Save a song to the library and sort songs into folders.',
+        [I('save-outline'), ' Save stores the song (with its tempo and feel) under a name.'],
+        [I('library-outline'), ' Library opens your saved songs; sort them into folders.'],
         'Back up or restore your whole library from Data Management in Settings.',
       ] },
     ],
@@ -128,13 +173,24 @@ const HELP_SECTIONS: HelpSection[] = [
         'Audio plays a chord for you to name.',
       ] },
       { h: 'Choose What to Practice', b: [
-        'Open the setup sheet to narrow the quiz to what you\'re working on.',
+        [I('layers'), ' Open the setup sheet to narrow the quiz to what you\'re working on.'],
         'Its Chords and Voicings tabs pick which chord types, inversions (which note sits in the bass), and voicing families can come up.',
+        'Depending on the family, you might identify a chord, scale, arpeggio, interval, or shape.',
         'Set the instrument in the top bar.',
       ] },
       { h: 'Answering', b: [
         ['Tap your answer, then ', I('arrow-forward'), ' Next for the next one.'],
-        'Your accuracy is tracked as you go.',
+        'Correct turns green, wrong turns red — and the chord plays so you hear it.',
+        'Not sure? Reveal shows the answer (it counts as a miss).',
+        ['Your score, streak, and accuracy track at the top; ', I('refresh'), ' resets them.'],
+      ] },
+      { h: 'While You Listen (Audio)', b: [
+        'In Audio mode the chord hides behind a big ? while it plays.',
+        [I('headset-outline'), ' Animated bars pulse with the sound, so you can feel its shape while you listen.'],
+      ] },
+      { h: 'The Reveal (Audio)', b: [
+        'When you answer, the bars become a chord-anatomy strip: one colored dot per note, its degree below (R, 3, 5…), and the interval between notes above.',
+        'Tap any dot to replay just that note.',
       ] },
     ],
   },
@@ -143,16 +199,16 @@ const HELP_SECTIONS: HelpSection[] = [
     paras: [
       { t: 'Tune your instrument by microphone or by ear.' },
       { h: 'Listen', b: [
-        'On Android, the tuner can use your mic to show the note you\'re playing and whether you\'re sharp or flat.',
+        [I('mic'), ' On Android, the tuner can use your mic to show the note you\'re playing and whether you\'re sharp or flat.'],
         'Sharp/flat is measured in cents (hundredths of a step), so 0 is perfectly in tune.',
         'On other devices, use Play below to tune by ear instead.',
       ] },
       { h: 'Play', b: [
-        'Tap a string to sound its reference pitch and tune your instrument to match.',
+        [I('volume-high'), ' Tap a string to sound its reference pitch and tune your instrument to match.'],
         'Tap again to silence it.',
       ] },
       { h: 'Setup', b: [
-        'Choose a tuning (e.g. Standard) on the screen.',
+        [I('options'), ' Choose a tuning: Standard, Drop D, ½ Step Down, Open G, or DADGAD.'],
         'The reference pitch (A=432/440/512) lives in Settings → Audio; 440 is the modern standard.',
       ] },
     ],
@@ -172,6 +228,13 @@ const HELP_SECTIONS: HelpSection[] = [
       { h: 'Labels', b: [
         'Set the dots to show note names, scale degrees (1, ♭3, 5…), or nothing in Settings → Display.',
       ] },
+      { h: 'Position & Box Shapes', b: [
+        'A number to the left of a guitar diagram is the fret it starts on — so the shape sits up the neck, not at the nut.',
+        'Names like "Box 1 (E Shape)" are CAGED positions: the five places a scale or arpeggio shape lives along the neck.',
+      ] },
+      { h: 'The Mini-Map', b: [
+        'Beside the big Explore diagram, a slim strip shows the whole neck (or keyboard) in miniature — a box marks the part you\'re viewing and dots mark every chord note.',
+      ] },
       { h: 'Voicing Types', b: [
         'Triads are basic 3-note chords.',
         'Shells keep only the defining notes (root, 3rd, 7th).',
@@ -182,6 +245,32 @@ const HELP_SECTIONS: HelpSection[] = [
         'maj7 = major 7th, m7 = minor 7th, 7 = dominant 7th.',
         'ø7 = half-diminished, °7 = diminished.',
         'Added numbers like 9, 11, and 13 are extensions — extra color notes stacked on top.',
+      ] },
+    ],
+  },
+  {
+    key: 'settings', icon: 'options-outline', title: 'Settings',
+    paras: [
+      { t: ['Open Settings from the ', I('settings-outline'), ' gear in the top bar. Changes apply everywhere, instantly.'] },
+      { h: 'Look & Feel', b: [
+        [I('color-palette-outline'), ' App Theme switches between light and dark.'],
+        'Font changes the typeface used on labels and diagrams.',
+      ] },
+      { h: 'Display', b: [
+        'Accidentals — spell notes with flats (♭) or sharps (♯).',
+        'Labels — show note names, scale degrees (1, ♭3, 5…), or nothing on the dots.',
+        'Octave numbers — show C4 instead of just C.',
+        'Note Color — Roles (a color per degree), Theme (one color), or Selective (spotlight only the degrees you choose).',
+      ] },
+      { h: 'Audio', b: [
+        'Instrument — Piano or Guitar; sets which diagrams and tabs you see.',
+        'Octave — how high or low notes sound and display.',
+        'Tuning (A=) — reference pitch 432, 440 (standard), or 512 Hz.',
+      ] },
+      { h: 'Your Data', b: [
+        [I('save-outline'), ' Data Management backs up or restores all your saved songs.'],
+        'Clear Stored Progress wipes quiz scores and the working progression (your saved songs stay).',
+        'Restore Default Settings resets preferences (your songs and scores stay).',
       ] },
     ],
   },
@@ -462,9 +551,11 @@ export default function SettingsScreen() {
                   { text: "Cancel", style: "cancel" },
                   { text: "Restore Defaults", style: "destructive", onPress: () => {
                     factoryReset();
-                    // Reset the other stores' preferences too so "Restore Defaults" is complete:
+                    // Reset EVERY store's preferences too so "Restore Defaults" is complete:
                     useChordStore.getState().resetChordState();  // chord pool (active types) + current chord
                     useProgressionStore.setState({ songVoicingType: 'auto', songStringSet: null, guitarNeckZone: null, rhythm: 'straight' });
+                    useDictionaryStore.getState().reset();       // dictionary browse state (mode/category/root/cols)
+                    useQuizStore.getState().resetPreferences();  // quiz mode + quizzed voicings/inversions (scores kept)
                   }}
                 ]
               );

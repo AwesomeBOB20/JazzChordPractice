@@ -1,5 +1,6 @@
 export { default as ChordCard } from '@features/play/components/ChordCard';
 export { default as CommandSheet } from '@shared/ui/CommandSheet';
+export { CountChip } from '@shared/ui/CountChip';
 export { ErrorBoundary } from '@shared/ui/ErrorBoundary';
 export { default as FadeIn } from '@shared/ui/FadeIn';
 export { default as FretboardView, type FretboardViewRef } from '@features/play/components/FretboardView';
@@ -9,6 +10,6 @@ export { default as SettingRow, ToggleButton } from '@features/settings/componen
 export { PopUpModal, SlideUpModal } from '@shared/ui/SharedModals';
 export { default as SharedSettingsPanel } from '@features/settings/components/SharedSettingsPanel';
 export { default as SoundfontPlayer } from '@shared/audio/SoundfontPlayer';
-export { default as MiniChordDiagram } from '@shared/ui/diagrams/MiniChordDiagram';
+export { default as MiniChordDiagram, miniChordFootprint } from '@shared/ui/diagrams/MiniChordDiagram';
 export { default as MiniPianoDiagram } from '@shared/ui/diagrams/MiniPianoDiagram';
 export { default as BpmModal } from '@shared/ui/BpmModal';
