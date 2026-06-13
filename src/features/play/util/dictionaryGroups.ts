@@ -34,7 +34,7 @@ const TAB_KIND: Record<DictionaryCategory, TabKind> = {
 };
 export const tabKind = (t: DictionaryCategory): TabKind => TAB_KIND[t];
 
-export interface DictItem { key: string; label: string; sub?: string; foundIn?: string[]; }
+export interface DictItem { key: string; label: string; sub?: string; foundIn?: { type: string; label: string }[]; }
 export interface DictGroup { label: string; items: DictItem[]; }
 
 export const ALL_CATEGORIES: { key: DictionaryCategory; label: string }[] = [
@@ -56,13 +56,15 @@ export const ORDERED_TYPES: string[] = (() => {
 // Maps a set of chord-type keys to their display labels (CH[ct].l), in canonical order, deduped.
 // Powers the chip row shown inside an expanded dictionary item (rootless/partial combos + scales).
 const orderIdxOf = (ct: string) => { const i = ORDERED_TYPES.indexOf(ct); return i === -1 ? 999 : i; };
-const foundInLabels = (chordTypes: string[]): string[] => {
+// Returns {type,label} so the rendered chip can both show the quality name AND navigate to that chord.
+const foundInLabels = (chordTypes: string[]): { type: string; label: string }[] => {
   const seen = new Set<string>();
-  return (chordTypes || [])
+  const out: { type: string; label: string }[] = [];
+  (chordTypes || [])
     .slice()
     .sort((a, b) => orderIdxOf(a) - orderIdxOf(b))
-    .map(ct => CH[ct]?.l)
-    .filter((l): l is string => !!l && !seen.has(l) && (seen.add(l), true));
+    .forEach(ct => { const l = CH[ct]?.l; if (l && !seen.has(l)) { seen.add(l); out.push({ type: ct, label: l }); } });
+  return out;
 };
 
 // Inverse of CHORD_SCALE_MAP (chord → scales): scaleId → the chord types that pair with it.
@@ -80,7 +82,7 @@ const SCALE_TO_CHORDS: Record<string, string[]> = (() => {
 //    you can arpeggiate/solo this shape safely over them. Built at root 0, so pitch-classes are
 //    root-relative; root-independent like the rest of the dictionary grouping.
 const GS_PC = GUITAR_TUNING.map(m => ((m % 12) + 12) % 12);
-const shapeChords = (shapeKey: string): string[] => {
+const shapeChords = (shapeKey: string): { type: string; label: string }[] => {
   const scaleId = shapeKey.replace('_shape', '');
   if (SCALES[scaleId]) return foundInLabels(SCALE_TO_CHORDS[scaleId] ?? []);
   const shapePcs = new Set<number>();

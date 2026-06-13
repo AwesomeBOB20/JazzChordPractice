@@ -225,7 +225,8 @@ export default function ChordDictionary({ t }: Props) {
   const octave = useSettingsStore((s: any) => s.octave);
   const labelMode = useSettingsStore((s: any) => s.labelMode);
   const selectedScaleId = useChordStore((s: any) => s.selectedScaleId);
-  const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols } = useDictionaryStore();
+  const setChord = useChordStore((s: any) => s.setChord);
+  const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
   const { playChord, stopAudio } = useAudio();
@@ -318,10 +319,20 @@ export default function ChordDictionary({ t }: Props) {
   const rawIdx = familyIdx < groupedSections.length ? familyIdx : 0;
   const fIdx = familyAvailItems[rawIdx] > 0 ? rawIdx : Math.max(0, familyAvailItems.findIndex(n => n > 0));
   const activeGroup = groupedSections[fIdx];
+  // Items shown for this root (empties hidden so header counts match what's rendered).
+  const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
   const toggleSection = React.useCallback((key: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }, []);
+  // Tap a "Comp with"/"Solo with" chip → load that chord at the dictionary's current root on the
+  // Chord screen (switch Explore out of Dictionary mode). Closes the explore loop.
+  const openChord = React.useCallback((type: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    stopAudio?.();
+    setChord(rootSemi, type);
+    setMode('chord');
+  }, [stopAudio, setChord, setMode, rootSemi]);
 
   const handlePlay = React.useCallback((it: DictMiniItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -395,71 +406,71 @@ export default function ChordDictionary({ t }: Props) {
         </View>
       )}
 
-      {/* ── Collapsible sections: tap an item to reveal its diagrams ── */}
+      {/* ── Collapsible sections: tap an item to reveal its diagrams. Built as a FLAT child list (each
+            open item → [header, content]) so the item headers can stick: stickyHeaderIndices docks the
+            current item's header at the top while its diagrams scroll. The category/family bars above
+            are already fixed. ── */}
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 32 }}
+        stickyHeaderIndices={(() => { const idx: number[] = []; let pos = 0; visibleItems.forEach(it => { idx.push(pos); pos += expanded.has(it.key) ? 2 : 1; }); return idx; })()}
       >
-        {!activeGroup || activeGroup.items.filter(i => itemCounts[i.key] > 0).length === 0 ? (
+        {visibleItems.length === 0 ? (
           <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
         ) : (
-          // Only chords that actually have a voicing for this root — empties are hidden, so the
-          // header chip count always matches what's shown (and the list never has dead rows).
-          activeGroup.items.filter(i => itemCounts[i.key] > 0).map(item => {
+          visibleItems.flatMap(item => {
             const open = expanded.has(item.key);
-            return (
-              <View key={item.key}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => toggleSection(item.key)}
-                  style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
-                >
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{item.label}</Text>
-                    {!!item.sub && <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{item.sub}</Text>}
-                    {familyCounts[item.key] > 0 && <CountChip count={familyCounts[item.key]} t={t} solid />}
-                  </View>
-                  <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
-                </TouchableOpacity>
-                {open && (
-                  <View style={{ borderBottomWidth: 1, borderBottomColor: t.border }}>
-                    {/* "Comp with" (rootless/partial combos) / "Solo with" (scales): the wording marks the
-                        relationship type — a voicing is what you PLAY for those chords, a scale is what you
-                        SOLO over. Lists which chord qualities use it. Only inside the expanded item, so
-                        the browse list stays clean. Capped at 6 + "+N more". */}
-                    {!!item.foundIn?.length && (
-                      <View style={styles.foundInRow}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>
-                          {(tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with'}
-                        </Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
-                          {item.foundIn.map(name => (
-                            <View key={name} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{name}</Text>
-                            </View>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    )}
-                    <DictSectionRow
-                      itemKey={item.key}
-                      isChordQuality={isChordQuality}
-                      category={effectiveCategory}
-                      instrument={instrument}
-                      rootSemi={rootSemi}
-                      allRoots={effectiveAllRoots}
-                      octave={octave}
-                      selectedScaleId={selectedScaleId}
-                      labelMode={labelMode}
-                      t={t}
-                      onPlay={handlePlay}
-                      L={L}
-                    />
+            const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
+            const header = (
+              <TouchableOpacity
+                key={`h-${item.key}`}
+                activeOpacity={0.7}
+                onPress={() => toggleSection(item.key)}
+                style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
+              >
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{item.label}</Text>
+                  {!!item.sub && <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{item.sub}</Text>}
+                  {familyCounts[item.key] > 0 && <CountChip count={familyCounts[item.key]} t={t} solid />}
+                </View>
+                <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
+              </TouchableOpacity>
+            );
+            if (!open) return [header];
+            const content = (
+              <View key={`c-${item.key}`} style={{ borderBottomWidth: 1, borderBottomColor: t.border }}>
+                {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
+                    Each chip is tappable → loads that chord at the current root on the Chord screen. */}
+                {!!item.foundIn?.length && (
+                  <View style={styles.foundInRow}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
+                      {item.foundIn.map(c => (
+                        <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
                   </View>
                 )}
+                <DictSectionRow
+                  itemKey={item.key}
+                  isChordQuality={isChordQuality}
+                  category={effectiveCategory}
+                  instrument={instrument}
+                  rootSemi={rootSemi}
+                  allRoots={effectiveAllRoots}
+                  octave={octave}
+                  selectedScaleId={selectedScaleId}
+                  labelMode={labelMode}
+                  t={t}
+                  onPlay={handlePlay}
+                  L={L}
+                />
               </View>
             );
+            return [header, content];
           })
         )}
       </ScrollView>
