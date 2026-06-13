@@ -410,16 +410,18 @@ export default function ChordDictionary({ t }: Props) {
         </View>
       )}
 
-      {/* ── Collapsible sections: tap an item to reveal its diagrams. Built as a FLAT child list (each
-            open item → [header, content]) so ONLY an OPEN item's header sticks — it docks at the top
-            like a dropdown title while its diagrams scroll. Collapsed headers are NOT sticky, so a
-            list of closed items scrolls normally (no pinned/clipped headers). The category/family bars
-            above are already fixed. ── */}
+      {/* ── Collapsible sections: tap an item to reveal its diagrams. Built as a FLAT child list. An
+            OPEN item contributes [header, content, sentinel]; a closed item just [header]. ONLY an open
+            item's header is sticky, so it docks like a dropdown title while its diagrams scroll, and a
+            list of closed items scrolls normally (no pinned/clipped headers). The zero-height sentinel
+            after the content is ALSO sticky: once the whole item scrolls above the top, the sentinel
+            docks and pushes the header out — so no sticky header lingers when none of the item is on
+            screen. The category/family bars above are already fixed. ── */}
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 32 }}
-        stickyHeaderIndices={(() => { const idx: number[] = []; let pos = 0; visibleItems.forEach(it => { const open = expanded.has(it.key); if (open) idx.push(pos); pos += open ? 2 : 1; }); return idx; })()}
+        stickyHeaderIndices={(() => { const idx: number[] = []; let pos = 0; visibleItems.forEach(it => { if (expanded.has(it.key)) { idx.push(pos); idx.push(pos + 2); pos += 3; } else { pos += 1; } }); return idx; })()}
       >
         {visibleItems.length === 0 ? (
           <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
@@ -475,7 +477,10 @@ export default function ChordDictionary({ t }: Props) {
                 />
               </View>
             );
-            return [header, content];
+            // Zero-height sticky sentinel (see ScrollView comment) — docks once the item scrolls past
+            // the top and pushes the item's sticky header out, so it doesn't linger off-screen.
+            const sentinel = <View key={`s-${item.key}`} style={{ height: 0 }} />;
+            return [header, content, sentinel];
           })
         )}
       </ScrollView>
