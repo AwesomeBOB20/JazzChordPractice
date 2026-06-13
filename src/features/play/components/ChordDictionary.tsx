@@ -477,9 +477,11 @@ export default function ChordDictionary({ t }: Props) {
                 />
               </View>
             );
-            // Zero-height sticky sentinel (see ScrollView comment) — docks once the item scrolls past
-            // the top and pushes the item's sticky header out, so it doesn't linger off-screen.
-            const sentinel = <View key={`s-${item.key}`} style={{ height: 0 }} />;
+            // Sticky sentinel (see ScrollView comment) — docks once the item scrolls past the top and
+            // pushes the item's sticky header out, so it doesn't linger off-screen. MUST be ≥1px:
+            // React Native ignores zero-height children when wiring up sticky headers, which left the
+            // open header with no follower to push it out. 1px transparent ≈ invisible.
+            const sentinel = <View key={`s-${item.key}`} style={{ height: 1 }} />;
             return [header, content, sentinel];
           })
         )}
