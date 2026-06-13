@@ -136,7 +136,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
             <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
               {instrument === 'guitar'
                 ? <MiniChordDiagram voicing={it.voicing} arpShape={it.arpShape} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={labelRoot} />
-                : <MiniPianoDiagram chord={isChordQuality ? { rootSemi, chordType: itemKey } : undefined} notes={it.notes} noteFormulas={it.noteFormulas} theme={t} octave={octave} maxWidth={innerW} labelMode={labelMode} namingMode={namingMode} rootSemi={labelRoot} />}
+                : <MiniPianoDiagram chord={isChordQuality ? { rootSemi, chordType: itemKey } : undefined} notes={it.notes} noteFormulas={it.noteFormulas} theme={t} octave={octave} maxWidth={innerW} maxHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={labelRoot} />}
             </View>
             {c ? (
               <>
