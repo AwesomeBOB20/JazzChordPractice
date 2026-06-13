@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const DEFAULT_VOICING_TYPES = ['block', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'];
+const DEFAULT_INVERSIONS = ['root', '1st', '2nd', '3rd'];
+
 export interface QuizState {
   quizMode: 'visual' | 'audio';
   quizScore: number;
@@ -12,6 +15,7 @@ export interface QuizState {
 
   setQuizMode: (mode: 'visual' | 'audio') => void;
   resetQuiz: () => void;
+  resetPreferences: () => void;
   incrementQuiz: (correct: boolean) => void;
   toggleVoicingType: (type: string) => void;
   setActiveVoicingTypes: (types: string[]) => void;
@@ -26,11 +30,14 @@ export const useQuizStore = create<QuizState>()(
       quizScore: 0,
       quizTotal: 0,
       quizStreak: 0,
-      activeVoicingTypes: ['block', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'],
-      activeInversions: ['root', '1st', '2nd', '3rd'],
+      activeVoicingTypes: [...DEFAULT_VOICING_TYPES],
+      activeInversions: [...DEFAULT_INVERSIONS],
 
       setQuizMode: (quizMode) => set({ quizMode }),
       resetQuiz: () => set({ quizScore: 0, quizTotal: 0, quizStreak: 0 }),
+      // Reset quiz PREFERENCES (mode + which voicings/inversions are quizzed) to defaults.
+      // Scores are kept — those are wiped by "Clear Stored Progress" via resetQuiz.
+      resetPreferences: () => set({ quizMode: 'visual', activeVoicingTypes: [...DEFAULT_VOICING_TYPES], activeInversions: [...DEFAULT_INVERSIONS] }),
       incrementQuiz: (correct) => set((state) => ({
         quizTotal: state.quizTotal + 1,
         quizScore: correct ? state.quizScore + 1 : state.quizScore,

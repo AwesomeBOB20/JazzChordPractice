@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Platform, StatusBar as RNStatusBar, TextInput, UIManager, Dimensions, Animated, TouchableWithoutFeedback, PanResponder, BackHandler } from 'react-native';
+import { Alert, View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Platform, StatusBar as RNStatusBar, TextInput, UIManager, Dimensions, Animated, TouchableWithoutFeedback, PanResponder, BackHandler } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,7 +10,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { THEMES } from '@shared/ui/themes';
-import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, GUITAR_TUNING } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, GUITAR_TUNING, detectKey } from '@shared/theory/musicTheory';
 import { useAudio } from '@shared/audio/AudioContext';
 import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
 import { calculateOptimalVoiceLeading, STRING_SETS_BY_TYPE, buildScaleVoicings, buildArpVoicings } from '@shared/guitar';
@@ -259,9 +259,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
 
 export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
-  const { theme, instrument, bpm, setBpm, voiceLeading, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced } = useSettingsStore();
+  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro } = useSettingsStore();
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
-  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory } = useProgressionStore();
+  const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory, activeSongId } = useProgressionStore();
   
   const t = THEMES[theme];
   const insets = useSafeAreaInsets();
@@ -291,7 +291,7 @@ export default function ProgressionScreen() {
     }
   };
 
-  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet]);
+  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet, voiceLeadDir]);
 
   const pianoVoicings = React.useMemo(() => {
     const result: any[] = [];
@@ -303,6 +303,14 @@ export default function ProgressionScreen() {
     // ignored — each chord is plain root position at the settings octave.
     const ZONE_PC = (((pianoZone % 12) + 12) % 12);
     const ZONE_TARGET = ((octave + 1) * 12) + ZONE_PC;
+
+    // Directional walk state (mirrors the guitar engine). `home` is the register the voicing
+    // is pulled toward each chord: Zone keeps it on ZONE_TARGET; Up/Down walk it and wrap by an
+    // octave at the band edges (staircase); Bounce ping-pongs it. PIANO_SPAN ≈ the half-band it
+    // travels (kept under an octave so notes stay in the octave-search range).
+    const PIANO_STEP = 4, PIANO_SPAN = 10;
+    let home = ZONE_TARGET;
+    let pBounceDir: 'up' | 'down' = 'up';
 
     for (let i = 0; i < progression.length; i++) {
       const chord = progression[i];
@@ -328,30 +336,48 @@ export default function ProgressionScreen() {
       }
 
       {
+        // Advance the directional `home` for this chord (after the first real chord, which sets
+        // the opening register). Up/Down walk the register and wrap an octave at the band edge;
+        // Bounce ping-pongs; Zone leaves home on ZONE_TARGET (identical to the old behaviour).
+        if (lastVoicing) {
+          if (voiceLeadDir === 'up')   { home += PIANO_STEP; if (home > ZONE_TARGET + PIANO_SPAN) home -= 12; }
+          else if (voiceLeadDir === 'down') { home -= PIANO_STEP; if (home < ZONE_TARGET - PIANO_SPAN) home += 12; }
+          else if (voiceLeadDir === 'bounce') {
+            home += (pBounceDir === 'up' ? PIANO_STEP : -PIANO_STEP);
+            if (home >= ZONE_TARGET + PIANO_SPAN) { home = ZONE_TARGET + PIANO_SPAN; pBounceDir = 'down'; }
+            else if (home <= ZONE_TARGET - PIANO_SPAN) { home = ZONE_TARGET - PIANO_SPAN; pBounceDir = 'up'; }
+          }
+        }
+
         // Voice-lead each pitch class to the octave nearest the previous voicing — or, for the
-        // FIRST chord (no previous), nearest the ZONE note. Using the zone as the first chord's
-        // reference means it actually re-voices (inverts) when the zone changes, instead of
-        // being frozen in root position the way a whole-voicing octave shift left it.
+        // FIRST chord (no previous), nearest `home`. Using home as the first chord's reference
+        // means it actually re-voices (inverts) when the zone changes, instead of being frozen
+        // in root position the way a whole-voicing octave shift left it.
+        const directional = voiceLeadDir === 'up' || voiceLeadDir === 'down' || voiceLeadDir === 'bounce';
         const prevCenter = lastVoicing
           ? lastVoicing.reduce((a, b) => a + b, 0) / lastVoicing.length
-          : ZONE_TARGET;
+          : home;
         let next = rawNotes.map(note => {
           const pc = note % 12;
           let closest = pc + baseMidi;
           let minScore = Infinity;
           for (let oct = octave - 2; oct <= octave + 2; oct++) {
             const test = pc + oct * 12;
-            const score = Math.abs(test - prevCenter) + 0.6 * Math.abs(test - ZONE_TARGET);
+            // Directional modes track the walking `home` register directly so the voicing
+            // actually moves with it; Zone keeps the original smoothness+zone blend.
+            const score = directional
+              ? Math.abs(test - home)
+              : Math.abs(test - prevCenter) + 0.6 * Math.abs(test - home);
             if (score < minScore) { minScore = score; closest = test; }
           }
           return closest;
         });
         next.sort((a: number, b: number) => a - b);
-        // Keep it centred on the zone: if the whole voicing has drifted more than a few
-        // semitones off the target, octave-shift it back — voice leading guiding it home.
+        // Hard register clamp: if the whole voicing has drifted more than a few semitones off
+        // `home`, octave-shift it back. This is what carries the voicing along as home walks.
         let center = next.reduce((a, b) => a + b, 0) / next.length;
-        while (center - ZONE_TARGET > 7) { next = next.map(n => n - 12); center -= 12; }
-        while (ZONE_TARGET - center > 7) { next = next.map(n => n + 12); center += 12; }
+        while (center - home > 7) { next = next.map(n => n - 12); center -= 12; }
+        while (home - center > 7) { next = next.map(n => n + 12); center += 12; }
         next.sort((a: number, b: number) => a - b);
         rawNotes = next;
       }
@@ -360,7 +386,7 @@ export default function ProgressionScreen() {
       result.push({ notes: rawNotes });
     }
     return result;
-  }, [progression, voiceLeading, octave, pianoZone]);
+  }, [progression, voiceLeading, octave, pianoZone, voiceLeadDir]);
 
   // ── ARPS view: CAGED arpeggio shapes (same as the Play / Quiz screens) ──────────
   // Guitar: build the chord's full arpeggio across the 5 CAGED boxes, then keep the ONE
@@ -476,10 +502,12 @@ export default function ProgressionScreen() {
 
   const [isSaveModalVisible, setIsSaveModalVisible] = useState(false);
   const [isLibModalVisible, setIsLibModalVisible] = useState(false);
+  const [isKeyModalVisible, setIsKeyModalVisible] = useState(false);
+  const [keyModalQuality, setKeyModalQuality] = useState<'major' | 'minor'>('major');
   const [songName, setSongName] = useState('');
   const [isBpmModalVisible, setIsBpmModalVisible] = useState(false);
   // Library categories
-  const [selectedLibCategory, setSelectedLibCategory] = useState('Songs');
+  const [selectedLibCategory, setSelectedLibCategory] = useState('Standards');
   const [isCatModalVisible, setIsCatModalVisible] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [moveSongId, setMoveSongId] = useState<string | null>(null);
@@ -555,6 +583,31 @@ export default function ProgressionScreen() {
     });
   }, [groupedCells]);
 
+  const detectedKey = React.useMemo(() => {
+    // Only analyse the first section so multi-key exercises (ii-V-I circle, etc.)
+    // display and transpose from their opening key rather than a blended average.
+    let sectionsSeen = 0;
+    const firstSection: typeof progression = [];
+    for (const cell of progression) {
+      if (cell && !cell.spacer && cell.section) {
+        sectionsSeen++;
+        if (sectionsSeen === 2) break;
+      }
+      firstSection.push(cell);
+    }
+    if (sectionsSeen < 2) {
+      // No second section marker — cap at 4 real chords (one ii-V-I cycle).
+      const capped: typeof progression = [];
+      let real = 0;
+      for (const c of firstSection) {
+        capped.push(c);
+        if (c && !c.spacer) { real++; if (real >= 4) break; }
+      }
+      return detectKey(capped);
+    }
+    return detectKey(firstSection);
+  }, [progression]);
+
   const [isDrawerVisible, setIsDrawerVisible] = useState(false);
   const drawerSlideAnim = useRef(new Animated.Value(sheetPixelHeight)).current;
   const drawerBackdropAnim = useRef(new Animated.Value(0)).current;
@@ -605,6 +658,8 @@ export default function ProgressionScreen() {
     const timer = setTimeout(performScroll, 250);
     return () => clearTimeout(timer);
   }, [isDrawerVisible, brushRoot, brushType, drawerRootHeight, drawerQualHeight]);
+
+  const showProAlert = () => Alert.alert('Pro Feature', 'Upgrade to Pro to unlock key changes and zone control.', [{ text: 'OK' }]);
 
   const openDrawer = () => setIsDrawerVisible(true);
   const closeDrawer = () => {
@@ -662,13 +717,14 @@ export default function ProgressionScreen() {
       if (isCatModalVisible) { setIsCatModalVisible(false); return true; }
       if (isSaveModalVisible) { setIsSaveModalVisible(false); return true; }
       if (isBpmModalVisible) { setIsBpmModalVisible(false); return true; }
+      if (isKeyModalVisible) { setIsKeyModalVisible(false); return true; }
       if (isLibModalVisible) { setIsLibModalVisible(false); return true; }
       if (isDrawerVisible || drawerModalVisible) { closeDrawer(); return true; }
       return false;
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
-  }, [moveSongId, isCatModalVisible, isSaveModalVisible, isBpmModalVisible, isLibModalVisible, isDrawerVisible, drawerModalVisible]);
+  }, [moveSongId, isCatModalVisible, isSaveModalVisible, isBpmModalVisible, isLibModalVisible, isKeyModalVisible, isDrawerVisible, drawerModalVisible]);
 
   const playSelectedCellAudio = (idx: number, chord: any) => {
     if (!chord || chord.spacer) return;
@@ -830,16 +886,18 @@ export default function ProgressionScreen() {
               <Text style={{ fontSize: 10, fontWeight: '800', color: viewMode === 'text' ? t.txt2 : t.accent }}>{viewMode === 'text' ? 'NAME' : arpView ? 'ARPS' : 'CHORDS'}</Text>
             </TouchableOpacity>
             
-            {instrument === 'guitar' && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
-                <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 12 : (guitarNeckZone <= 1 ? null : guitarNeckZone - 1))} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+            {/* Neck zone is hidden for Up/Down, which deliberately walk the whole neck and
+                ignore the zone; Zone and Bounce both still use it (Bounce swings within it). */}
+            {instrument === 'guitar' && !(voiceLeading && (voiceLeadDir === 'up' || voiceLeadDir === 'down')) && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: isPro ? t.border : t.border, overflow: 'hidden', opacity: isPro ? 1 : 0.5 }}>
+                <TouchableOpacity onPress={() => isPro ? setGuitarNeckZone(guitarNeckZone === null ? 12 : (guitarNeckZone <= 1 ? null : guitarNeckZone - 1)) : showProAlert()} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
                   <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>-</Text>
                 </TouchableOpacity>
                 <View style={{ alignItems: 'center', minWidth: 36 }}>
                   <Text style={{ fontSize: 8, fontWeight: '800', color: t.txt3 }}>ZONE</Text>
                   <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt1 }}>{guitarNeckZone === null ? 'AUTO' : guitarNeckZone}</Text>
                 </View>
-                <TouchableOpacity onPress={() => setGuitarNeckZone(guitarNeckZone === null ? 1 : (guitarNeckZone >= 12 ? null : guitarNeckZone + 1))} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
+                <TouchableOpacity onPress={() => isPro ? setGuitarNeckZone(guitarNeckZone === null ? 1 : (guitarNeckZone >= 12 ? null : guitarNeckZone + 1)) : showProAlert()} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
                   <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>+</Text>
                 </TouchableOpacity>
               </View>
@@ -852,15 +910,15 @@ export default function ProgressionScreen() {
               const noteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[zonePc];
               const label = `${noteName}${octave}`;
               return (
-                <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
-                  <TouchableOpacity onPress={() => setPianoZone((zonePc + 11) % 12)} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden', opacity: isPro ? 1 : 0.5 }}>
+                  <TouchableOpacity onPress={() => isPro ? setPianoZone((zonePc + 11) % 12) : showProAlert()} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
                     <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>-</Text>
                   </TouchableOpacity>
                   <View style={{ alignItems: 'center', minWidth: 40 }}>
                     <Text style={{ fontSize: 8, fontWeight: '800', color: t.txt3 }}>ZONE</Text>
                     <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt1 }}>{label}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => setPianoZone((zonePc + 1) % 12)} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
+                  <TouchableOpacity onPress={() => isPro ? setPianoZone((zonePc + 1) % 12) : showProAlert()} style={{ height: 40, width: 30, justifyContent: 'center', alignItems: 'center', borderLeftWidth: 1, borderColor: t.border }}>
                     <Text style={{ fontSize: 16, fontWeight: '800', color: t.txt2 }}>+</Text>
                   </TouchableOpacity>
                 </View>
@@ -893,7 +951,7 @@ export default function ProgressionScreen() {
               return (
                 <TouchableOpacity
                   onPress={() => {
-                    const keys: (string | null)[] = [...sets.map(s => s.key), null];
+                    const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
                     setSongStringSet(keys[(keys.indexOf(songStringSet) + 1) % keys.length]);
                   }}
                   style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
@@ -974,14 +1032,25 @@ export default function ProgressionScreen() {
             </View>
 
             {/* Transposition */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
-              <TouchableOpacity onPress={() => transposeProgression(-1)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, backgroundColor: t.bg2, borderRadius: 20, borderWidth: 1, borderColor: t.border, overflow: 'hidden', opacity: isPro ? 1 : 0.5 }}>
+              <TouchableOpacity onPress={() => isPro ? transposeProgression(-1) : showProAlert()} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center', borderRightWidth: 1, borderColor: t.border }}>
                 <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt2, transform: [{ translateY: -2 }] }}>♭</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => transposeProgression(1)} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}>
+              <TouchableOpacity onPress={() => isPro ? transposeProgression(1) : showProAlert()} style={{ height: 40, width: 40, justifyContent: 'center', alignItems: 'center' }}>
                 <Text style={{ fontSize: 20, fontWeight: '800', color: t.txt2, transform: [{ translateY: -2 }] }}>♯</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Change Key */}
+            <TouchableOpacity
+              onPress={() => isPro ? (setKeyModalQuality(detectedKey.quality), setIsKeyModalVisible(true)) : showProAlert()}
+              style={{ height: 40, minWidth: 60, paddingHorizontal: 10, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border, opacity: isPro ? 1 : 0.5 }}
+            >
+              <Text style={{ fontSize: 8, fontWeight: '800', color: t.txt3 }}>KEY</Text>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt1 }}>
+                {NOTE_FLAT[detectedKey.root]}{detectedKey.quality === 'minor' ? 'm' : ''}
+              </Text>
+            </TouchableOpacity>
 
             {/* Measure Management */}
             <View style={{ flexDirection: 'row', alignItems: 'center', height: 40, gap: 8 }}>
@@ -1449,7 +1518,7 @@ export default function ProgressionScreen() {
             <Text style={[styles.modalTitle, { color: t.txt1 }]}>Library</Text>
             <TouchableOpacity onPress={() => setIsLibModalVisible(false)} style={{ padding: 4 }}><Ionicons name="close" size={28} color={t.txt1} /></TouchableOpacity>
           </View>
-          {/* Category selector: Exercises / Songs / custom… + add a category */}
+          {/* Category selector: Exercises / Standards / custom… + add a category */}
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 8 }}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 8, alignItems: 'center', paddingRight: 8 }}>
               {categories.map((cat: string) => {
@@ -1474,7 +1543,7 @@ export default function ProgressionScreen() {
               // (case-insensitive). .filter() returns a fresh array, so the sort doesn't mutate
               // the store's saved order.
               const visibleSongs = savedSongs
-                .filter((s: any) => (s.category || 'Songs') === selectedLibCategory)
+                .filter((s: any) => (s.category || 'Standards') === selectedLibCategory)
                 .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
               if (visibleSongs.length === 0) {
                 return (
@@ -1485,9 +1554,11 @@ export default function ProgressionScreen() {
                   </View>
                 );
               }
-              return visibleSongs.map((song: any) => (
-                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => { stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
-                  <View style={[styles.songCardIcon, { backgroundColor: t.bg3, borderColor: t.border }]}><Ionicons name="play" size={20} color={t.accent} /></View>
+              return visibleSongs.map((song: any) => {
+                const isActive = song.id === activeSongId;
+                return (
+                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: isActive ? t.bg3 : t.bg2, borderColor: isActive ? t.accent : t.border, borderWidth: isActive ? 2 : 1 }]} onPress={() => { stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
+                  <View style={[styles.songCardIcon, { backgroundColor: isActive ? t.accent : t.bg3, borderColor: t.border }]}><Ionicons name="play" size={20} color={isActive ? '#fff' : t.accent} /></View>
                   <View style={{ flex: 1, paddingHorizontal: 12 }}>
                     <Text style={{ color: t.txt1, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{song.name}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Ionicons name="timer-outline" size={12} color={t.txt3} /><Text style={{ color: t.txt3, fontSize: 12, fontWeight: '600' }}>{song.bpm} BPM</Text></View>
@@ -1495,7 +1566,8 @@ export default function ProgressionScreen() {
                   <TouchableOpacity onPress={() => setMoveSongId(song.id)} style={styles.deleteBtn}><Ionicons name="folder-outline" size={18} color={t.txt3} /></TouchableOpacity>
                   <TouchableOpacity onPress={() => deleteSong(song.id)} style={styles.deleteBtn}><Ionicons name="trash-outline" size={20} color={t.accent} /></TouchableOpacity>
                 </TouchableOpacity>
-              ));
+                );
+              });
             })()}
           </ScrollView>
         </View>
@@ -1532,6 +1604,51 @@ export default function ProgressionScreen() {
       </PopUpModal>
 
       <BpmModal visible={isBpmModalVisible} onClose={() => setIsBpmModalVisible(false)} />
+
+      {/* Key Selection Modal */}
+      <SlideUpModal visible={isKeyModalVisible} onClose={() => setIsKeyModalVisible(false)}>
+        <View style={[{ flex: 1, backgroundColor: t.bg }]}>
+          <View style={[styles.modalHeader, { paddingTop: 10, paddingBottom: 8 }]}>
+            <Text style={[styles.modalTitle, { color: t.txt1 }]}>Change Key</Text>
+            <TouchableOpacity onPress={() => setIsKeyModalVisible(false)} style={{ padding: 4 }}><Ionicons name="close" size={28} color={t.txt1} /></TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 20, paddingBottom: 12 }}>
+            {(['major', 'minor'] as const).map(q => (
+              <TouchableOpacity key={q} onPress={() => setKeyModalQuality(q)}
+                style={{ flex: 1, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: keyModalQuality === q ? t.accent : t.bg2, borderWidth: 1, borderColor: keyModalQuality === q ? t.accent : t.border }}>
+                <Text style={{ fontWeight: '700', fontSize: 14, color: keyModalQuality === q ? '#fff' : t.txt2 }}>{q.charAt(0).toUpperCase() + q.slice(1)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              {[0,1,2,3,4,5,6,7,8,9,10,11].map(root => {
+                const label = NOTE_FLAT[root] + (keyModalQuality === 'minor' ? 'm' : '');
+                // When the quality toggle differs from the detected quality, treat the
+                // relative key as "current" so Em ↔ G major costs zero semitones.
+                const effectiveRoot = keyModalQuality === detectedKey.quality
+                  ? detectedKey.root
+                  : keyModalQuality === 'major'
+                    ? (detectedKey.root + 3) % 12   // relative major of detected minor
+                    : (detectedKey.root + 9) % 12;  // relative minor of detected major
+                const isCurrent = effectiveRoot === root;
+                return (
+                  <TouchableOpacity key={root}
+                    onPress={() => {
+                      const semitones = ((root - effectiveRoot) + 12) % 12;
+                      const shift = semitones > 6 ? semitones - 12 : semitones;
+                      if (shift !== 0) transposeProgression(shift);
+                      setIsKeyModalVisible(false);
+                    }}
+                    style={{ width: '30%', height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: isCurrent ? t.accent : t.bg2, borderWidth: 1, borderColor: isCurrent ? t.accent : t.border }}>
+                    <Text style={{ fontSize: 18, fontWeight: '800', color: isCurrent ? '#fff' : t.txt1 }}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </View>
+      </SlideUpModal>
     </View>
   );
 }

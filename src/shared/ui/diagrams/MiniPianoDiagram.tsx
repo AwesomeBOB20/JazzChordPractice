@@ -1,9 +1,10 @@
 import React from 'react';
 import { View } from 'react-native';
-import Svg, { Rect } from 'react-native-svg';
+import Svg, { Rect, Text as SvgText, Defs, RadialGradient, LinearGradient, Stop, Ellipse } from 'react-native-svg';
 import { ROLE_COLORS_GLOBAL, getNoteColor } from '@shared/ui/themes';
-import { CH } from '@shared/theory/musicTheory';
+import { CH, getGlobalLabel } from '@shared/theory/musicTheory';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+import { familyForWeight } from '@shared/fonts/fonts';
 
 interface Props {
   chord: any;
@@ -11,11 +12,24 @@ interface Props {
   theme: any;
   octave?: number;
   isMasked?: boolean;
+  maxWidth?: number; // when set, the diagram scales UP to ~fill this width (capped); default keeps the compact 68px cap
+  // When labelMode is set (and not 'none'), each active key shows its degree / note
+  // name, following the global label preference. Omitted → no labels.
+  labelMode?: 'degrees' | 'notes' | 'none';
+  namingMode?: 'sharp' | 'flat';
+  rootSemi?: number;
+  noteFormulas?: string[]; // degree token per provided note (scale/arp) → degree colour + labels
 }
 
-const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octave = 4, isMasked }: Props) => {
+const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octave = 4, isMasked, maxWidth, labelMode, namingMode, rootSemi, noteFormulas }: Props) => {
   const colorMode = useSettingsStore((s: any) => s.colorMode);
+  const storeFontFamily = useSettingsStore((s: any) => s.fontFamily);
+  const svgFont = familyForWeight(storeFontFamily, '700');
+  const showLabels = !!labelMode && labelMode !== 'none';
   const selectiveRoles = useSettingsStore((s: any) => s.selectiveRoles);
+  // Dark themes have a non-white bg2; soften the divider stroke between white keys so the
+  // keys read as a more uniform white area rather than a grid chopped up by dark lines.
+  const isDark = theme.bg2 !== '#FFFFFF';
 
   if (!chord && (!providedNotes || !providedNotes.length)) return <View style={{ height: 52 }} />;
 
@@ -26,14 +40,18 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
 
   if (providedNotes && providedNotes.length > 0) {
     activeNotes = providedNotes;
-    roles = activeNotes.map((midi: number) => {
-      const pc = midi % 12;
-      if (def) {
-        const idx = def.iv.findIndex((iv: number) => (chord.rootSemi + iv) % 12 === pc);
-        if (idx !== -1) return def.f[idx];
-      }
-      return '';
-    });
+    // Prefer explicit degree tokens (scales/arps carry their own) so each note gets its
+    // correct scale-degree colour; otherwise derive from the chord, if one was passed.
+    roles = (noteFormulas && noteFormulas.length === providedNotes.length)
+      ? noteFormulas
+      : activeNotes.map((midi: number) => {
+          const pc = midi % 12;
+          if (def) {
+            const idx = def.iv.findIndex((iv: number) => (chord.rootSemi + iv) % 12 === pc);
+            if (idx !== -1) return def.f[idx];
+          }
+          return '';
+        });
   } else if (def) {
     const intervals = def.iv.slice(0, 4);
     activeNotes = intervals.map((iv: number) => {
@@ -80,34 +98,37 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
   for (let midi = minMidi; midi <= maxMidi; midi++) {
       const activeIdx = activeNotes.indexOf(midi);
       const active = activeIdx !== -1;
-      
+      const role = active ? roles[activeIdx] : '';
+
       let color = theme.accent;
       if (active) {
-        const role = roles[activeIdx];
         color = (!isMasked && role) ? getNoteColor(role, colorMode, theme, selectiveRoles) : theme.accent;
       } else {
         color = '#fff';
       }
-      
+
+      const label = (active && showLabels) ? getGlobalLabel(labelMode!, namingMode || 'sharp', rootSemi, role, undefined, midi, undefined) : '';
+
       if (!isBlack(midi)) {
-          whiteKeys.push({ midi, active, color, x: whiteIdx * WHITE_WIDTH });
+          whiteKeys.push({ midi, active, color, x: whiteIdx * WHITE_WIDTH, label });
           whiteIdx++;
       } else {
-          blackKeys.push({ midi, active, color: active ? color : '#222', x: (whiteIdx * WHITE_WIDTH) - (BLACK_WIDTH / 2) });
+          blackKeys.push({ midi, active, color: active ? color : '#222', x: (whiteIdx * WHITE_WIDTH) - (BLACK_WIDTH / 2), label });
       }
   }
 
   const SVG_W = whiteIdx * WHITE_WIDTH;
   const SVG_H = WHITE_HEIGHT;
-  
-  // Calculate exact pixel bounds to prevent the "shrink-wrap" collapse bug
-  const MAX_WIDTH = 68; // Slightly smaller safe maximum width for grid cells
-  const scale = Math.min(1, MAX_WIDTH / SVG_W);
+
+  // Default: cap at 68px (compact, for the progression grid). When a maxWidth is
+  // given (dictionary grid), scale UP to roughly fill it so bigger chords read
+  // clearly — capped at 2.4× so a 2-note interval doesn't blow up.
+  const scale = maxWidth ? Math.min(2.4, maxWidth / SVG_W) : Math.min(1, 68 / SVG_W);
   const displayW = SVG_W * scale;
   const displayH = SVG_H * scale;
-  
+
   return (
-    <View style={{ height: 48, alignItems: 'center', justifyContent: 'center', marginTop: -4}}>
+    <View style={{ height: maxWidth ? Math.ceil(displayH) : 48, alignItems: 'center', justifyContent: 'center', marginTop: -4}}>
       <Svg 
         viewBox={`0 0 ${SVG_W} ${SVG_H}`} 
         width={displayW} 
@@ -115,13 +136,42 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
         preserveAspectRatio="xMidYMid meet"
       >
          {whiteKeys.map(k => (
-           <Rect 
-             key={k.midi} 
-             x={k.x} y={0} 
-             width={WHITE_WIDTH} height={WHITE_HEIGHT} 
-             fill={k.color} 
-             stroke={theme.border} strokeWidth={1} rx={1} 
+           <Rect
+             key={k.midi}
+             x={k.x} y={0}
+             width={WHITE_WIDTH} height={WHITE_HEIGHT}
+             fill={k.color}
+             stroke={isDark ? 'rgba(255,255,255,0.3)' : theme.border} strokeWidth={1} rx={1}
            />
+         ))}
+         {/* Soft, blurred drop shadow under each black key — a radial fade (dark contact
+             point → transparent) so it reads as a subtle depth cue, not a hard band.
+             Shared component → applies to the progression grid too. */}
+         <Defs>
+           <RadialGradient id="miniKeyShadow" cx="50%" cy="50%" r="50%">
+             <Stop offset="0" stopColor="#000" stopOpacity={0.38} />
+             <Stop offset="1" stopColor="#000" stopOpacity={0} />
+           </RadialGradient>
+           {/* Side shadows: darkest at the black key's edge, fading out onto the white key beside it,
+               so each accidental reads as raised and distinct from the white below. Kept subtle. */}
+           <LinearGradient id="bkShadeL" x1="0" y1="0" x2="1" y2="0">
+             <Stop offset="0" stopColor="#000" stopOpacity={0} />
+             <Stop offset="1" stopColor="#000" stopOpacity={0.16} />
+           </LinearGradient>
+           <LinearGradient id="bkShadeR" x1="0" y1="0" x2="1" y2="0">
+             <Stop offset="0" stopColor="#000" stopOpacity={0.16} />
+             <Stop offset="1" stopColor="#000" stopOpacity={0} />
+           </LinearGradient>
+         </Defs>
+         {blackKeys.map(k => (
+           <Ellipse key={`bks-${k.midi}`} cx={k.x + BLACK_WIDTH / 2} cy={BLACK_HEIGHT - 0.5} rx={BLACK_WIDTH * 0.6} ry={2} fill="url(#miniKeyShadow)" />
+         ))}
+         {/* Thin left/right drop shadows cast onto the neighbouring white keys. */}
+         {blackKeys.map(k => (
+           <Rect key={`bksl-${k.midi}`} x={k.x - 1.6} y={0} width={1.6} height={BLACK_HEIGHT} fill="url(#bkShadeL)" />
+         ))}
+         {blackKeys.map(k => (
+           <Rect key={`bksr-${k.midi}`} x={k.x + BLACK_WIDTH} y={0} width={1.6} height={BLACK_HEIGHT} fill="url(#bkShadeR)" />
          ))}
          {blackKeys.map(k => (
            <Rect
@@ -132,15 +182,21 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
              rx={1}
            />
          ))}
-         {/* Overall thin black border */}
-         <Rect 
-           x={0} y={0} 
-           width={SVG_W} height={SVG_H} 
-           fill="none" 
-           stroke="#000" 
-           strokeWidth={1.5} 
-           rx={1} 
+         {/* Overall border — white frame in dark themes so the piano reads as a white block */}
+         <Rect
+           x={0} y={0}
+           width={SVG_W} height={SVG_H}
+           fill="none"
+           stroke={isDark ? 'rgba(255,255,255,0.5)' : '#000'}
+           strokeWidth={1.5}
+           rx={1}
          />
+         {showLabels && whiteKeys.filter(k => k.active && k.label).map(k => (
+           <SvgText key={`wl-${k.midi}`} x={k.x + WHITE_WIDTH / 2} y={WHITE_HEIGHT - 5} fill="#fff" fontSize={5} fontWeight="bold" textAnchor="middle" fontFamily={svgFont}>{k.label}</SvgText>
+         ))}
+         {showLabels && blackKeys.filter(k => k.active && k.label).map(k => (
+           <SvgText key={`bl-${k.midi}`} x={k.x + BLACK_WIDTH / 2} y={BLACK_HEIGHT - 4} fill="#fff" fontSize={5} fontWeight="bold" textAnchor="middle" fontFamily={svgFont}>{k.label}</SvgText>
+         ))}
       </Svg>
     </View>
   );

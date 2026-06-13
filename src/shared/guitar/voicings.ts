@@ -896,8 +896,6 @@ function buildTriadDropVoicings(
 //    (b5th/#5th) count as ordinary color tones.
 //  - base shell  = root + both guide tones.
 //  - rootless shells = both guide tones + one color tone, one per color tone.
-//  - plain 7th/6th chords (no color tones) also get the bare 2-note guide-tone
-//    shell (3 + 7).
 //  - chords with no 7th-role and no 6th (pure triads, add9/minAdd9) get nothing.
 const SHELL_THIRD_ROLES = ['3rd', 'b3rd'];
 const SHELL_THIRD_SUBS = ['4th', '2nd']; // sus chords have no 3rd
@@ -946,23 +944,11 @@ export function deriveShellToneSets(
       toneSets.push([c1, c2,  seventh]);  // ext1-ext2-7
     }
   }
-  // Guide-tone dyad — the foundational 2-note jazz shell (3 + 7), applies to
-  // all 7th/6th chords regardless of how many color tones they carry.
-  toneSets.push([third, seventh]);   // 3-7
-  toneSets.push([seventh, third]);   // 7-3
   return toneSets;
 }
 
 // String sets used to voice a shell, grouped by which string carries the bass
-// (the first index). 3-note sets skip an interior string (classic shell shapes);
-// 2-note sets use an adjacent pair.
-const SHELL_STRING_SETS_2: number[][] = [
-  [0, 1],  // 65
-  [1, 2],  // 54
-  [2, 3],  // 43
-  [3, 4],  // 32
-  [4, 5],  // 21
-];
+// (the first index). 3-note sets skip an interior string (classic shell shapes).
 const SHELL_STRING_SETS_3: number[][] = [
   [0, 1, 2],  // 654
   [0, 2, 3],  // 643
@@ -1090,9 +1076,19 @@ export function identifyChord(
     }
   }
   
-  // Sort by complexity (fewer notes = simpler = priority)
-  matches.sort((a, b) => a.complexity - b.complexity);
-  
+  // Prefer a match rooted on the EXPECTED root (e.g. the root selected in the dictionary dial)
+  // for inversion-ambiguous chords, so B-C♯-F♯ reads "B sus2" when B is selected — not the
+  // enharmonically-equal "F♯ sus4". Fall back to the simplest (fewest-note) match otherwise.
+  const expectedPC = expectedRootSemi !== undefined ? ((expectedRootSemi % 12) + 12) % 12 : undefined;
+  matches.sort((a, b) => {
+    if (expectedPC !== undefined) {
+      const aExp = a.root === expectedPC ? 0 : 1;
+      const bExp = b.root === expectedPC ? 0 : 1;
+      if (aExp !== bExp) return aExp - bExp;
+    }
+    return a.complexity - b.complexity;
+  });
+
   if (matches.length > 0) {
     const best = matches[0];
     return `${best.name} ${best.label}`;
@@ -1310,7 +1306,7 @@ function buildShellVoicingsUncached(
   const groupMap = new Map<string, Voicing[]>();
 
   for (const roles of toneSets) {
-    const stringSets = roles.length === 2 ? SHELL_STRING_SETS_2 : SHELL_STRING_SETS_3;
+    const stringSets = SHELL_STRING_SETS_3;
     for (const strings of stringSets) {
       const placed = placeShellToneSet(roles, strings, chordDef, rootSemi);
       if (!placed) continue;
@@ -2345,6 +2341,112 @@ function buildHardcodedShapeVoicingsUncached(
       });
 
   return results;
+}
+
+// ─── STANDALONE SHAPE + INTERVAL BUILDERS (dictionary "Shapes"/"Intervals" tabs) ──
+// These render a SINGLE CAGED shape template, or a single interval, at any root —
+// independent of any chord. Kept separate from buildHardcodedShapeVoicings (which
+// resolves chord→stack) so the dictionary can list shapes/intervals as first-class
+// items. GS_PC = open-string pitch classes for standard tuning (E A D G B e).
+const GS_PC_STANDALONE = [4, 9, 2, 7, 11, 4];
+
+/** Friendly display name per CAGED shape template key. */
+export const SHAPE_DISPLAY_NAMES: Record<string, string> = {
+  maj_shape: 'Maj', min_shape: 'Min', aug_shape: 'Aug', dim_4_shape: 'Dim',
+  sus4_shape: 'Sus4', sus2_shape: 'Sus2', maj_b5_shape: 'Maj ♭5', min_b5_shape: 'Min ♭5',
+  min_2_shape: 'Min 2', '7b9_shape': '7♭9', b5_shape: '7♭5', b5_b9_shape: '7♭5♭9',
+  b5_s9_shape: '7♭5♯9', s5_b9_shape: '7♯5♭9', s5_s9_shape: '7♯5♯9',
+  lydian_shape: 'Lydian', phrygian_shape: 'Phrygian', blues_shape: 'Blues',
+};
+
+const SHAPE_BOX_MAP: Record<string, string> = {
+  'E Shape': 'Box 1 (E Shape)', 'D Shape': 'Box 2 (D Shape)', 'C Shape': 'Box 3 (C Shape)',
+  'A Shape': 'Box 4 (A Shape)', 'G Shape': 'Box 5 (G Shape)',
+};
+
+/** Build one CAGED shape template's 5 boxes at an arbitrary root (self-rooted labels). */
+export function buildShapeTemplate(
+  shapeKey: string, rootSemi: number, namingMode: 'sharp' | 'flat' = 'sharp'
+): ScaleVoicing[] {
+  const boxes = (HARDCODED_SHAPES as any)[shapeKey];
+  if (!boxes) return [];
+  const flat = namingMode === 'flat';
+  const display = SHAPE_DISPLAY_NAMES[shapeKey] || shapeKey.replace('_shape', '');
+  const rootLetter = spellInterval(rootSemi, 'R', flat);
+  const results: ScaleVoicing[] = [];
+
+  boxes.forEach((box: any, index: number) => {
+    // Transpose so the box's own root ('1') lands on rootSemi (lowest position),
+    // pulling to open position when every note stays ≥ 0 — same as the live builder.
+    let bFret = 0, bString = 0;
+    for (let s = 0; s < 6; s++) {
+      const ri = box.roles[s].indexOf('1');
+      if (ri !== -1) { bFret = box.frets[s][ri]; bString = s; break; }
+    }
+    let shift = ((rootSemi - GS_PC_STANDALONE[bString] - bFret) % 12 + 12) % 12;
+    let canDown = true;
+    for (let s = 0; s < 6; s++) (box.frets[s] || []).forEach((fr: number) => { if (fr + shift - 12 < 0) canDown = false; });
+    if (canDown) shift -= 12;
+
+    const notes: ScaleNote[] = [];
+    for (let s = 0; s < 6; s++) {
+      if (!box.frets[s]) continue;
+      box.frets[s].forEach((fr: number, i: number) => {
+        const af = fr + shift;
+        if (af < 0 || af > 22) return;
+        const tok = (box.roles[s][i] || '').toLowerCase();
+        const formula = (tok === '1' || tok === 'r' || tok === 'root') ? 'R' : box.roles[s][i];
+        notes.push({
+          stringIdx: s, fret: af, role: formula, formula,
+          noteName: spellInterval(rootSemi, formula === 'R' ? '1' : formula, flat), isChordTone: true,
+        });
+      });
+    }
+    if (!notes.length) return;
+    const fretsOnly = notes.map(n => n.fret).filter(f => f > 0);
+    results.push({
+      boxName: SHAPE_BOX_MAP[box.name] || box.name,
+      boxNumber: index + 1,
+      scaleName: `${rootLetter} ${display} Shape`,
+      scaleId: `shape-${shapeKey}`,
+      notes: notes.sort((a, b) => a.stringIdx - b.stringIdx || a.fret - b.fret),
+      minFret: fretsOnly.length ? Math.min(...fretsOnly) : 0,
+      maxFret: fretsOnly.length ? Math.max(...fretsOnly) : 4,
+    });
+  });
+  return results;
+}
+
+const INTERVAL_FORMULA: Record<number, string> = {
+  1: 'b2', 2: '2', 3: 'b3', 4: '3', 5: '4', 6: 'b5', 7: '5', 8: 'b6', 9: '6', 10: 'b7', 11: '7', 12: 'R',
+};
+
+/** Build a 2-note interval (root + root+semitone) on guitar: root on the A string,
+ *  interval note on the D string at the nearest position. Always within 0..22. */
+export function buildIntervalShape(
+  rootSemi: number, semitone: number, namingMode: 'sharp' | 'flat' = 'sharp'
+): ScaleVoicing {
+  const flat = namingMode === 'flat';
+  const fForm = INTERVAL_FORMULA[semitone] || 'R';
+  const rf = ((rootSemi - GS_PC_STANDALONE[1]) % 12 + 12) % 12; // A string, 0..11
+  const targetPc = (rootSemi + semitone) % 12;
+  // nearest D-string fret whose pitch class is the interval note
+  const baseF2 = ((targetPc - GS_PC_STANDALONE[2]) % 12 + 12) % 12;
+  let f2 = baseF2, best = Math.abs(baseF2 - rf);
+  for (const k of [1, 2]) { const f = baseF2 + 12 * k; if (f <= 22 && Math.abs(f - rf) < best) { best = Math.abs(f - rf); f2 = f; } }
+  const notes: ScaleNote[] = [
+    { stringIdx: 1, fret: rf, role: 'R', formula: 'R', noteName: spellInterval(rootSemi, '1', flat), isChordTone: true },
+    { stringIdx: 2, fret: f2, role: fForm, formula: fForm, noteName: spellInterval(rootSemi, fForm === 'R' ? '1' : fForm, flat), isChordTone: true },
+  ];
+  const fretsOnly = notes.map(n => n.fret).filter(f => f > 0);
+  return {
+    boxName: '', boxNumber: 1,
+    scaleName: `${spellInterval(rootSemi, 'R', flat)} interval`,
+    scaleId: `interval-${semitone}`,
+    notes,
+    minFret: fretsOnly.length ? Math.min(...fretsOnly) : 0,
+    maxFret: fretsOnly.length ? Math.max(...fretsOnly) : 4,
+  };
 }
 
 export function filterVoicingsByInversion(

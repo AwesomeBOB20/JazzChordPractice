@@ -103,7 +103,7 @@ export const CH: Record<string, {l:string,s:string,iv:number[],r:string[],f:stri
 export const CHORD_CATEGORIES = [
   { label: 'Triads', keys: ['maj', 'min', 'aug', 'dim', 'sus4', 'sus2', 'maj_b5'] },
   { label: '6th Chords', keys: ['maj6', 'min6', 'maj69', 'min69'] },
-  { label: '7th Chords', keys: ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'minMaj7', 'dimMaj7', 'dom7sus4'] },
+  { label: '7th Chords', keys: ['maj7', 'min7', 'dom7', 'hdim7', 'fdim7', 'minMaj7', 'dimMaj7', 'maj7s5', 'dom7sus4'] },
   { label: 'Altered 7ths', keys: ['dom7b5', 'dom7s5', 'dom7b9', 'dom7s9', 'dom7alt', 'dom7b13', 'dom7b5b9', 'dom7b5s9', 'dom7s5b9', 'dom7s5s9'] },
   { label: '9th Chords', keys: ['maj9', 'min9', 'dom9', 'minMaj9', 'dom9sus4', 'add9', 'minAdd9'] },
   { label: '11th Chords', keys: ['maj11', 'min11', 'dom11', 'maj7s11', 'dom7s11'] },
@@ -125,7 +125,7 @@ export const SCALES: Record<string, { name: string; iv: number[]; r: string[]; f
   'harm_min':     { name: 'Harmonic Minor',       iv: [0,2,3,5,7,8,11],    r: ['root','2nd','b3rd','4th','5th','b6th','7th'],     f: ['R','2','b3','4','5','b6','7'] },
   'dim_hw':       { name: 'HW Diminished',        iv: [0,1,3,4,6,7,9,10],  r: ['root','b2nd','b3rd','3rd','b5th','5th','6th','b7th'],f: ['R','b2','b3','3','b5','5','6','b7'] },
   'dim_wh':       { name: 'WH Diminished',        iv: [0,2,3,5,6,8,9,11],  r: ['root','2nd','b3rd','4th','b5th','b6th','6th','7th'],f: ['R','2','b3','4','b5','b6','6','7'] },
-  'altered':      { name: 'Altered',              iv: [0,1,3,4,6,8,10],    r: ['root','b2nd','#2nd','b3rd','b5th','b6th','b7th'], f: ['R','b2','#2','b3','b5','b6','b7'] },
+  'altered':      { name: 'Altered',              iv: [0,1,3,4,6,8,10],    r: ['root','b2nd','#2nd','3rd','b5th','b6th','b7th'], f: ['R','b2','#2','3','b5','b6','b7'] },
   'whole_tone':   { name: 'Whole Tone',           iv: [0,2,4,6,8,10],      r: ['root','2nd','3rd','#4th','#5th','b7th'],         f: ['R','2','3','#4','#5','b7'] },
   'lydian_aug':   { name: 'Lydian Augmented',     iv: [0,2,4,6,8,9,11],    r: ['root','2nd','3rd','#4th','#5th','6th','7th'],    f: ['R','2','3','#4','#5','6','7'] },
   'locrian_nat2': { name: 'Locrian ♮2',           iv: [0,2,3,5,6,8,10],    r: ['root','2nd','b3rd','4th','b5th','b6th','b7th'],  f: ['R','2','b3','4','b5','b6','b7'] },
@@ -138,7 +138,7 @@ export const SCALES: Record<string, { name: string; iv: number[]; r: string[]; f
   'bebop_min':    { name: 'Bebop Minor',          iv: [0,2,3,4,5,7,9,10],  r: ['root','2nd','b3rd','3rd','4th','5th','6th','b7th'],f: ['R','2','b3','3','4','5','6','b7'] },
   'bebop_mel_min':{ name: 'Bebop Melodic Minor',  iv: [0,2,3,5,7,8,9,11],  r: ['root','2nd','b3rd','4th','5th','b6th','6th','7th'],f: ['R','2','b3','4','5','b6','6','7'] },
   'blues_maj':    { name: 'Blues Major',          iv: [0,2,3,4,7,9],       r: ['root','2nd','b3rd','3rd','5th','6th'],           f: ['R','2','b3','3','5','6'] },
-  'augmented_sym':{ name: 'Augmented (Symmetric)',iv: [0,3,4,7,8,11],      r: ['root','b3rd','3rd','5th','#5th','7th'],         f: ['R','#2','3','5','#5','7'] },
+  'augmented_sym':{ name: 'Augmented (Symmetric)',iv: [0,3,4,7,8,11],      r: ['root','#2nd','3rd','5th','#5th','7th'],         f: ['R','#2','3','5','#5','7'] },
   'hung_min':     { name: 'Hungarian Minor',      iv: [0,2,3,6,7,8,11],    r: ['root','2nd','b3rd','#4th','5th','b6th','7th'],   f: ['R','2','b3','#4','5','b6','7'] },
   'hung_maj':     { name: 'Hungarian Major',      iv: [0,3,4,6,7,9,10],    r: ['root','#2nd','3rd','#4th','5th','6th','b7th'],   f: ['R','#2','3','#4','5','6','b7'] },
   'neapolitan_maj':{name: 'Neapolitan Major',     iv: [0,1,3,5,7,9,11],    r: ['root','b2nd','b3rd','4th','5th','6th','7th'],    f: ['R','b2','b3','4','5','6','7'] },
@@ -454,4 +454,59 @@ export function getBassLineMidi(rootSemi: number, chordType: string, nextRootSem
   }
 
   return line;
+}
+
+/**
+ * Analyse a chord progression and return the most likely key.
+ * Uses a simple diatonic-scoring approach: each chord that fits a candidate key
+ * adds to that key's score, with bonuses for strong-function chords (V7, I, ii°).
+ * First/last chords also carry a tonic-bias bonus.
+ */
+export function detectKey(
+  progression: Array<{ rootSemi: number; chordType: string; spacer?: boolean } | null>
+): { root: number; quality: 'major' | 'minor' } {
+  const realChords = progression.filter(
+    (c): c is { rootSemi: number; chordType: string; spacer?: boolean } => !!c && !c.spacer
+  );
+  if (!realChords.length) return { root: 0, quality: 'major' };
+
+  // scores[0..11] = major keys, scores[12..23] = minor keys (same root offsets)
+  const scores = new Array(24).fill(0);
+  const majorSteps = [0, 2, 4, 5, 7, 9, 11];
+  const minorSteps = [0, 2, 3, 5, 7, 8, 10];
+
+  for (const chord of realChords) {
+    for (let root = 0; root < 12; root++) {
+      const iv = ((chord.rootSemi - root) + 12) % 12;
+      if (majorSteps.includes(iv)) {
+        scores[root] += 1;
+        if (iv === 7 && chord.chordType === 'dom7') scores[root] += 1.5;
+        if (iv === 0 && (chord.chordType === 'maj7' || chord.chordType === 'maj6')) scores[root] += 1;
+        if (iv === 2 && chord.chordType === 'min7') scores[root] += 0.5;
+        if (iv === 5 && chord.chordType === 'maj7') scores[root] += 0.5;
+      }
+      if (minorSteps.includes(iv)) {
+        scores[root + 12] += 1;
+        if (iv === 7 && chord.chordType === 'dom7') scores[root + 12] += 1.5;
+        if (iv === 0 && chord.chordType === 'min7') scores[root + 12] += 1;
+        if (iv === 2 && chord.chordType === 'hdim7') scores[root + 12] += 1;
+      }
+    }
+  }
+
+  // Tonic bias: first and last chord hint at the key centre
+  const first = realChords[0];
+  const last  = realChords[realChords.length - 1];
+  if (first.chordType === 'maj7' || first.chordType === 'maj6') scores[first.rootSemi] += 2;
+  else if (first.chordType === 'min7') scores[first.rootSemi + 12] += 2;
+  if (last.chordType === 'maj7' || last.chordType === 'maj6') scores[last.rootSemi] += 2;
+  else if (last.chordType === 'min7') scores[last.rootSemi + 12] += 2;
+  else if (last.chordType === 'dom7') {
+    scores[(last.rootSemi + 5) % 12] += 1.5;
+    scores[(last.rootSemi + 5) % 12 + 12] += 1;
+  }
+
+  let bestIdx = 0;
+  for (let i = 1; i < 24; i++) { if (scores[i] > scores[bestIdx]) bestIdx = i; }
+  return { root: bestIdx % 12, quality: bestIdx < 12 ? 'major' : 'minor' };
 }

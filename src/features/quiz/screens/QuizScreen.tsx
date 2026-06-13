@@ -12,6 +12,7 @@ import { useChordStore } from '@features/play/store/chordStore';
 import { useQuizStore } from '@features/quiz/store/quizStore';
 import ListeningVisual from '@features/quiz/components/ListeningVisual';
 import { THEMES } from '@shared/ui/themes';
+import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, preferredAccidentalForRoot, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CommandSheet } from '@shared/ui';
 import { useAudio } from '@shared/audio/AudioContext';
@@ -1651,8 +1652,8 @@ export default function QuizScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: t.accent + '40', backgroundColor: t.accent + '15', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 }}>
                   <Ionicons name="musical-notes-outline" size={12} color={t.accent} />
-                  <Text style={{ fontSize: 10, fontWeight: '800', color: t.accent }}>
-                    {questionVoicingTab === 'block' ? 'Block' : 
+                  <Text style={{ ...TYPE.caption, color: t.accent }}>
+                    {questionVoicingTab === 'block' ? 'Block' :
                      questionVoicingTab === 'open' ? 'Open' :
                      questionVoicingTab === 'barre' ? 'Barre' :
                      questionVoicingTab === 'triads' ? 'Triads' :
@@ -1737,6 +1738,7 @@ export default function QuizScreen() {
               formulas={activeFormulas}
               namingMode={questionNaming}
               theme={t}
+              onNotePress={(midi) => onNotePress?.(midi, 80, false)}
             />
           </View>
         )}
@@ -1788,12 +1790,12 @@ export default function QuizScreen() {
         )}
       </ScrollView>
 
-      <View style={[styles.stickyPlayer, { backgroundColor: t.bg2, borderTopColor: t.border }]}>
+      <View style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border }]}>
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[styles.poolBtn, { backgroundColor: t.bg2, borderColor: t.border }]}
             onPress={() => setSheetVisible(true)}>
-            <Ionicons name="library-outline" size={24} color={t.txt2} />
+            <Ionicons name="layers" size={24} color={t.txt2} />
             <View style={[styles.badge, { backgroundColor: t.accent }]}>
               <Text style={styles.badgeText}>{activeTypes.length}</Text>
             </View>
@@ -1852,35 +1854,35 @@ const styles = StyleSheet.create({
   scroll: { paddingVertical: 16, paddingBottom: 32, gap: 12 },
   compactScore: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 16 },
   scoreItem: { alignItems: 'center', gap: 2, flex: 1 },
-  scoreVal: { fontSize: 16, fontWeight: '700' },
-  scoreLbl: { fontSize: 9, fontWeight: '700', letterSpacing: 1 },
+  scoreVal: { ...TYPE.heading },
+  scoreLbl: { ...TYPE.caption, letterSpacing: 1 },
   scoreDivider: { width: 1, height: 24 },
   scoreResetBtn: { paddingHorizontal: 8, paddingVertical: 8 },
   card: { borderTopWidth: 1, borderBottomWidth: 1, padding: 16 },
   cardInner: { flexDirection: 'row', alignItems: 'stretch' },
   cardLeft: { flex: 1, paddingRight: 12, alignItems: 'center', justifyContent: 'center' },
   cardRight: { flex: 1.1, paddingLeft: 12, justifyContent: 'center' },
-  questionLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 2, textAlign: 'center', marginBottom: 8 },
+  questionLabel: { ...TYPE.label, fontWeight: FONT_WEIGHT.bold, letterSpacing: 2, textAlign: 'center', marginBottom: 8 },
   chordDisplay: { alignItems: 'center', justifyContent: 'center', gap: 2 },
   chordNameRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 4 },
-  questionRoot: { fontSize: 44, fontWeight: '700', lineHeight: 48 },
-  questionType: { fontSize: 20, fontWeight: '600', marginBottom: 6 },
-  audioQuestion: { fontSize: 60, fontWeight: '700', lineHeight: 66 },
+  questionRoot: { ...TYPE.display, lineHeight: 48 },
+  questionType: { ...TYPE.subtitle, fontWeight: FONT_WEIGHT.semibold, marginBottom: 6 },
+  audioQuestion: { ...TYPE.display, lineHeight: 48 },
   // Revealed answer for the category modes (scale/arp/interval/shape) — sized to
   // sit between the big root and the small type so every category reads alike.
-  revealAnswer: { fontSize: 24, fontWeight: '700', textAlign: 'center', lineHeight: 30 },
+  revealAnswer: { ...TYPE.title, textAlign: 'center', lineHeight: 30 },
   optionsGrid: { flexDirection: 'column', gap: 8, width: '100%' },
   optBtn: { width: '100%', paddingVertical: 10, paddingHorizontal: 8, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44 },
-  optText: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  optText: { ...TYPE.body, fontWeight: FONT_WEIGHT.semibold, textAlign: 'center' },
   stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   actionRow: { flexDirection: 'row', gap: 12, marginHorizontal: 16 },
   poolBtn: { width: 56, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  badge: { position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
-  badgeText: { color: '#fff', fontSize: 9, fontWeight: '900' },
+  badge: { position: 'absolute', top: -6, right: -6, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#fff' },
+  badgeText: { color: '#fff', ...TYPE.caption },
   revealBtn: { flex: 1, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  revealText: { fontSize: 14, fontWeight: '700' },
+  revealText: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   playQuizBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   nextBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 56, borderRadius: 20 },
-  nextText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  nextText: { color: '#fff', ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   pianoWrap: { justifyContent: 'center', marginHorizontal: 0 },
 });

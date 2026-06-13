@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Animated, Easing } from 'react-native';
+import { View, Text, Animated, Easing, TouchableOpacity, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Line, Circle, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, Text as SvgText } from 'react-native-svg';
 import { getNoteColor } from '@shared/ui/themes';
-import { NOTE_SHARP, NOTE_FLAT } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, spellInterval, ROLE_SHORT } from '@shared/theory/musicTheory';
 import { familyForWeight } from '@shared/fonts/fonts';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
@@ -16,6 +16,7 @@ interface Props {
   formulas: string[];
   namingMode: 'sharp' | 'flat';
   theme: any;
+  onNotePress?: (midi: number) => void;
 }
 
 // Compact interval names between adjacent notes — works for any chord/scale size.
@@ -36,6 +37,41 @@ function degreeLabel(s: string): string {
   let num = parseInt(m[0], 10);
   if (num > 7) num = ((num - 1) % 7) + 1;
   return String(num);
+}
+
+const ANATOMY_HEIGHT = 210;
+
+// The VISIBLE note dot — a colored circle with its note name, that bounce-scales
+// on tap exactly like the ChordCard AnimatedPill (scale 1→1.35→1, native driver).
+function AnimatedNoteDot({ cx, cy, r, color, name, fBold, midi, index, onNotePress }: {
+  cx: number; cy: number; r: number; color: string; name: string; fBold?: string; midi: number; index: number;
+  onNotePress?: (midi: number) => void;
+}) {
+  // Entrance: cascade in left→right with a springy overshoot + fade, so the chord
+  // "assembles" note by note instead of popping in all at once.
+  const scale = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const delay = 60 + index * 75;
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 200, delay, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, delay, friction: 5, tension: 140, useNativeDriver: true }),
+    ]).start();
+  }, []);
+  const handlePress = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 1.35, duration: 80, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, friction: 4, tension: 170, useNativeDriver: true }),
+    ]).start();
+    onNotePress?.(midi);
+  };
+  return (
+    <Animated.View style={{ position: 'absolute', left: cx - r, top: cy - r, width: r * 2, height: r * 2, borderRadius: r, backgroundColor: color, alignItems: 'center', justifyContent: 'center', opacity, transform: [{ scale }] }}>
+      <TouchableOpacity disabled={!onNotePress} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderRadius: r }} activeOpacity={0.85} onPress={handlePress}>
+        <Text style={{ color: '#fff', fontSize: Math.min(20, r * 0.85), fontFamily: fBold }}>{name}</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
 }
 
 // ── Listening-phase equaliser bars ───────────────────────────────────────────
@@ -108,36 +144,48 @@ function splitRows(n: number): number[] {
 }
 
 // ── Reveal-phase chord anatomy ───────────────────────────────────────────────
-function ChordAnatomy({ notes, roles, formulas, namingMode, theme }: Omit<Props, 'revealed' | 'isPlaying' | 'pulse'>) {
+function ChordAnatomy({ notes, roles, formulas, namingMode, theme, onNotePress }: Omit<Props, 'revealed' | 'isPlaying' | 'pulse'>) {
   const colorMode = useSettingsStore((s: any) => s.colorMode);
   const selectiveRoles = useSettingsStore((s: any) => s.selectiveRoles);
   const fontFamily = useSettingsStore((s: any) => s.fontFamily);
   const fBold = familyForWeight(fontFamily, '800');
   const fMed = familyForWeight(fontFamily, '700');
-  const [dim, setDim] = useState<{ w: number; h: number } | null>(null);
+  const [w, setW] = useState<number>(() => Dimensions.get('window').width);
+  // The connector lines + interval/degree labels fade in just after the dots start
+  // cascading, so the chord wires itself together.
+  const reveal = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(reveal, { toValue: 1, duration: 340, delay: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, []);
 
   // Basic anatomy: ONE note per scale/chord degree (no octave doublings, no actual-voicing
   // spread), ordered ascending from the root within a single octave → R 2 3 4 5 6 7. Caps
   // the count at ≤7 so a 7-note scale never blows out into overlapping rows.
   const NOTE = namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP;
-  const byDeg = new Map<string, { deg: string; m: number; role: string; name: string }>();
+  const byDeg = new Map<string, { deg: string; m: number; role: string; formula: string }>();
   notes.forEach((m, i) => {
     if (m == null || isNaN(m)) return;
     const deg = degreeLabel(formulas[i] || roles[i] || '');
     if (!deg || byDeg.has(deg)) return;
-    byDeg.set(deg, { deg, m, role: roles[i] || '', name: NOTE[((m % 12) + 12) % 12] });
+    byDeg.set(deg, { deg, m, role: roles[i] || '', formula: formulas[i] || '' });
   });
   const items = [...byDeg.values()];
   const rootItem = items.find((x) => x.deg === 'R') || items[0];
   const rootPc = rootItem ? (((rootItem.m % 12) + 12) % 12) : 0;
-  const withOff = items.map((it) => ({ ...it, off: (((((it.m % 12) + 12) % 12) - rootPc + 12) % 12) }));
+  const withOff = items.map((it) => {
+    const raw = it.formula || it.role || '';
+    const effFormula = ROLE_SHORT[raw] || raw || '1';
+    const name = spellInterval(rootPc, effFormula, namingMode === 'flat') || NOTE[((it.m % 12) + 12) % 12];
+    return { ...it, name, off: (((((it.m % 12) + 12) % 12) - rootPc + 12) % 12) };
+  });
   withOff.sort((a, b) => a.off - b.off);
   const N = withOff.length;
 
   return (
-    <View style={{ flex: 1, width: '100%' }} onLayout={(e) => setDim({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
-      {dim && N > 0 && (() => {
-        const { w: W, h: H } = dim;
+    <View style={{ width: '100%', height: ANATOMY_HEIGHT }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
+      {N > 0 && (() => {
+        const W = w;
+        const H = ANATOMY_HEIGHT;
         const counts = splitRows(N);
         const rows = counts.length;
         const maxCols = Math.max(...counts);
@@ -165,32 +213,40 @@ function ChordAnatomy({ notes, roles, formulas, namingMode, theme }: Omit<Props,
         });
 
         return (
-          <Svg width={W} height={H}>
-            {dots.map((d, i) => (!d.rowFirst ? (
-              <Line key={`l${i}`} x1={d.prevX} y1={d.cy} x2={d.cx} y2={d.cy} stroke={theme.border} strokeWidth={2} />
-            ) : null))}
-            {dots.map((d, i) => (!d.rowFirst ? (
-              <SvgText key={`iv${i}`} x={(d.prevX + d.cx) / 2} y={d.cy - r - 9} fill={theme.txt3} fontSize={12} fontFamily={fMed} textAnchor="middle">{ivName(d.off - d.prevOff)}</SvgText>
-            ) : null))}
-            {dots.map((d, i) => (
-              <React.Fragment key={`d${i}`}>
-                <Circle cx={d.cx} cy={d.cy} r={r} fill={d.color} />
-                <SvgText x={d.cx} y={d.cy + r * 0.34} fill="#fff" fontSize={Math.min(20, r * 0.85)} fontFamily={fBold} textAnchor="middle">{d.name}</SvgText>
-                <SvgText x={d.cx} y={d.cy + r + 19} fill={theme.txt2} fontSize={13} fontFamily={fMed} textAnchor="middle">{d.deg}</SvgText>
-              </React.Fragment>
-            ))}
-          </Svg>
+          <>
+            <Animated.View style={{ opacity: reveal }}>
+              <Svg width={W} height={H}>
+                {dots.map((d, i) => (!d.rowFirst ? (
+                  <Line key={`l${i}`} x1={d.prevX} y1={d.cy} x2={d.cx} y2={d.cy} stroke={theme.border} strokeWidth={2} />
+                ) : null))}
+                {dots.map((d, i) => (!d.rowFirst ? (
+                  <SvgText key={`iv${i}`} x={(d.prevX + d.cx) / 2} y={d.cy - r - 9} fill={theme.txt3} fontSize={12} fontFamily={fMed} textAnchor="middle">{ivName(d.off - d.prevOff)}</SvgText>
+                ) : null))}
+                {/* Degree labels stay in the SVG, beneath each note. The colored note
+                    circles themselves are now visible animated Views (below) so they
+                    bounce on tap like the ChordCard pills. */}
+                {dots.map((d, i) => (
+                  <SvgText key={`deg${i}`} x={d.cx} y={d.cy + r + 19} fill={theme.txt2} fontSize={13} fontFamily={fMed} textAnchor="middle">{d.deg}</SvgText>
+                ))}
+              </Svg>
+            </Animated.View>
+            <View style={{ position: 'absolute', top: 0, left: 0, width: W, height: H }} pointerEvents="box-none">
+              {dots.map((d, i) => (
+                <AnimatedNoteDot key={i} cx={d.cx} cy={d.cy} r={r} color={d.color} name={d.name || ''} fBold={fBold} midi={d.m} index={i} onNotePress={onNotePress} />
+              ))}
+            </View>
+          </>
         );
       })()}
     </View>
   );
 }
 
-export default function ListeningVisual({ revealed, isPlaying, pulse, notes, roles, formulas, namingMode, theme }: Props) {
+export default function ListeningVisual({ revealed, isPlaying, pulse, notes, roles, formulas, namingMode, theme, onNotePress }: Props) {
   return (
     <View style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' }}>
       {revealed
-        ? <ChordAnatomy notes={notes} roles={roles} formulas={formulas} namingMode={namingMode} theme={theme} />
+        ? <ChordAnatomy notes={notes} roles={roles} formulas={formulas} namingMode={namingMode} theme={theme} onNotePress={onNotePress} />
         : <EqualizerBars isPlaying={isPlaying} pulse={pulse} theme={theme} />}
     </View>
   );

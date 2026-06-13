@@ -1,5 +1,5 @@
-import { CH, SCALES, CHORD_SCALE_MAP, NOTE_SHARP, NOTE_FLAT, spellInterval, formatDegree } from '@shared/theory/musicTheory';
-import { findTriads, TRIAD_FULL_NAMES } from '@shared/guitar/voicings';
+import { CH, SCALES, CHORD_SCALE_MAP, NOTE_SHARP, NOTE_FLAT, spellInterval } from '@shared/theory/musicTheory';
+import { findTriads, TRIAD_FULL_NAMES, deriveShellToneSets } from '@shared/guitar/voicings';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { UnifiedVoicing } from '@shared/types/models';
 
@@ -202,33 +202,46 @@ function buildPianoVoicingsUncached(rootSemi: number, chordType: string, octave:
     }
   }
 
-  // 2. Shell Voicings
-  const has7th = ch.iv.find(iv => iv === 10 || iv === 11 || iv === 9); 
-  const has3rd = ch.iv.find(iv => iv === 3 || iv === 4);
-  const has5th = ch.iv.find(iv => iv === 6 || iv === 7 || iv === 8);
-  const has9th = ch.iv.find(iv => iv === 13 || iv === 14 || iv === 15);
-  
-  if (ch.iv.length >= 4 && has7th !== undefined) {
-    const getFmt = (val: number | undefined) => {
-      if (val === undefined) return '';
-      const idx = ch.iv.indexOf(val);
-      return (idx !== -1 && ch.f && ch.f[idx]) ? formatDegree(ch.f[idx]) : '';
-    };
-    
-    const f3 = getFmt(has3rd), f5 = getFmt(has5th), f7 = getFmt(has7th), f9 = getFmt(has9th);
+  // 2. Shell Voicings — converged onto the guitar's deriveShellToneSets (the single
+  // source of truth for what a shell contains), so the sounding tones and the
+  // Dictionary's shell combos match across instruments. A shell is the 3-note
+  // skeleton root + guide tones (perfect 5th omitted), plus its rootless variants
+  // (guide tones + one color tone). Every shell has ≥3 notes — 2-note guide-tone
+  // dyads were removed per user request. Pure triads (no 7th/6th) produce no shells.
+  const shellToneSets = deriveShellToneSets(ch);
+  if (shellToneSets.length) {
+    const orderedSets: string[][] = [
+      shellToneSets[0],          // R-3-7  (rooted base)
+      shellToneSets[1],          // R-7-3
+      ...shellToneSets.slice(2), // rootless guide tones + one color tone
+    ];
 
-    if (has3rd !== undefined) {
-       shells.push(createVoicing(`R-${f3}-${f7}`, [rootMidi, rootMidi + has3rd, rootMidi + has7th].sort((a,b)=>a-b)));
-       shells.push(createVoicing(`R-${f7}-${f3}`, [rootMidi, rootMidi + has7th, rootMidi + has3rd + 12].sort((a,b)=>a-b)));
-       if (has9th !== undefined) {
-         shells.push(createVoicing(`R-${f7}-${f9}`, [rootMidi, rootMidi + has7th, rootMidi + (has9th % 12) + 12].sort((a,b)=>a-b)));
-         shells.push(createVoicing(`R-${f3}-${f7}-${f9}`, [rootMidi, rootMidi + has3rd, rootMidi + has7th, rootMidi + (has9th % 12) + 12].sort((a,b)=>a-b)));
-       }
-    } else if (has5th !== undefined) {
-       shells.push(createVoicing(`R-${f5}-${f7}`, [rootMidi, rootMidi + has5th, rootMidi + has7th].sort((a,b)=>a-b)));
-       if (has9th !== undefined) {
-         shells.push(createVoicing(`R-${f5}-${f7}-${f9}`, [rootMidi, rootMidi + has5th, rootMidi + has7th, rootMidi + (has9th % 12) + 12].sort((a,b)=>a-b)));
-       }
+    const seenShell = new Set<string>();
+    for (const roles of orderedSets) {
+      // Stack the tone-set upward from the root's octave; roles[0] is the bass and
+      // each upper voice takes the nearest octave above the previous (compact grip).
+      let prev = -Infinity;
+      const notes: number[] = [];
+      const rolesArr: string[] = [];
+      const formulasArr: string[] = [];
+      let ok = true;
+      for (const role of roles) {
+        const idx = ch.r.indexOf(role);
+        if (idx === -1) { ok = false; break; }
+        let midi = rootMidi + (ch.iv[idx] % 12);
+        while (midi <= prev) midi += 12;
+        prev = midi;
+        notes.push(midi);
+        const rawF = (ch.f && ch.f[idx]) ? ch.f[idx] : role;
+        const formula = rawF.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
+        rolesArr.push(role);
+        formulasArr.push(formula === 'root' ? '1' : formula);
+      }
+      if (!ok) continue;
+      const key = notes.join(',');
+      if (seenShell.has(key)) continue;
+      seenShell.add(key);
+      shells.push(createVoicing(formulasArr.join('-'), notes, undefined, rolesArr, formulasArr));
     }
   }
 
