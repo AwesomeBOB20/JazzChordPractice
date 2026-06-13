@@ -226,6 +226,7 @@ export default function ChordDictionary({ t }: Props) {
   const labelMode = useSettingsStore((s: any) => s.labelMode);
   const selectedScaleId = useChordStore((s: any) => s.selectedScaleId);
   const setChord = useChordStore((s: any) => s.setChord);
+  const setPendingVoicingTab = useChordStore((s: any) => s.setPendingVoicingTab);
   const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
@@ -331,8 +332,9 @@ export default function ChordDictionary({ t }: Props) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     stopAudio?.();
     setChord(rootSemi, type);
+    setPendingVoicingTab(effectiveCategory); // land on the same voicing tab we were browsing
     setMode('chord');
-  }, [stopAudio, setChord, setMode, rootSemi]);
+  }, [stopAudio, setChord, setPendingVoicingTab, setMode, rootSemi, effectiveCategory]);
 
   const handlePlay = React.useCallback((it: DictMiniItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

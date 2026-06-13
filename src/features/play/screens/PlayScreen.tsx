@@ -1357,7 +1357,7 @@ function VoicingExplorer({
 // dictionary (the self-contained mini-diagram grid).
 export default function PlayScreen() {
   const { theme, instrument, setInstrument } = useSettingsStore();
-  const { rootSemi, chordType, namingMode, shiftRoot, cycleType } = useChordStore();
+  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab } = useChordStore();
   const dict = useDictionaryStore();
   const t = THEMES[theme];
 
@@ -1366,6 +1366,16 @@ export default function PlayScreen() {
   const [chordVoicingTab, setChordVoicingTab] = React.useState<VoicingTabKey>('block');
   const [sheetVisible, setSheetVisible] = React.useState(false);
   const livePlayRef = React.useRef<() => void>(() => {});
+
+  // Consume the one-shot voicing tab a Dictionary "Comp/Solo with" chip left for us, so tapping a
+  // chip lands on the same tab it was browsing. The VoicingTabBar's own guard snaps to a valid tab
+  // if this chord doesn't support it.
+  React.useEffect(() => {
+    if (pendingVoicingTab) {
+      setChordVoicingTab(pendingVoicingTab as VoicingTabKey);
+      setPendingVoicingTab(null);
+    }
+  }, [pendingVoicingTab, setPendingVoicingTab]);
 
   if (dict.mode === 'dictionary') {
     return (

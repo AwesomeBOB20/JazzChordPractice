@@ -13,8 +13,13 @@ export interface ChordState {
   resetPulse: number;
   namingMode: 'sharp' | 'flat';
   inputMode: 'random' | 'manual';
+  // One-shot: when the Dictionary "Comp/Solo with" chip navigates to a chord, it stashes the voicing
+  // tab it was browsing here; the Chord screen reads it once, applies it, then clears it. Transient
+  // (not persisted).
+  pendingVoicingTab: string | null;
 
   setNamingMode: (mode: 'sharp' | 'flat') => void;
+  setPendingVoicingTab: (tab: string | null) => void;
   setInputMode: (mode: 'random' | 'manual') => void;
   setChord: (rootSemi: number, type: string) => void;
   randomChord: (preferredTypes?: string[]) => void;
@@ -40,8 +45,10 @@ export const useChordStore = create<ChordState>()(
       resetPulse: 0,
       namingMode: 'sharp',
       inputMode: 'random',
+      pendingVoicingTab: null,
 
       setNamingMode: (namingMode) => set({ namingMode }),
+      setPendingVoicingTab: (pendingVoicingTab) => set({ pendingVoicingTab }),
       setInputMode: (inputMode) => set({ inputMode }),
 
       setChord: (rootSemi, chordType) => set({ 
