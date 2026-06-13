@@ -227,6 +227,7 @@ export default function ChordDictionary({ t }: Props) {
   const selectedScaleId = useChordStore((s: any) => s.selectedScaleId);
   const setChord = useChordStore((s: any) => s.setChord);
   const setPendingVoicingTab = useChordStore((s: any) => s.setPendingVoicingTab);
+  const setPendingVoicingKey = useChordStore((s: any) => s.setPendingVoicingKey);
   const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
@@ -328,13 +329,14 @@ export default function ChordDictionary({ t }: Props) {
   }, []);
   // Tap a "Comp with"/"Solo with" chip → load that chord at the dictionary's current root on the
   // Chord screen (switch Explore out of Dictionary mode). Closes the explore loop.
-  const openChord = React.useCallback((type: string) => {
+  const openChord = React.useCallback((type: string, voicingKey?: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     stopAudio?.();
     setChord(rootSemi, type);
-    setPendingVoicingTab(effectiveCategory); // land on the same voicing tab we were browsing
+    setPendingVoicingTab(effectiveCategory);    // land on the same voicing tab we were browsing
+    setPendingVoicingKey(voicingKey ?? null);   // …and on the same voicing (combo pc-key) when known
     setMode('chord');
-  }, [stopAudio, setChord, setPendingVoicingTab, setMode, rootSemi, effectiveCategory]);
+  }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicingKey, setMode, rootSemi, effectiveCategory]);
 
   const handlePlay = React.useCallback((it: DictMiniItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -450,7 +452,7 @@ export default function ChordDictionary({ t }: Props) {
                     <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
                       {item.foundIn.map(c => (
-                        <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
+                        <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type, tabKind(effectiveCategory) === 'formulaCombo' ? item.key : undefined)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
                           <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
                         </TouchableOpacity>
                       ))}

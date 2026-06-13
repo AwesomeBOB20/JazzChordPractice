@@ -179,6 +179,10 @@ interface VoicingExplorerProps {
   sheetVisible: boolean;
   setSheetVisible: (v: boolean) => void;
   playRef?: React.MutableRefObject<() => void>;
+  // A Dictionary chip navigated here and wants us to land on this voicing (root-relative pc-set key);
+  // we select it once, then call onTargetVoicingApplied so the parent clears it.
+  targetVoicingKey?: string | null;
+  onTargetVoicingApplied?: () => void;
 }
 
 function VoicingExplorer({
@@ -186,6 +190,7 @@ function VoicingExplorer({
   voicingTab, setVoicingTab, shiftRoot, cycleType,
   showChordChrome, showInstrumentToggle,
   sheetVisible, setSheetVisible, playRef,
+  targetVoicingKey, onTargetVoicingApplied,
 }: VoicingExplorerProps) {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
@@ -866,6 +871,17 @@ function VoicingExplorer({
     return [];
   }, [rootSemi, chordType, octave, currentChordDef, voicingTab, scaleVoicings, arpVoicings, intervalVoicings, sortMode, displayChordName, selectedScaleId, rootNoteName, arpSubsets, intervalSubsets, safeArpSubsetIdx, safeIntervalSubsetIdx]);
 
+  // PIANO: a Dictionary chip asked us to land on a specific voicing → select the piano voicing whose
+  // root-relative pitch-class set matches the combo key the chip carried, then tell the parent to
+  // clear it (one-shot). Only matches once THIS tab's voicings have rebuilt, so the combo key can't
+  // falsely match the previous tab's list. (Guitar is handled inside FretboardView.)
+  React.useEffect(() => {
+    if (!targetVoicingKey || instrument !== 'piano' || !pianoVoicings.length) return;
+    const keyOf = (notes: number[]) => Array.from(new Set(notes.map((m: number) => ((((m % 12) - rootSemi) % 12) + 12) % 12))).sort((a, b) => a - b).join(',');
+    const idx = pianoVoicings.findIndex((pv: any) => keyOf(pv.notes) === targetVoicingKey);
+    if (idx >= 0) { setPianoVoicingIdx(idx); onTargetVoicingApplied?.(); }
+  }, [targetVoicingKey, instrument, pianoVoicings, rootSemi, onTargetVoicingApplied]);
+
   // Spelled note names for the piano keys. Memoized so it stays a STABLE array reference
   // across renders that don't change the chord/voicing — otherwise this inline .map() made
   // a fresh array every render and defeated PianoView's React.memo.
@@ -1357,25 +1373,30 @@ function VoicingExplorer({
 // dictionary (the self-contained mini-diagram grid).
 export default function PlayScreen() {
   const { theme, instrument, setInstrument } = useSettingsStore();
-  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab } = useChordStore();
+  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab, pendingVoicingKey, setPendingVoicingKey } = useChordStore();
   const dict = useDictionaryStore();
   const t = THEMES[theme];
 
   // Chord mode's voicing tab lives here (not in chordStore) so it survives
   // Chord⇄Dictionary toggles.
   const [chordVoicingTab, setChordVoicingTab] = React.useState<VoicingTabKey>('block');
+  const [targetVoicingKey, setTargetVoicingKey] = React.useState<string | null>(null);
   const [sheetVisible, setSheetVisible] = React.useState(false);
   const livePlayRef = React.useRef<() => void>(() => {});
 
-  // Consume the one-shot voicing tab a Dictionary "Comp/Solo with" chip left for us, so tapping a
-  // chip lands on the same tab it was browsing. The VoicingTabBar's own guard snaps to a valid tab
-  // if this chord doesn't support it.
+  // Consume the one-shot tab+voicing a Dictionary "Comp/Solo with" chip left for us, so tapping a chip
+  // lands on the same tab AND the same voicing it was browsing. We stash the voicing key into local
+  // state here (the moment we apply the tab) so it survives until VoicingExplorer rebuilds the new
+  // tab's voicings — avoiding a race where it's read against the OLD tab. The VoicingTabBar's own
+  // guard snaps to a valid tab if this chord doesn't support it.
   React.useEffect(() => {
     if (pendingVoicingTab) {
       setChordVoicingTab(pendingVoicingTab as VoicingTabKey);
+      setTargetVoicingKey(pendingVoicingKey);
       setPendingVoicingTab(null);
+      setPendingVoicingKey(null);
     }
-  }, [pendingVoicingTab, setPendingVoicingTab]);
+  }, [pendingVoicingTab, pendingVoicingKey, setPendingVoicingTab, setPendingVoicingKey]);
 
   if (dict.mode === 'dictionary') {
     return (
@@ -1397,6 +1418,7 @@ export default function PlayScreen() {
         showChordChrome={true} showInstrumentToggle={false}
         sheetVisible={sheetVisible} setSheetVisible={setSheetVisible}
         playRef={livePlayRef}
+        targetVoicingKey={targetVoicingKey} onTargetVoicingApplied={() => setTargetVoicingKey(null)}
       />
       <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
     </View>

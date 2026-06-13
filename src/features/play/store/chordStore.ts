@@ -17,9 +17,13 @@ export interface ChordState {
   // tab it was browsing here; the Chord screen reads it once, applies it, then clears it. Transient
   // (not persisted).
   pendingVoicingTab: string | null;
+  // Alongside the tab: the voicing the Dictionary chip was on, as its root-relative pitch-class set
+  // key (e.g. "0,4,9,10"). The Chord screen selects the matching voicing once, then clears it.
+  pendingVoicingKey: string | null;
 
   setNamingMode: (mode: 'sharp' | 'flat') => void;
   setPendingVoicingTab: (tab: string | null) => void;
+  setPendingVoicingKey: (key: string | null) => void;
   setInputMode: (mode: 'random' | 'manual') => void;
   setChord: (rootSemi: number, type: string) => void;
   randomChord: (preferredTypes?: string[]) => void;
@@ -46,9 +50,11 @@ export const useChordStore = create<ChordState>()(
       namingMode: 'sharp',
       inputMode: 'random',
       pendingVoicingTab: null,
+      pendingVoicingKey: null,
 
       setNamingMode: (namingMode) => set({ namingMode }),
       setPendingVoicingTab: (pendingVoicingTab) => set({ pendingVoicingTab }),
+      setPendingVoicingKey: (pendingVoicingKey) => set({ pendingVoicingKey }),
       setInputMode: (inputMode) => set({ inputMode }),
 
       setChord: (rootSemi, chordType) => set({ 
