@@ -299,12 +299,19 @@ export default function ChordDictionary({ t }: Props) {
   // Floating section header — our own replacement for native stickyHeaderIndices (which renders
   // differently on web vs phone). Holds the OPEN item whose diagrams are currently scrolled under the
   // top of the list; driven by scroll position + measured item layouts → identical on both platforms.
-  const [floatingKey, setFloatingKey] = React.useState<string | null>(null);
-  const floatingKeyRef = React.useRef<string | null>(null);          // mirror of floatingKey, to dedupe scroll updates
-  const itemLayouts = React.useRef<Record<string, { top?: number; bottom?: number }>>({}); // per item: header top + content bottom (content-coords)
+  // Floating section header — our own replacement for native stickyHeaderIndices (which renders
+  // differently web vs phone). For each OPEN item we render a copy pinned at the top, revealed/moved
+  // by a NATIVE opacity + transform driven by the scroll offset — always mounted (no flicker), no JS
+  // per-frame work. It fades in as the real header reaches the top, then slides up over the last
+  // header-height as the next header rises into its place. Item layouts live in state so the
+  // interpolations rebuild when they change; the wrapper's overflow:hidden clips the slide so it tucks
+  // UNDER the category/family bars instead of covering them.
+  const [layouts, setLayouts] = React.useState<Record<string, { top?: number; bottom?: number }>>({});
+  const setItemTop = React.useCallback((key: string, top: number) => setLayouts(prev => prev[key]?.top === top ? prev : ({ ...prev, [key]: { ...prev[key], top } })), []);
+  const setItemBottom = React.useCallback((key: string, bottom: number) => setLayouts(prev => prev[key]?.bottom === bottom ? prev : ({ ...prev, [key]: { ...prev[key], bottom } })), []);
   const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
-  const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset → smooth floating-header push
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setFloatingKey(null); floatingKeyRef.current = null; }, [effectiveCategory, instrument]);
+  const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
+  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setLayouts({}); }, [effectiveCategory, instrument]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
   // number of items that actually HAVE voicings per family (the family-tab chip, and to hide an
@@ -354,7 +361,7 @@ export default function ChordDictionary({ t }: Props) {
       key={floating ? `fh-${item.key}` : `h-${item.key}`}
       activeOpacity={0.7}
       onPress={() => toggleSection(item.key)}
-      onLayout={floating ? undefined : (e) => { const l = itemLayouts.current[item.key] || {}; l.top = e.nativeEvent.layout.y; itemLayouts.current[item.key] = l; headerHRef.current = e.nativeEvent.layout.height; }}
+      onLayout={floating ? undefined : (e) => { setItemTop(item.key, Math.round(e.nativeEvent.layout.y)); headerHRef.current = e.nativeEvent.layout.height; }}
       style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
     >
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -442,31 +449,13 @@ export default function ChordDictionary({ t }: Props) {
             renders differently web vs phone — lingering/clipping); instead we pin our own copy of the
             OPEN item's header at the top while its diagrams are scrolled under it, driven by scroll
             position + measured layouts. Same behaviour on both platforms. ── */}
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, overflow: 'hidden' }}>
         <Animated.ScrollView
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 32 }}
           scrollEventThrottle={16}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            {
-              useNativeDriver: true, // scrollY drives the floating header's transform on the UI thread
-              listener: (e: any) => {
-                // Active floating item = the OPEN item whose [headerTop, contentBottom) range contains
-                // the scroll offset (real header above the top, diagrams not yet fully past). The slide
-                // (below) handles the hand-off, so the range runs all the way to contentBottom.
-                const y = e.nativeEvent.contentOffset.y;
-                let active: string | null = null;
-                for (const it of visibleItems) {
-                  if (!expanded.has(it.key)) continue;
-                  const lay = itemLayouts.current[it.key];
-                  if (lay && lay.top != null && lay.bottom != null && y >= lay.top && y < lay.bottom) { active = it.key; break; }
-                }
-                if (active !== floatingKeyRef.current) { floatingKeyRef.current = active; setFloatingKey(active); }
-              },
-            }
-          )}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         >
           {visibleItems.length === 0 ? (
             <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
@@ -479,7 +468,7 @@ export default function ChordDictionary({ t }: Props) {
               const content = (
                 <View
                   key={`c-${item.key}`}
-                  onLayout={(e) => { const l = itemLayouts.current[item.key] || {}; l.bottom = e.nativeEvent.layout.y + e.nativeEvent.layout.height; itemLayouts.current[item.key] = l; }}
+                  onLayout={(e) => setItemBottom(item.key, Math.round(e.nativeEvent.layout.y + e.nativeEvent.layout.height))}
                   style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
@@ -516,23 +505,26 @@ export default function ChordDictionary({ t }: Props) {
             })
           )}
         </Animated.ScrollView>
-        {/* The floating header — pinned at the top while an open item's diagrams sit under it. Over the
-            last header-height of the item it SLIDES UP (translateY 0 → -H), so the next item's header
-            rises into its place and pushes it off — fully visible until then, never overlapping. The
-            transform is driven by the native scrollY, so the slide is smooth with no JS per-frame work. */}
-        {!!floatingKey && expanded.has(floatingKey) && (() => {
-          const item = visibleItems.find(i => i.key === floatingKey);
-          const lay = itemLayouts.current[floatingKey];
-          if (!item || !lay || lay.bottom == null) return null;
+        {/* One floating header per OPEN item, ALWAYS mounted (no mount flicker). Native opacity fades it
+            in as the item's real header reaches the top; native translateY slides it up over the last
+            header-height so the next header pushes it off. Clipped by the wrapper's overflow:hidden so
+            it tucks under the bars above and never covers them. Items above sit at translateY -H (off,
+            clipped); the item below is opacity 0 — so exactly one shows. */}
+        {visibleItems.map(item => {
+          if (!expanded.has(item.key)) return null;
+          const lay = layouts[item.key];
+          if (!lay || lay.top == null || lay.bottom == null) return null;
           const H = headerHRef.current;
-          const cb = lay.bottom;
-          const translateY = scrollY.interpolate({ inputRange: [cb - H, cb], outputRange: [0, -H], extrapolate: 'clamp' });
+          const { top, bottom } = lay;
+          if (bottom - top <= H) return null;
+          const opacity = scrollY.interpolate({ inputRange: [top - 1, top], outputRange: [0, 1], extrapolate: 'clamp' });
+          const translateY = scrollY.interpolate({ inputRange: [bottom - H, bottom], outputRange: [0, -H], extrapolate: 'clamp' });
           return (
-            <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, transform: [{ translateY }] }} pointerEvents="box-none">
+            <Animated.View key={`float-${item.key}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, opacity, transform: [{ translateY }] }} pointerEvents="box-none">
               {renderHeader(item, true, true)}
             </Animated.View>
           );
-        })()}
+        })}
       </View>
 
       {/* ── Spin dial (slides up from behind the dock when the root chip is tapped) ── */}
