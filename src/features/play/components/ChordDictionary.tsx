@@ -297,21 +297,23 @@ export default function ChordDictionary({ t }: Props) {
   // Sub-category (family) tab within the voicing tab — reset to the first when the tab changes.
   const [familyIdx, setFamilyIdx] = React.useState(0);
   // Floating section header — our own replacement for native stickyHeaderIndices (which renders
-  // differently on web vs phone). Holds the OPEN item whose diagrams are currently scrolled under the
-  // top of the list; driven by scroll position + measured item layouts → identical on both platforms.
-  // Floating section header — our own replacement for native stickyHeaderIndices (which renders
   // differently web vs phone). For each OPEN item we render a copy pinned at the top, revealed/moved
   // by a NATIVE opacity + transform driven by the scroll offset — always mounted (no flicker), no JS
   // per-frame work. It fades in as the real header reaches the top, then slides up over the last
-  // header-height as the next header rises into its place. Item layouts live in state so the
-  // interpolations rebuild when they change; the wrapper's overflow:hidden clips the slide so it tucks
-  // UNDER the category/family bars instead of covering them.
-  const [layouts, setLayouts] = React.useState<Record<string, { top?: number; bottom?: number }>>({});
-  const setItemTop = React.useCallback((key: string, top: number) => setLayouts(prev => prev[key]?.top === top ? prev : ({ ...prev, [key]: { ...prev[key], top } })), []);
-  const setItemBottom = React.useCallback((key: string, bottom: number) => setLayouts(prev => prev[key]?.bottom === bottom ? prev : ({ ...prev, [key]: { ...prev[key], bottom } })), []);
+  // header-height as the next header rises into its place; the wrapper's overflow:hidden clips the
+  // slide so it tucks UNDER the category/family bars instead of covering them.
+  //
+  // We store each section's measured HEIGHT (not its absolute top/bottom) and derive top/bottom by a
+  // cumulative sum at render. A section's height only changes when IT opens/closes — and onLayout
+  // always fires for a self-size change — whereas onLayout does NOT reliably refire when a section is
+  // merely pushed down by a sibling above it expanding. Deriving positions from heights keeps every
+  // section's top/bottom mutually consistent, so opening a 2nd dropdown can't leave a stale `top` that
+  // makes a floating header appear while its real header is still on screen.
+  const [heights, setHeights] = React.useState<Record<string, number>>({});
+  const setItemHeight = React.useCallback((key: string, h: number) => setHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
   const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
   const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setLayouts({}); }, [effectiveCategory, instrument]);
+  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setHeights({}); }, [effectiveCategory, instrument]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
   // number of items that actually HAVE voicings per family (the family-tab chip, and to hide an
@@ -353,15 +355,16 @@ export default function ChordDictionary({ t }: Props) {
     setMode('chord');
   }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicingKey, setMode, rootSemi, effectiveCategory]);
 
-  // One section header — rendered both in the scrolling list (measured via onLayout) and as the
-  // floating copy pinned at the top. `floating` skips onLayout (its position is fixed); the chevron
-  // points up for an open item either way.
+  // One section header — rendered both in the scrolling list and as the floating copy pinned at the
+  // top. The in-list copy measures only the header HEIGHT (drives the slide distance); the section's
+  // top/bottom come from the cumulative height sum, not from this header's position. `floating` skips
+  // onLayout (its position is fixed); the chevron points up for an open item either way.
   const renderHeader = (item: any, open: boolean, floating: boolean) => (
     <TouchableOpacity
       key={floating ? `fh-${item.key}` : `h-${item.key}`}
       activeOpacity={0.7}
       onPress={() => toggleSection(item.key)}
-      onLayout={floating ? undefined : (e) => { setItemTop(item.key, Math.round(e.nativeEvent.layout.y)); headerHRef.current = e.nativeEvent.layout.height; }}
+      onLayout={floating ? undefined : (e) => { headerHRef.current = e.nativeEvent.layout.height; }}
       style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
     >
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -460,15 +463,16 @@ export default function ChordDictionary({ t }: Props) {
           {visibleItems.length === 0 ? (
             <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
           ) : (
-            visibleItems.flatMap(item => {
+            visibleItems.map(item => {
               const open = expanded.has(item.key);
               const header = renderHeader(item, open, false);
-              if (!open) return [header];
               const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
-              const content = (
+              // Wrap header + content in one View and measure ITS height. This fires onLayout whenever
+              // the section opens/closes (its own size changes) — the only thing the cumulative-sum
+              // position model needs. Closed sections measure to the header height alone.
+              const content = !open ? null : (
                 <View
                   key={`c-${item.key}`}
-                  onLayout={(e) => setItemBottom(item.key, Math.round(e.nativeEvent.layout.y + e.nativeEvent.layout.height))}
                   style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
@@ -501,7 +505,12 @@ export default function ChordDictionary({ t }: Props) {
                   />
                 </View>
               );
-              return [header, content];
+              return (
+                <View key={`sec-${item.key}`} onLayout={(e) => setItemHeight(item.key, Math.round(e.nativeEvent.layout.height))}>
+                  {header}
+                  {content}
+                </View>
+              );
             })
           )}
         </Animated.ScrollView>
@@ -510,25 +519,31 @@ export default function ChordDictionary({ t }: Props) {
             header-height so the next header pushes it off. Clipped by the wrapper's overflow:hidden so
             it tucks under the bars above and never covers them. Items above sit at translateY -H (off,
             clipped); the item below is opacity 0 — so exactly one shows. */}
-        {visibleItems.map(item => {
-          if (!expanded.has(item.key)) return null;
-          const lay = layouts[item.key];
-          if (!lay || lay.top == null || lay.bottom == null) return null;
+        {(() => {
+          // Derive every section's top/bottom from the running height sum, in render order. Because all
+          // positions come from one consistent pass, opening/closing any section can never leave another
+          // with a stale top — the duplicate-floating-header bug.
           const H = headerHRef.current;
-          const { top, bottom } = lay;
-          if (bottom - top <= H) return null;
-          // Fade IN over the first few px of docking (not a 1-px pop) so the entry reads as smoothly as
-          // the slide-out; masked by the real header still covering underneath. Capped to the dockable
-          // range so it always finishes before the slide-up begins.
-          const fade = Math.max(1, Math.min(14, bottom - top - H));
-          const opacity = scrollY.interpolate({ inputRange: [top, top + fade], outputRange: [0, 1], extrapolate: 'clamp' });
-          const translateY = scrollY.interpolate({ inputRange: [bottom - H, bottom], outputRange: [0, -H], extrapolate: 'clamp' });
-          return (
-            <Animated.View key={`float-${item.key}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, opacity, transform: [{ translateY }] }} pointerEvents="box-none">
-              {renderHeader(item, true, true)}
-            </Animated.View>
-          );
-        })}
+          let acc = 0;
+          return visibleItems.map(item => {
+            const top = acc;
+            const h = heights[item.key] ?? H; // un-measured (just toggled) → assume collapsed for now
+            const bottom = top + h;
+            acc = bottom;
+            if (!expanded.has(item.key)) return null;
+            if (bottom - top <= H) return null; // header only, nothing to stick under
+            // 1-px range: transition is sub-frame at any real scroll speed, so the switch is invisible.
+            // At scrollY===top both real and floating headers sit at y=0 — they overlap perfectly and
+            // the takeover reads as seamless rather than a pop or a fade.
+            const opacity = scrollY.interpolate({ inputRange: [top - 1, top], outputRange: [0, 1], extrapolate: 'clamp' });
+            const translateY = scrollY.interpolate({ inputRange: [bottom - H, bottom], outputRange: [0, -H], extrapolate: 'clamp' });
+            return (
+              <Animated.View key={`float-${item.key}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, opacity, transform: [{ translateY }] }} pointerEvents="box-none">
+                {renderHeader(item, true, true)}
+              </Animated.View>
+            );
+          });
+        })()}
       </View>
 
       {/* ── Spin dial (slides up from behind the dock when the root chip is tapped) ── */}
