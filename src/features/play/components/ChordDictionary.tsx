@@ -296,7 +296,13 @@ export default function ChordDictionary({ t }: Props) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   // Sub-category (family) tab within the voicing tab — reset to the first when the tab changes.
   const [familyIdx, setFamilyIdx] = React.useState(0);
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); }, [effectiveCategory, instrument]);
+  // Floating section header — our own replacement for native stickyHeaderIndices (which renders
+  // differently on web vs phone). Holds the OPEN item whose diagrams are currently scrolled under the
+  // top of the list; driven by scroll position + measured item layouts → identical on both platforms.
+  const [floatingKey, setFloatingKey] = React.useState<string | null>(null);
+  const floatingKeyRef = React.useRef<string | null>(null);          // mirror of floatingKey, to dedupe scroll updates
+  const itemLayouts = React.useRef<Record<string, { top?: number; bottom?: number }>>({}); // per item: header top + content bottom (content-coords)
+  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setFloatingKey(null); floatingKeyRef.current = null; }, [effectiveCategory, instrument]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
   // number of items that actually HAVE voicings per family (the family-tab chip, and to hide an
@@ -337,6 +343,26 @@ export default function ChordDictionary({ t }: Props) {
     setPendingVoicingKey(voicingKey ?? null);   // …and on the same voicing (combo pc-key) when known
     setMode('chord');
   }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicingKey, setMode, rootSemi, effectiveCategory]);
+
+  // One section header — rendered both in the scrolling list (measured via onLayout) and as the
+  // floating copy pinned at the top. `floating` skips onLayout (its position is fixed); the chevron
+  // points up for an open item either way.
+  const renderHeader = (item: any, open: boolean, floating: boolean) => (
+    <TouchableOpacity
+      key={floating ? `fh-${item.key}` : `h-${item.key}`}
+      activeOpacity={0.7}
+      onPress={() => toggleSection(item.key)}
+      onLayout={floating ? undefined : (e) => { const l = itemLayouts.current[item.key] || {}; l.top = e.nativeEvent.layout.y; itemLayouts.current[item.key] = l; }}
+      style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
+    >
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{item.label}</Text>
+        {!!item.sub && <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{item.sub}</Text>}
+        {familyCounts[item.key] > 0 && <CountChip count={familyCounts[item.key]} t={t} solid />}
+      </View>
+      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
+    </TouchableOpacity>
+  );
 
   const handlePlay = React.useCallback((it: DictMiniItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -410,82 +436,87 @@ export default function ChordDictionary({ t }: Props) {
         </View>
       )}
 
-      {/* ── Collapsible sections: tap an item to reveal its diagrams. Built as a FLAT child list. An
-            OPEN item contributes [header, content, sentinel]; a closed item just [header]. ONLY an open
-            item's header is sticky, so it docks like a dropdown title while its diagrams scroll, and a
-            list of closed items scrolls normally (no pinned/clipped headers). The zero-height sentinel
-            after the content is ALSO sticky: once the whole item scrolls above the top, the sentinel
-            docks and pushes the header out — so no sticky header lingers when none of the item is on
-            screen. The category/family bars above are already fixed. ── */}
-      <ScrollView
-        style={{ flex: 1 }}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 32 }}
-        stickyHeaderIndices={(() => { const idx: number[] = []; let pos = 0; visibleItems.forEach(it => { if (expanded.has(it.key)) { idx.push(pos); idx.push(pos + 2); pos += 3; } else { pos += 1; } }); return idx; })()}
-      >
-        {visibleItems.length === 0 ? (
-          <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
-        ) : (
-          visibleItems.flatMap(item => {
-            const open = expanded.has(item.key);
-            const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
-            const header = (
-              <TouchableOpacity
-                key={`h-${item.key}`}
-                activeOpacity={0.7}
-                onPress={() => toggleSection(item.key)}
-                style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
-              >
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{item.label}</Text>
-                  {!!item.sub && <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{item.sub}</Text>}
-                  {familyCounts[item.key] > 0 && <CountChip count={familyCounts[item.key]} t={t} solid />}
+      {/* ── Collapsible sections + a FLOATING header. We don't use native stickyHeaderIndices (it
+            renders differently web vs phone — lingering/clipping); instead we pin our own copy of the
+            OPEN item's header at the top while its diagrams are scrolled under it, driven by scroll
+            position + measured layouts. Same behaviour on both platforms. ── */}
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            // Active floating item = the OPEN item whose [headerTop, contentBottom) range contains the
+            // scroll offset (its real header is above the top, its diagrams not yet fully past).
+            const y = e.nativeEvent.contentOffset.y;
+            let active: string | null = null;
+            for (const it of visibleItems) {
+              if (!expanded.has(it.key)) continue;
+              const lay = itemLayouts.current[it.key];
+              if (lay && lay.top != null && lay.bottom != null && y >= lay.top && y < lay.bottom) { active = it.key; break; }
+            }
+            if (active !== floatingKeyRef.current) { floatingKeyRef.current = active; setFloatingKey(active); }
+          }}
+        >
+          {visibleItems.length === 0 ? (
+            <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
+          ) : (
+            visibleItems.flatMap(item => {
+              const open = expanded.has(item.key);
+              const header = renderHeader(item, open, false);
+              if (!open) return [header];
+              const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
+              const content = (
+                <View
+                  key={`c-${item.key}`}
+                  onLayout={(e) => { const l = itemLayouts.current[item.key] || {}; l.bottom = e.nativeEvent.layout.y + e.nativeEvent.layout.height; itemLayouts.current[item.key] = l; }}
+                  style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
+                >
+                  {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
+                      Each chip is tappable → loads that chord at the current root on the Chord screen. */}
+                  {!!item.foundIn?.length && (
+                    <View style={styles.foundInRow}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
+                        {item.foundIn.map((c: any) => (
+                          <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type, tabKind(effectiveCategory) === 'formulaCombo' ? item.key : undefined)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                  <DictSectionRow
+                    itemKey={item.key}
+                    isChordQuality={isChordQuality}
+                    category={effectiveCategory}
+                    instrument={instrument}
+                    rootSemi={rootSemi}
+                    allRoots={effectiveAllRoots}
+                    octave={octave}
+                    selectedScaleId={selectedScaleId}
+                    labelMode={labelMode}
+                    t={t}
+                    onPlay={handlePlay}
+                    L={L}
+                  />
                 </View>
-                <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
-              </TouchableOpacity>
-            );
-            if (!open) return [header];
-            const content = (
-              <View key={`c-${item.key}`} style={{ borderBottomWidth: 1, borderBottomColor: t.border }}>
-                {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
-                    Each chip is tappable → loads that chord at the current root on the Chord screen. */}
-                {!!item.foundIn?.length && (
-                  <View style={styles.foundInRow}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
-                      {item.foundIn.map(c => (
-                        <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type, tabKind(effectiveCategory) === 'formulaCombo' ? item.key : undefined)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
-                <DictSectionRow
-                  itemKey={item.key}
-                  isChordQuality={isChordQuality}
-                  category={effectiveCategory}
-                  instrument={instrument}
-                  rootSemi={rootSemi}
-                  allRoots={effectiveAllRoots}
-                  octave={octave}
-                  selectedScaleId={selectedScaleId}
-                  labelMode={labelMode}
-                  t={t}
-                  onPlay={handlePlay}
-                  L={L}
-                />
-              </View>
-            );
-            // Sticky sentinel (see ScrollView comment) — docks once the item scrolls past the top and
-            // pushes the item's sticky header out, so it doesn't linger off-screen. MUST be ≥1px:
-            // React Native ignores zero-height children when wiring up sticky headers, which left the
-            // open header with no follower to push it out. 1px transparent ≈ invisible.
-            const sentinel = <View key={`s-${item.key}`} style={{ height: 1 }} />;
-            return [header, content, sentinel];
-          })
-        )}
-      </ScrollView>
+              );
+              return [header, content];
+            })
+          )}
+        </ScrollView>
+        {/* The floating header itself — only while an open item's diagrams sit under the top. */}
+        {!!floatingKey && expanded.has(floatingKey) && (() => {
+          const item = visibleItems.find(i => i.key === floatingKey);
+          return item ? (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }} pointerEvents="box-none">
+              {renderHeader(item, true, true)}
+            </View>
+          ) : null;
+        })()}
+      </View>
 
       {/* ── Spin dial (slides up from behind the dock when the root chip is tapped) ── */}
       <RootPicker open={dialOpen} rootSemi={rootSemi} t={t} onPick={pickRoot} onClose={closeDial} />
