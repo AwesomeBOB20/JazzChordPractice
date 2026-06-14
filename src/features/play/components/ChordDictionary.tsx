@@ -136,7 +136,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
             <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
               {instrument === 'guitar'
                 ? <MiniChordDiagram voicing={it.voicing} arpShape={it.arpShape} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={labelRoot} />
-                : <MiniPianoDiagram chord={isChordQuality ? { rootSemi, chordType: itemKey } : undefined} notes={it.notes} noteFormulas={it.noteFormulas} theme={t} octave={octave} maxWidth={innerW} labelMode={labelMode} namingMode={namingMode} rootSemi={labelRoot} />}
+                : <MiniPianoDiagram chord={isChordQuality ? { rootSemi, chordType: itemKey } : undefined} notes={it.notes} noteFormulas={it.noteFormulas} theme={t} octave={octave} maxWidth={innerW} maxHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={labelRoot} />}
             </View>
             {c ? (
               <>
@@ -225,7 +225,10 @@ export default function ChordDictionary({ t }: Props) {
   const octave = useSettingsStore((s: any) => s.octave);
   const labelMode = useSettingsStore((s: any) => s.labelMode);
   const selectedScaleId = useChordStore((s: any) => s.selectedScaleId);
-  const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols } = useDictionaryStore();
+  const setChord = useChordStore((s: any) => s.setChord);
+  const setPendingVoicingTab = useChordStore((s: any) => s.setPendingVoicingTab);
+  const setPendingVoicingKey = useChordStore((s: any) => s.setPendingVoicingKey);
+  const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
   const { playChord, stopAudio } = useAudio();
@@ -293,7 +296,24 @@ export default function ChordDictionary({ t }: Props) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   // Sub-category (family) tab within the voicing tab — reset to the first when the tab changes.
   const [familyIdx, setFamilyIdx] = React.useState(0);
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); }, [effectiveCategory, instrument]);
+  // Floating section header — our own replacement for native stickyHeaderIndices (which renders
+  // differently web vs phone). For each OPEN item we render a copy pinned at the top, revealed/moved
+  // by a NATIVE opacity + transform driven by the scroll offset — always mounted (no flicker), no JS
+  // per-frame work. It fades in as the real header reaches the top, then slides up over the last
+  // header-height as the next header rises into its place; the wrapper's overflow:hidden clips the
+  // slide so it tucks UNDER the category/family bars instead of covering them.
+  //
+  // We store each section's measured HEIGHT (not its absolute top/bottom) and derive top/bottom by a
+  // cumulative sum at render. A section's height only changes when IT opens/closes — and onLayout
+  // always fires for a self-size change — whereas onLayout does NOT reliably refire when a section is
+  // merely pushed down by a sibling above it expanding. Deriving positions from heights keeps every
+  // section's top/bottom mutually consistent, so opening a 2nd dropdown can't leave a stale `top` that
+  // makes a floating header appear while its real header is still on screen.
+  const [heights, setHeights] = React.useState<Record<string, number>>({});
+  const setItemHeight = React.useCallback((key: string, h: number) => setHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
+  const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
+  const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
+  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setHeights({}); }, [effectiveCategory, instrument]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
   // number of items that actually HAVE voicings per family (the family-tab chip, and to hide an
@@ -318,10 +338,43 @@ export default function ChordDictionary({ t }: Props) {
   const rawIdx = familyIdx < groupedSections.length ? familyIdx : 0;
   const fIdx = familyAvailItems[rawIdx] > 0 ? rawIdx : Math.max(0, familyAvailItems.findIndex(n => n > 0));
   const activeGroup = groupedSections[fIdx];
+  // Items shown for this root (empties hidden so header counts match what's rendered).
+  const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
   const toggleSection = React.useCallback((key: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }, []);
+  // Tap a "Comp with"/"Solo with" chip → load that chord at the dictionary's current root on the
+  // Chord screen (switch Explore out of Dictionary mode). Closes the explore loop.
+  const openChord = React.useCallback((type: string, voicingKey?: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    stopAudio?.();
+    setChord(rootSemi, type);
+    setPendingVoicingTab(effectiveCategory);    // land on the same voicing tab we were browsing
+    setPendingVoicingKey(voicingKey ?? null);   // …and on the same voicing (combo pc-key) when known
+    setMode('chord');
+  }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicingKey, setMode, rootSemi, effectiveCategory]);
+
+  // One section header — rendered both in the scrolling list and as the floating copy pinned at the
+  // top. The in-list copy measures only the header HEIGHT (drives the slide distance); the section's
+  // top/bottom come from the cumulative height sum, not from this header's position. `floating` skips
+  // onLayout (its position is fixed); the chevron points up for an open item either way.
+  const renderHeader = (item: any, open: boolean, floating: boolean) => (
+    <TouchableOpacity
+      key={floating ? `fh-${item.key}` : `h-${item.key}`}
+      activeOpacity={0.7}
+      onPress={() => toggleSection(item.key)}
+      onLayout={floating ? undefined : (e) => { headerHRef.current = e.nativeEvent.layout.height; }}
+      style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
+    >
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{item.label}</Text>
+        {!!item.sub && <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{item.sub}</Text>}
+        {familyCounts[item.key] > 0 && <CountChip count={familyCounts[item.key]} t={t} solid />}
+      </View>
+      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
+    </TouchableOpacity>
+  );
 
   const handlePlay = React.useCallback((it: DictMiniItem) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -395,74 +448,103 @@ export default function ChordDictionary({ t }: Props) {
         </View>
       )}
 
-      {/* ── Collapsible sections: tap an item to reveal its diagrams ── */}
-      <ScrollView
-        style={{ flex: 1 }}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 32 }}
-      >
-        {!activeGroup || activeGroup.items.filter(i => itemCounts[i.key] > 0).length === 0 ? (
-          <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
-        ) : (
-          // Only chords that actually have a voicing for this root — empties are hidden, so the
-          // header chip count always matches what's shown (and the list never has dead rows).
-          activeGroup.items.filter(i => itemCounts[i.key] > 0).map(item => {
-            const open = expanded.has(item.key);
-            return (
-              <View key={item.key}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => toggleSection(item.key)}
-                  style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
+      {/* ── Collapsible sections + a FLOATING header. We don't use native stickyHeaderIndices (it
+            renders differently web vs phone — lingering/clipping); instead we pin our own copy of the
+            OPEN item's header at the top while its diagrams are scrolled under it, driven by scroll
+            position + measured layouts. Same behaviour on both platforms. ── */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.ScrollView
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          scrollEventThrottle={16}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+        >
+          {visibleItems.length === 0 ? (
+            <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
+          ) : (
+            visibleItems.map(item => {
+              const open = expanded.has(item.key);
+              const header = renderHeader(item, open, false);
+              const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
+              // Wrap header + content in one View and measure ITS height. This fires onLayout whenever
+              // the section opens/closes (its own size changes) — the only thing the cumulative-sum
+              // position model needs. Closed sections measure to the header height alone.
+              const content = !open ? null : (
+                <View
+                  key={`c-${item.key}`}
+                  style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
                 >
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{item.label}</Text>
-                    {!!item.sub && <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{item.sub}</Text>}
-                    {familyCounts[item.key] > 0 && <CountChip count={familyCounts[item.key]} t={t} solid />}
-                  </View>
-                  <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
-                </TouchableOpacity>
-                {open && (
-                  <View style={{ borderBottomWidth: 1, borderBottomColor: t.border }}>
-                    {/* "Comp with" (rootless/partial combos) / "Solo with" (scales): the wording marks the
-                        relationship type — a voicing is what you PLAY for those chords, a scale is what you
-                        SOLO over. Lists which chord qualities use it. Only inside the expanded item, so
-                        the browse list stays clean. Capped at 6 + "+N more". */}
-                    {!!item.foundIn?.length && (
-                      <View style={styles.foundInRow}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>
-                          {(tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with'}
-                        </Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
-                          {item.foundIn.map(name => (
-                            <View key={name} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{name}</Text>
-                            </View>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    )}
-                    <DictSectionRow
-                      itemKey={item.key}
-                      isChordQuality={isChordQuality}
-                      category={effectiveCategory}
-                      instrument={instrument}
-                      rootSemi={rootSemi}
-                      allRoots={effectiveAllRoots}
-                      octave={octave}
-                      selectedScaleId={selectedScaleId}
-                      labelMode={labelMode}
-                      t={t}
-                      onPlay={handlePlay}
-                      L={L}
-                    />
-                  </View>
-                )}
-              </View>
+                  {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
+                      Each chip is tappable → loads that chord at the current root on the Chord screen. */}
+                  {!!item.foundIn?.length && (
+                    <View style={styles.foundInRow}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
+                        {item.foundIn.map((c: any) => (
+                          <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type, tabKind(effectiveCategory) === 'formulaCombo' ? item.key : undefined)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                  <DictSectionRow
+                    itemKey={item.key}
+                    isChordQuality={isChordQuality}
+                    category={effectiveCategory}
+                    instrument={instrument}
+                    rootSemi={rootSemi}
+                    allRoots={effectiveAllRoots}
+                    octave={octave}
+                    selectedScaleId={selectedScaleId}
+                    labelMode={labelMode}
+                    t={t}
+                    onPlay={handlePlay}
+                    L={L}
+                  />
+                </View>
+              );
+              return (
+                <View key={`sec-${item.key}`} onLayout={(e) => setItemHeight(item.key, Math.round(e.nativeEvent.layout.height))}>
+                  {header}
+                  {content}
+                </View>
+              );
+            })
+          )}
+        </Animated.ScrollView>
+        {/* One floating header per OPEN item, ALWAYS mounted (no mount flicker). Native opacity fades it
+            in as the item's real header reaches the top; native translateY slides it up over the last
+            header-height so the next header pushes it off. Clipped by the wrapper's overflow:hidden so
+            it tucks under the bars above and never covers them. Items above sit at translateY -H (off,
+            clipped); the item below is opacity 0 — so exactly one shows. */}
+        {(() => {
+          // Derive every section's top/bottom from the running height sum, in render order. Because all
+          // positions come from one consistent pass, opening/closing any section can never leave another
+          // with a stale top — the duplicate-floating-header bug.
+          const H = headerHRef.current;
+          let acc = 0;
+          return visibleItems.map(item => {
+            const top = acc;
+            const h = heights[item.key] ?? H; // un-measured (just toggled) → assume collapsed for now
+            const bottom = top + h;
+            acc = bottom;
+            if (!expanded.has(item.key)) return null;
+            if (bottom - top <= H) return null; // header only, nothing to stick under
+            // 1-px range: transition is sub-frame at any real scroll speed, so the switch is invisible.
+            // At scrollY===top both real and floating headers sit at y=0 — they overlap perfectly and
+            // the takeover reads as seamless rather than a pop or a fade.
+            const opacity = scrollY.interpolate({ inputRange: [top - 1, top], outputRange: [0, 1], extrapolate: 'clamp' });
+            const translateY = scrollY.interpolate({ inputRange: [bottom - H, bottom], outputRange: [0, -H], extrapolate: 'clamp' });
+            return (
+              <Animated.View key={`float-${item.key}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, opacity, transform: [{ translateY }] }} pointerEvents="box-none">
+                {renderHeader(item, true, true)}
+              </Animated.View>
             );
-          })
-        )}
-      </ScrollView>
+          });
+        })()}
+      </View>
 
       {/* ── Spin dial (slides up from behind the dock when the root chip is tapped) ── */}
       <RootPicker open={dialOpen} rootSemi={rootSemi} t={t} onPick={pickRoot} onClose={closeDial} />
@@ -521,7 +603,9 @@ const styles = StyleSheet.create({
   // pills above so the two bars read as a hierarchy (primary pills → secondary underline) not twins.
   familyBar: { borderBottomWidth: 1 },
   familyTab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 11, paddingHorizontal: 12, borderBottomWidth: 2 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: 1 },
+  // width:100% so a DOCKED (sticky) header keeps spanning the full bar — otherwise the sticky wrapper
+  // shrinks it to its content width and space-between pulls the chevron in next to the label.
+  sectionHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: 1 },
   // "Comp with" / "Solo with" row at the top of an expanded item: muted label + a horizontal scroller of
   // borderless soft chips (faint accent fill, accent text), one per chord quality. Slides instead of a
   // "+N more" cap, so every chord is reachable. Label stays fixed; the scroller takes the rest.

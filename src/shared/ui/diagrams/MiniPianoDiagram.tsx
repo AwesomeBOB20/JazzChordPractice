@@ -13,6 +13,7 @@ interface Props {
   octave?: number;
   isMasked?: boolean;
   maxWidth?: number; // when set, the diagram scales UP to ~fill this width (capped); default keeps the compact 68px cap
+  maxHeight?: number; // when set (dictionary grid), also bound the scale by height so the keyboard never spills its cell
   // When labelMode is set (and not 'none'), each active key shows its degree / note
   // name, following the global label preference. Omitted → no labels.
   labelMode?: 'degrees' | 'notes' | 'none';
@@ -21,7 +22,7 @@ interface Props {
   noteFormulas?: string[]; // degree token per provided note (scale/arp) → degree colour + labels
 }
 
-const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octave = 4, isMasked, maxWidth, labelMode, namingMode, rootSemi, noteFormulas }: Props) => {
+const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octave = 4, isMasked, maxWidth, maxHeight, labelMode, namingMode, rootSemi, noteFormulas }: Props) => {
   const colorMode = useSettingsStore((s: any) => s.colorMode);
   const storeFontFamily = useSettingsStore((s: any) => s.fontFamily);
   const svgFont = familyForWeight(storeFontFamily, '700');
@@ -123,7 +124,11 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
   // Default: cap at 68px (compact, for the progression grid). When a maxWidth is
   // given (dictionary grid), scale UP to roughly fill it so bigger chords read
   // clearly — capped at 2.4× so a 2-note interval doesn't blow up.
-  const scale = maxWidth ? Math.min(2.4, maxWidth / SVG_W) : Math.min(1, 68 / SVG_W);
+  // Fit BOTH width and height (and cap at 2.4×) so the keyboard can never spill its cell — width
+  // alone let a wide cell scale the fixed-height keyboard past its slot. Default path is unchanged.
+  const scale = maxWidth
+    ? Math.min(2.4, maxWidth / SVG_W, maxHeight ? maxHeight / SVG_H : Infinity)
+    : Math.min(1, 68 / SVG_W);
   const displayW = SVG_W * scale;
   const displayH = SVG_H * scale;
 

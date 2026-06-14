@@ -114,7 +114,9 @@ export default function ProgressionPlayerDock({
         <View style={{ marginBottom: 12 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
             <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMetronomeEnabled(!metronomeEnabled); }} style={[styles.enginePill, { backgroundColor: metronomeEnabled ? t.accent : t.bg2, borderColor: metronomeEnabled ? t.accent : t.border }]}>
-              <MaterialCommunityIcons name="metronome" size={16} color={metronomeEnabled ? '#fff' : t.txt2} />
+              {/* metronome is a FILLED glyph → reads heavier than the outline icons beside it; use the
+                  lighter txt3 when resting so its visual weight matches them (text stays txt2). */}
+              <MaterialCommunityIcons name="metronome" size={16} color={metronomeEnabled ? '#fff' : t.txt3} />
               <Text style={[styles.enginePillTxt, { color: metronomeEnabled ? '#fff' : t.txt2 }]}>Click</Text>
             </TouchableOpacity>
 

@@ -34,7 +34,7 @@ const TAB_KIND: Record<DictionaryCategory, TabKind> = {
 };
 export const tabKind = (t: DictionaryCategory): TabKind => TAB_KIND[t];
 
-export interface DictItem { key: string; label: string; sub?: string; foundIn?: string[]; }
+export interface DictItem { key: string; label: string; sub?: string; foundIn?: { type: string; label: string }[]; }
 export interface DictGroup { label: string; items: DictItem[]; }
 
 export const ALL_CATEGORIES: { key: DictionaryCategory; label: string }[] = [
@@ -56,13 +56,15 @@ export const ORDERED_TYPES: string[] = (() => {
 // Maps a set of chord-type keys to their display labels (CH[ct].l), in canonical order, deduped.
 // Powers the chip row shown inside an expanded dictionary item (rootless/partial combos + scales).
 const orderIdxOf = (ct: string) => { const i = ORDERED_TYPES.indexOf(ct); return i === -1 ? 999 : i; };
-const foundInLabels = (chordTypes: string[]): string[] => {
+// Returns {type,label} so the rendered chip can both show the quality name AND navigate to that chord.
+const foundInLabels = (chordTypes: string[]): { type: string; label: string }[] => {
   const seen = new Set<string>();
-  return (chordTypes || [])
+  const out: { type: string; label: string }[] = [];
+  (chordTypes || [])
     .slice()
     .sort((a, b) => orderIdxOf(a) - orderIdxOf(b))
-    .map(ct => CH[ct]?.l)
-    .filter((l): l is string => !!l && !seen.has(l) && (seen.add(l), true));
+    .forEach(ct => { const l = CH[ct]?.l; if (l && !seen.has(l)) { seen.add(l); out.push({ type: ct, label: l }); } });
+  return out;
 };
 
 // Inverse of CHORD_SCALE_MAP (chord → scales): scaleId → the chord types that pair with it.
@@ -74,23 +76,24 @@ const SCALE_TO_CHORDS: Record<string, string[]> = (() => {
   return m;
 })();
 
-// Chords a CAGED shape works for (its "Solo with" list). Two kinds of shape:
-//  • a scale shape (lydian/phrygian/blues) → reuse the scale→chords table.
-//  • a chord shape (maj/7b9/…) → the chords whose chord tones CONTAIN all the shape's notes, i.e.
-//    you can arpeggiate/solo this shape safely over them. Built at root 0, so pitch-classes are
-//    root-relative; root-independent like the rest of the dictionary grouping.
+// Chords a CAGED shape works for (its "Solo with" list), by FUNCTION not literal chord tones:
+// a shape works for a chord if the shape's notes fit inside one of the chord's scales. The Maj shape
+// (1 2 3 5) has a 9th the major TRIAD lacks, but C Major functions as Ionian / Lydian / Mixolydian,
+// and 1 2 3 5 lives inside all of those — so it works. This naturally covers the scale-shapes too
+// (the Lydian shape IS the Lydian scale → the chords that use Lydian). Built at root 0 (root-relative).
 const GS_PC = GUITAR_TUNING.map(m => ((m % 12) + 12) % 12);
-const shapeChords = (shapeKey: string): string[] => {
-  const scaleId = shapeKey.replace('_shape', '');
-  if (SCALES[scaleId]) return foundInLabels(SCALE_TO_CHORDS[scaleId] ?? []);
+const shapeChords = (shapeKey: string): { type: string; label: string }[] => {
   const shapePcs = new Set<number>();
   buildShapeTemplate(shapeKey, 0, 'sharp').forEach((b: any) => b.notes.forEach((n: any) => shapePcs.add((GS_PC[n.stringIdx] + n.fret) % 12)));
-  const matches = ORDERED_TYPES.filter(ct => {
-    const ch = CH[ct];
-    if (!ch) return false;
-    const chordPcs = new Set(ch.iv.map((iv: number) => ((iv % 12) + 12) % 12));
-    return Array.from(shapePcs).every(pc => chordPcs.has(pc));
-  });
+  // Does every note of the shape fall inside this one scale?
+  const fitsScale = (scaleId: string): boolean => {
+    const sc = SCALES[scaleId];
+    if (!sc) return false;
+    const scalePcs = new Set(sc.iv.map((iv: number) => ((iv % 12) + 12) % 12));
+    return Array.from(shapePcs).every(pc => scalePcs.has(pc));
+  };
+  // The shape works for a chord if it fits inside ANY one of that chord's scales (its function).
+  const matches = ORDERED_TYPES.filter(ct => (CHORD_SCALE_MAP[ct] ?? []).some(fitsScale));
   return foundInLabels(matches);
 };
 
