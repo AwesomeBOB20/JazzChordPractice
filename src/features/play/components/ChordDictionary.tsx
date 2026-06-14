@@ -302,6 +302,7 @@ export default function ChordDictionary({ t }: Props) {
   const [floatingKey, setFloatingKey] = React.useState<string | null>(null);
   const floatingKeyRef = React.useRef<string | null>(null);          // mirror of floatingKey, to dedupe scroll updates
   const itemLayouts = React.useRef<Record<string, { top?: number; bottom?: number }>>({}); // per item: header top + content bottom (content-coords)
+  const headerHRef = React.useRef(40); // measured section-header height — hide the floating copy this far before the next header so they never overlap
   React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setFloatingKey(null); floatingKeyRef.current = null; }, [effectiveCategory, instrument]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
@@ -352,7 +353,7 @@ export default function ChordDictionary({ t }: Props) {
       key={floating ? `fh-${item.key}` : `h-${item.key}`}
       activeOpacity={0.7}
       onPress={() => toggleSection(item.key)}
-      onLayout={floating ? undefined : (e) => { const l = itemLayouts.current[item.key] || {}; l.top = e.nativeEvent.layout.y; itemLayouts.current[item.key] = l; }}
+      onLayout={floating ? undefined : (e) => { const l = itemLayouts.current[item.key] || {}; l.top = e.nativeEvent.layout.y; itemLayouts.current[item.key] = l; headerHRef.current = e.nativeEvent.layout.height; }}
       style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}
     >
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -454,7 +455,9 @@ export default function ChordDictionary({ t }: Props) {
             for (const it of visibleItems) {
               if (!expanded.has(it.key)) continue;
               const lay = itemLayouts.current[it.key];
-              if (lay && lay.top != null && lay.bottom != null && y >= lay.top && y < lay.bottom) { active = it.key; break; }
+              // Upper bound is contentBottom MINUS a header height, so the floating copy hides just
+              // before the next item's header scrolls up into it → they never overlap.
+              if (lay && lay.top != null && lay.bottom != null && y >= lay.top && y < lay.bottom - headerHRef.current) { active = it.key; break; }
             }
             if (active !== floatingKeyRef.current) { floatingKeyRef.current = active; setFloatingKey(active); }
           }}
