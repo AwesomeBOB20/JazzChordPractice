@@ -517,7 +517,11 @@ export default function ChordDictionary({ t }: Props) {
           const H = headerHRef.current;
           const { top, bottom } = lay;
           if (bottom - top <= H) return null;
-          const opacity = scrollY.interpolate({ inputRange: [top - 1, top], outputRange: [0, 1], extrapolate: 'clamp' });
+          // Fade IN over the first few px of docking (not a 1-px pop) so the entry reads as smoothly as
+          // the slide-out; masked by the real header still covering underneath. Capped to the dockable
+          // range so it always finishes before the slide-up begins.
+          const fade = Math.max(1, Math.min(14, bottom - top - H));
+          const opacity = scrollY.interpolate({ inputRange: [top, top + fade], outputRange: [0, 1], extrapolate: 'clamp' });
           const translateY = scrollY.interpolate({ inputRange: [bottom - H, bottom], outputRange: [0, -H], extrapolate: 'clamp' });
           return (
             <Animated.View key={`float-${item.key}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, opacity, transform: [{ translateY }] }} pointerEvents="box-none">
