@@ -544,7 +544,9 @@ const styles = StyleSheet.create({
   // pills above so the two bars read as a hierarchy (primary pills → secondary underline) not twins.
   familyBar: { borderBottomWidth: 1 },
   familyTab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 11, paddingHorizontal: 12, borderBottomWidth: 2 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: 1 },
+  // width:100% so a DOCKED (sticky) header keeps spanning the full bar — otherwise the sticky wrapper
+  // shrinks it to its content width and space-between pulls the chevron in next to the label.
+  sectionHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: 1 },
   // "Comp with" / "Solo with" row at the top of an expanded item: muted label + a horizontal scroller of
   // borderless soft chips (faint accent fill, accent text), one per chord quality. Slides instead of a
   // "+N more" cap, so every chord is reachable. Label stays fixed; the scroller takes the rest.
