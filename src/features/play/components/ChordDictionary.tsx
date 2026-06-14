@@ -302,7 +302,8 @@ export default function ChordDictionary({ t }: Props) {
   const [floatingKey, setFloatingKey] = React.useState<string | null>(null);
   const floatingKeyRef = React.useRef<string | null>(null);          // mirror of floatingKey, to dedupe scroll updates
   const itemLayouts = React.useRef<Record<string, { top?: number; bottom?: number }>>({}); // per item: header top + content bottom (content-coords)
-  const headerHRef = React.useRef(40); // measured section-header height — hide the floating copy this far before the next header so they never overlap
+  const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
+  const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset → smooth floating-header push
   React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setFloatingKey(null); floatingKeyRef.current = null; }, [effectiveCategory, instrument]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
@@ -442,25 +443,30 @@ export default function ChordDictionary({ t }: Props) {
             OPEN item's header at the top while its diagrams are scrolled under it, driven by scroll
             position + measured layouts. Same behaviour on both platforms. ── */}
       <View style={{ flex: 1 }}>
-        <ScrollView
+        <Animated.ScrollView
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 32 }}
           scrollEventThrottle={16}
-          onScroll={(e) => {
-            // Active floating item = the OPEN item whose [headerTop, contentBottom) range contains the
-            // scroll offset (its real header is above the top, its diagrams not yet fully past).
-            const y = e.nativeEvent.contentOffset.y;
-            let active: string | null = null;
-            for (const it of visibleItems) {
-              if (!expanded.has(it.key)) continue;
-              const lay = itemLayouts.current[it.key];
-              // Upper bound is contentBottom MINUS a header height, so the floating copy hides just
-              // before the next item's header scrolls up into it → they never overlap.
-              if (lay && lay.top != null && lay.bottom != null && y >= lay.top && y < lay.bottom - headerHRef.current) { active = it.key; break; }
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            {
+              useNativeDriver: true, // scrollY drives the floating header's transform on the UI thread
+              listener: (e: any) => {
+                // Active floating item = the OPEN item whose [headerTop, contentBottom) range contains
+                // the scroll offset (real header above the top, diagrams not yet fully past). The slide
+                // (below) handles the hand-off, so the range runs all the way to contentBottom.
+                const y = e.nativeEvent.contentOffset.y;
+                let active: string | null = null;
+                for (const it of visibleItems) {
+                  if (!expanded.has(it.key)) continue;
+                  const lay = itemLayouts.current[it.key];
+                  if (lay && lay.top != null && lay.bottom != null && y >= lay.top && y < lay.bottom) { active = it.key; break; }
+                }
+                if (active !== floatingKeyRef.current) { floatingKeyRef.current = active; setFloatingKey(active); }
+              },
             }
-            if (active !== floatingKeyRef.current) { floatingKeyRef.current = active; setFloatingKey(active); }
-          }}
+          )}
         >
           {visibleItems.length === 0 ? (
             <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>Nothing here for this root.</Text>
@@ -509,15 +515,23 @@ export default function ChordDictionary({ t }: Props) {
               return [header, content];
             })
           )}
-        </ScrollView>
-        {/* The floating header itself — only while an open item's diagrams sit under the top. */}
+        </Animated.ScrollView>
+        {/* The floating header — pinned at the top while an open item's diagrams sit under it. Over the
+            last header-height of the item it SLIDES UP (translateY 0 → -H), so the next item's header
+            rises into its place and pushes it off — fully visible until then, never overlapping. The
+            transform is driven by the native scrollY, so the slide is smooth with no JS per-frame work. */}
         {!!floatingKey && expanded.has(floatingKey) && (() => {
           const item = visibleItems.find(i => i.key === floatingKey);
-          return item ? (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }} pointerEvents="box-none">
+          const lay = itemLayouts.current[floatingKey];
+          if (!item || !lay || lay.bottom == null) return null;
+          const H = headerHRef.current;
+          const cb = lay.bottom;
+          const translateY = scrollY.interpolate({ inputRange: [cb - H, cb], outputRange: [0, -H], extrapolate: 'clamp' });
+          return (
+            <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, transform: [{ translateY }] }} pointerEvents="box-none">
               {renderHeader(item, true, true)}
-            </View>
-          ) : null;
+            </Animated.View>
+          );
         })()}
       </View>
 
