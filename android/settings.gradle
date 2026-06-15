@@ -21,7 +21,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   }
 }
 
-rootProject.name = 'Jazz Chord Practice'
+rootProject.name = 'Kordal'
 
 dependencyResolutionManagement {
   versionCatalogs {

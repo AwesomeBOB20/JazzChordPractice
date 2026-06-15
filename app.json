@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Jazz Chord Practice",
+    "name": "Kordal",
     "slug": "jazzchordpractice",
     "owner": "anthonysteller314s-organization",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#0f0f1e"
       },
       "package": "com.awesomebob20.jazzchordpractice",
@@ -30,7 +30,7 @@
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Jazz Chord Practice uses the microphone for the guitar tuner to detect the pitch of the notes you play."
+        "NSMicrophoneUsageDescription": "Kordal uses the microphone for the guitar tuner to detect the pitch of the notes you play."
       }
     },
     "extra": {
