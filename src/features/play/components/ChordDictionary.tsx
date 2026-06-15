@@ -38,11 +38,13 @@ function randomChordWithInterval(semitone: number): string | null {
 
 const screenW = Dimensions.get('window').width;
 const H_PAD = 12;
-// Divider thickness. A 1-DP border becomes ~2-3 PHYSICAL pixels on Android's fractional-density
-// screens (e.g. 2.75×), so adjacent row dividers round to 2 or 3 px inconsistently — some look darker,
-// some lighter. hairlineWidth is a guaranteed-crisp single physical pixel, so every divider matches.
-// iOS/web have integer-ish density and already render 1 DP crisply, so leave them at 1.
-const HAIRLINE = Platform.OS === 'android' ? StyleSheet.hairlineWidth : 1;
+// Divider thickness. On Android's fractional-density screens (e.g. 2.75×) a 1-DP border is ~2.75
+// physical px, which rounds to 2 or 3 px inconsistently (some dividers look darker/lighter). A single
+// physical px (hairlineWidth) is uniform but, when a row's edge lands mid-pixel, splits ~50/50 across
+// two pixel rows and can vanish entirely. TWO physical px is the sweet spot: a whole-pixel width so it
+// never rounds unevenly, and thick enough that it always fully covers at least one pixel regardless of
+// sub-pixel position — so every divider is present and identical. iOS/web render 1 DP crisply → keep 1.
+const DIVIDER = Platform.OS === 'android' ? StyleSheet.hairlineWidth * 2 : 1;
 // Match the tuner/play/progression sticky players: 12 top pad + 56 button + bottom inset.
 const DOCK_H = 12 + 56 + (Platform.OS === 'ios' ? 24 : 12); // bottom dock height (picker floats above it)
 // Root picker: 12 plain circles in a horizontal scroller. NOT a spin dial — no infinite loop,
@@ -171,7 +173,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
     );
   };
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: HAIRLINE, borderLeftWidth: HAIRLINE, borderColor: t.border }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: DIVIDER, borderLeftWidth: DIVIDER, borderColor: t.border }}>
       {shownItems.map(it => {
         // Guitar cells carry four corner pills in place of the old caption; piano keeps its caption.
         const c = instrument === 'guitar' ? dictCorners(it, category, rootSemi, allRoots) : null;
@@ -612,7 +614,7 @@ export default function ChordDictionary({ t }: Props) {
               const content = !keepMounted ? null : (
                 <View
                   key={`c-${item.key}`}
-                  style={{ height: open ? undefined : 0, overflow: 'hidden', borderBottomWidth: open ? HAIRLINE : 0, borderBottomColor: t.border }}
+                  style={{ height: open ? undefined : 0, overflow: 'hidden', borderBottomWidth: open ? DIVIDER : 0, borderBottomColor: t.border }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
                       Tap a chip to ARM that chord; the label switches to a prompt and the next diagram
@@ -753,21 +755,21 @@ export default function ChordDictionary({ t }: Props) {
 }
 
 const styles = StyleSheet.create({
-  chipBar: { paddingVertical: 8, borderBottomWidth: HAIRLINE },
+  chipBar: { paddingVertical: 8, borderBottomWidth: DIVIDER },
   catTab: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 10, paddingHorizontal: 14 },
   // Family sub-tabs: quiet underline text-tabs, deliberately shorter + flatter than the catTab
   // pills above so the two bars read as a hierarchy (primary pills → secondary underline) not twins.
-  familyBar: { borderBottomWidth: HAIRLINE },
+  familyBar: { borderBottomWidth: DIVIDER },
   familyTab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 11, paddingHorizontal: 12, borderBottomWidth: 2 },
   // width:100% so a DOCKED (sticky) header keeps spanning the full bar — otherwise the sticky wrapper
   // shrinks it to its content width and space-between pulls the chevron in next to the label.
-  sectionHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: HAIRLINE },
+  sectionHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: DIVIDER },
   // "Comp with" / "Solo with" row at the top of an expanded item: muted label + a horizontal scroller of
   // borderless soft chips (faint accent fill, accent text), one per chord quality. Slides instead of a
   // "+N more" cap, so every chord is reachable. Label stays fixed; the scroller takes the rest.
   foundInRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: H_PAD, paddingVertical: 8 },
   // Flat grid cell (no card): sharp corners, shared right/bottom 1px borders, content centred.
-  cell: { alignItems: 'center', justifyContent: 'center', borderRightWidth: HAIRLINE, borderBottomWidth: HAIRLINE, paddingVertical: 8, paddingHorizontal: 2, position: 'relative', overflow: 'hidden' },
+  cell: { alignItems: 'center', justifyContent: 'center', borderRightWidth: DIVIDER, borderBottomWidth: DIVIDER, paddingVertical: 8, paddingHorizontal: 2, position: 'relative', overflow: 'hidden' },
   // Corner-label pill: flush to the cell corner, only the inner corner rounded (set per-anchor).
   cornerPill: { position: 'absolute', zIndex: 2, paddingHorizontal: 5, paddingVertical: 2 },
   cTL: { top: 0, left: 0, borderBottomRightRadius: 8 },
