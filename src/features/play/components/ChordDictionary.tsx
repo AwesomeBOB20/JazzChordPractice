@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform, InteractionManager } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform, InteractionManager, PixelRatio } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { NOTE_SHARP, NOTE_FLAT, CH, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
@@ -143,9 +143,13 @@ const DictSectionRow = React.memo(function DictSectionRow({
   // The diagrams streamed in so far, plus a spacer reserving the height of the rows still to mount so
   // the section (and the list below) doesn't jump while it fills. Cell height ≈ box + vertical padding.
   const shownItems = items.slice(0, shown);
-  const rowPad = instrument === 'guitar' ? (L.cornerFs + 9) * 2 : 16 + Math.round(L.labelFs * 1.6);
+  // Guitar cells get a fixed height snapped to a whole physical pixel so every grid row is identical
+  // and its bottom divider lands crisply — same fix as the section headers. Piano keeps a caption, so
+  // leave it content-sized. The inner diagram box centres within the fixed height.
+  const guitarCellH = PixelRatio.roundToNearestPixel(boxH + (L.cornerFs + 9) * 2);
+  const rowH = instrument === 'guitar' ? guitarCellH : boxH + 16 + Math.round(L.labelFs * 1.6);
   const pendingRows = Math.ceil(items.length / L.cols) - Math.ceil(shownItems.length / L.cols);
-  const spacerH = Math.max(0, pendingRows * (boxH + rowPad));
+  const spacerH = Math.max(0, pendingRows * rowH);
   // Flat grid (no card panels) — cells tile the full width and share 1px borders, matching the
   // progression measure grid. The container draws the top + left edge; each cell draws its
   // right + bottom edge.
@@ -184,7 +188,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
             onPress={() => (armedType ? onCommit(it, armedType, itemKey) : onPlay(it))}
             onLongPress={() => onHold(it, itemKey)}
             delayLongPress={300}
-            style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, paddingVertical: instrument === 'guitar' ? L.cornerFs + 9 : 8 }, armedDiagramKey === it.key ? { backgroundColor: t.accent + '26' } : armedType ? { backgroundColor: t.accent + '14' } : null]}
+            style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: instrument === 'guitar' ? guitarCellH : undefined, paddingVertical: instrument === 'guitar' ? 0 : 8 }, armedDiagramKey === it.key ? { backgroundColor: t.accent + '26' } : armedType ? { backgroundColor: t.accent + '14' } : null]}
           >
             <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
               {instrument === 'guitar'
@@ -763,7 +767,10 @@ const styles = StyleSheet.create({
   familyTab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 11, paddingHorizontal: 12, borderBottomWidth: 2 },
   // width:100% so a DOCKED (sticky) header keeps spanning the full bar — otherwise the sticky wrapper
   // shrinks it to its content width and space-between pulls the chevron in next to the label.
-  sectionHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: DIVIDER },
+  // Fixed height snapped to a whole physical pixel so every row is identical and its bottom divider
+  // lands on a pixel boundary — a fractional row height makes consecutive dividers alternate
+  // crisp/straddled (thick/thin) on Android. Content stays vertically centred via alignItems:'center'.
+  sectionHeader: { width: '100%', height: PixelRatio.roundToNearestPixel(44), flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, borderBottomWidth: DIVIDER },
   // "Comp with" / "Solo with" row at the top of an expanded item: muted label + a horizontal scroller of
   // borderless soft chips (faint accent fill, accent text), one per chord quality. Slides instead of a
   // "+N more" cap, so every chord is reachable. Label stays fixed; the scroller takes the rest.
