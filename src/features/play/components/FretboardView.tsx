@@ -1393,7 +1393,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
             {scaleMode ? formatVoicingName(currentScaleVoicing?.boxName) : 
              shapesMode ? formatVoicingName(currentShapeVoicing?.boxName) : 
              arpMode ? formatVoicingName(currentArpVoicing?.boxName) : 
-             (currentVoicing?.type === 'open' || currentVoicing?.type === 'barre') ? formatVoicingName(currentGroup?.label) : 
+             // Shells move across strings as the voicing order changes (R-3-7 vs R-7-3), so an exact
+             // string set would flicker within one group. They're grouped by BASS string instead, so
+             // show that consistent group label ("E Bass"/"A Bass"/"D Bass") like open/barre do.
+             (currentVoicing?.type === 'open' || currentVoicing?.type === 'barre' || currentVoicing?.type === 'shell') ? formatVoicingName(currentGroup?.label) :
              (currentVoicing?.frets ? currentVoicing.frets.map((f: any, i: number) => f.fret !== null ? 6 - i : null).filter((x: any) => x !== null).join('-') : formatVoicingName(currentGroup?.label))}
           </Text>
           <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{scaleMode ? `${Math.max(0, uniqueBoxNames.indexOf(activeScaleBoxName)) + 1}/${Math.max(1, uniqueBoxNames.length)}` : shapesMode ? `${Math.max(0, uniqueShapesBoxNames.indexOf(activeShapesBoxName)) + 1}/${Math.max(1, uniqueShapesBoxNames.length)}` : arpMode ? `${Math.max(0, uniqueArpBoxNames.indexOf(activeArpBoxName)) + 1}/${Math.max(1, uniqueArpBoxNames.length)}` : `${safeGroupIdx + 1}/${Math.max(1, displayGroups.length)}`}</Text>
