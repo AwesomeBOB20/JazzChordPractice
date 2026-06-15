@@ -21,6 +21,14 @@ const activeRoles = (v: any): string[] => v.frets.filter((f: any) => f && f.fret
 const activeStringKey = (v: any): string =>
   v.frets.map((f: any, i: number) => (f && f.fret !== null) ? i : null).filter((i: any) => i !== null).join(',');
 
+// Shells move across strings as the voicing order changes (R-3-7 vs R-7-3 sit on different strings),
+// so they can't lock to an exact string SET like drops do. Instead they lock to the BASS string —
+// 6th / 5th / 4th — keyed by the lowest active string index ('b0' = low-E/6th, 'b1' = A/5th, 'b2' = D/4th).
+const bassStringKey = (v: any): string => {
+  const idxs = v.frets.map((f: any, i: number) => (f && f.fret !== null) ? i : -1).filter((i: number) => i >= 0);
+  return idxs.length ? 'b' + Math.min(...idxs) : '';
+};
+
 function jazzCharacter(v: any, def: { r: string[] }): number {
   const roles = activeRoles(v);
   const present = new Set(roles);
@@ -109,14 +117,18 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       forcedType === 'triads' ? triadVoicings :
       forcedType === 'drop2'  ? drop2Voicings :
       forcedType === 'drop3'  ? drop3Voicings :
-      forcedType === 'shells' ? shellVoicings : null;
+      forcedType === 'shells' ? shellVoicings :
+      // Auto = drop 2 / drop 3 ONLY — no triads, no shells. Falls back to the full set below when a
+      // chord has neither (e.g. a plain triad can't be a drop voicing), so no cell renders blank.
+      forcedType === 'auto'   ? [...drop2Voicings, ...drop3Voicings] : null;
     let pool = (forcedSubset && forcedSubset.length) ? forcedSubset : allVoicings;
 
     // Strict string-set lock: keep every chord on the chosen set of strings so the
     // whole progression sits in one place on the neck. Only relax (fall back to the
     // wider pool) when this particular chord can't be voiced on that set at all.
     if (forcedStringSet) {
-      const onSet = pool.filter((v: any) => activeStringKey(v) === forcedStringSet);
+      const keyOf = forcedType === 'shells' ? bassStringKey : activeStringKey;
+      const onSet = pool.filter((v: any) => keyOf(v) === forcedStringSet);
       if (onSet.length) pool = onSet;
     }
 

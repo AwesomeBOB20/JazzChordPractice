@@ -1739,6 +1739,9 @@ export const STRING_SETS_BY_TYPE: Record<string, { key: string; label: string }[
   triads: TRIAD_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop2: DROP2_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop3: DROP3_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
+  // Shells change strings per voicing order, so they lock to the BASS string rather than an exact set:
+  // bass on the 6th / 5th / 4th string. Keys ('b0/b1/b2') match bassStringKey() in voiceLeading.ts.
+  shells: [{ key: 'b0', label: '6th' }, { key: 'b1', label: '5th' }, { key: 'b2', label: '4th' }],
 };
 
 // Generates all 4-note combinations for chords with >4 notes (like 9ths or 13ths)
