@@ -29,6 +29,23 @@ const bassStringKey = (v: any): string => {
   return idxs.length ? 'b' + Math.min(...idxs) : '';
 };
 
+// Guide-tone pitches (the 3rd and 7th) of a voicing, for shell voice leading. The 3rd may be a sus
+// substitute (4th/2nd); the 7th may be a 6th. Measured as absolute MIDI pitch so the line can move to
+// any string — what matters is how far the 3 & 7 travel, not which strings they sit on.
+const TUNING_MIDI = [40, 45, 50, 55, 59, 64];
+const SHELL_G3 = new Set(['3rd', 'b3rd', '4th', '2nd']);
+const SHELL_G7 = new Set(['7th', 'b7th', 'bb7', '6th']);
+const shellGuides = (frets: any): { g3: number | null; g7: number | null } => {
+  let g3: number | null = null, g7: number | null = null;
+  frets.forEach((f: any, i: number) => {
+    if (!f || f.fret === null) return;
+    const pitch = TUNING_MIDI[i] + f.fret;
+    if (SHELL_G3.has(f.role)) g3 = pitch;
+    else if (SHELL_G7.has(f.role)) g7 = pitch;
+  });
+  return { g3, g7 };
+};
+
 function jazzCharacter(v: any, def: { r: string[] }): number {
   const roles = activeRoles(v);
   const present = new Set(roles);
@@ -306,21 +323,41 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
             vMelodyPitch = TUNING[vHighestStr] + v.frets[vHighestStr].fret;
         }
 
-        if (lastMelodyPitch !== null && vMelodyPitch !== null && !inWrap) {
-            // INCREASED to 15: The top voice is the most critical part of jazz voice leading
-            d += Math.abs(vMelodyPitch - lastMelodyPitch) * 15;
-        }
-
-        // Standard physical finger travel penalty for remaining voices (skipped on a wrap chord).
-        if (!inWrap) for (let i = 0; i < 6; i++) {
-          const f1 = lastFrets[i]?.fret;
-          const f2 = v.frets[i]?.fret;
-
-          if (f1 !== null && f1 !== undefined && f2 !== null && f2 !== undefined) {
-              // Exact common tone (same string, same fret) costs 0. Small moves cost little.
-              d += Math.abs(f1 - f2);
-          } else if ((f1 !== null && f1 !== undefined) || (f2 !== null && f2 !== undefined)) {
-              d += 5; // Slight bump to strongly discourage dropping/adding strings mid-phrase
+        if (!inWrap) {
+          if (forcedType === 'shells') {
+            // SHELL VOICE LEADING: a shell is a guide-tone instrument, so minimise how far the 3 & 7
+            // travel and let the ROOT bounce freely. Match the two guides by the closer pairing (the
+            // 7→3 line crosses roles) and measure by PITCH — the strings can change as long as the
+            // line stays smooth. The third "free" note (root, or a color in a rootless shell) is not
+            // scored for motion; the root just gets a light tether to the 6th/5th string below.
+            const cur = shellGuides(v.frets), prev = shellGuides(lastFrets);
+            if (cur.g3 !== null && cur.g7 !== null && prev.g3 !== null && prev.g7 !== null) {
+              const direct = Math.abs(cur.g3 - prev.g3) + Math.abs(cur.g7 - prev.g7);
+              const crossed = Math.abs(cur.g3 - prev.g7) + Math.abs(cur.g7 - prev.g3);
+              d += Math.min(direct, crossed) * 12;
+            } else if (lastMelodyPitch !== null && vMelodyPitch !== null) {
+              d += Math.abs(vMelodyPitch - lastMelodyPitch) * 12; // fallback: top-voice motion
+            }
+            // Root free to bounce between the 6th/5th strings (no penalty); only nudge it back if it
+            // wanders onto an inner string, so the bass stays sensible. Rootless shells (no root) are
+            // unaffected.
+            const rootStr = v.frets.findIndex((f: any) => f && f.fret !== null && f.role === 'root');
+            if (rootStr > 1) d += 6;
+          } else {
+            // SOPRANO-WEIGHTED top voice + per-string finger travel (all other voicing types).
+            if (lastMelodyPitch !== null && vMelodyPitch !== null) {
+              // The top voice is the most critical part of jazz voice leading.
+              d += Math.abs(vMelodyPitch - lastMelodyPitch) * 15;
+            }
+            for (let i = 0; i < 6; i++) {
+              const f1 = lastFrets[i]?.fret;
+              const f2 = v.frets[i]?.fret;
+              if (f1 !== null && f1 !== undefined && f2 !== null && f2 !== undefined) {
+                d += Math.abs(f1 - f2); // common tone (same string+fret) costs 0; small moves cost little
+              } else if ((f1 !== null && f1 !== undefined) || (f2 !== null && f2 !== undefined)) {
+                d += 5; // discourage dropping/adding strings mid-phrase
+              }
+            }
           }
         }
         
