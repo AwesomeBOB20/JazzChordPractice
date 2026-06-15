@@ -587,7 +587,8 @@ const BASS_ROLE_RANK: Record<string, number> = {
 };
 
 function sortVoicingGroups(groups: VoicingGroup[]): VoicingGroup[] {
-  const bassRank = (label: string) => label.includes('D Bass') ? 0 : label.includes('A Bass') ? 1 : label.includes('E Bass') ? 2 : label.charCodeAt(0);
+  // Shell bass groups order by string, thickest first: 6th (E) → 5th (A) → 4th (D).
+  const bassRank = (label: string) => label.includes('E Bass') ? 0 : label.includes('A Bass') ? 1 : label.includes('D Bass') ? 2 : label.charCodeAt(0);
   groups.sort((a, b) => bassRank(a.label) - bassRank(b.label));
   groups.forEach(g => {
     g.voicings.sort((a, b) => {
