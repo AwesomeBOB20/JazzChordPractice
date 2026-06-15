@@ -572,10 +572,12 @@ function VoicingExplorer({
   const guitarGroups = React.useMemo(() => {
     if (voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || voicingTab === 'shapes') return [];
     let rawGroups = displayGuitarGroups;
+    // Order groups by bass string, thickest first: 6th (E) → 5th (A) → 4th (D) → … so the navigator
+    // reads 1/3 = E Bass, 2/3 = A Bass, 3/3 = D Bass for shells (and lowest-bass-first for every type).
     rawGroups = [...rawGroups].sort((a, b) => {
       const bassA = a.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
       const bassB = b.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
-      return bassB - bassA;
+      return bassA - bassB;
     });
 
     const ROLE_ORDER: Record<string, number> = { 'root': 0, 'R': 0, '1': 0, 'b2': 1, '2nd': 1, '2': 1, 'b3': 2, '3rd': 2, '3': 2, '4th': 3, '4': 3, '#4': 3, 'b5': 4, '5th': 4, '5': 4, '#5': 4, 'b6': 5, '6th': 5, '6': 5, 'bb7': 6, 'b7': 6, '7th': 6, '7': 6, 'b9': 7, '9th': 7, '9': 7, '#9': 7, '11th': 8, '11': 8, '#11': 8, 'b13': 9, '13th': 9, '13': 9, '#13': 9 };
