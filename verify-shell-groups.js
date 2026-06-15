@@ -36,13 +36,7 @@ function deriveShellToneSets(chordDef) {
   const toneSets = [['root', third, seventh], ['root', seventh, third]];
   for (const color of colorTones) {
     toneSets.push([third, seventh, color]); toneSets.push([seventh, third, color]);
-    toneSets.push(['root', third, color]); toneSets.push(['root', seventh, color]);
     toneSets.push([color, third, seventh]); toneSets.push([color, seventh, third]);
-  }
-  for (let i = 0; i < colorTones.length; i++) for (let j = i + 1; j < colorTones.length; j++) {
-    const c1 = colorTones[i], c2 = colorTones[j];
-    toneSets.push([third, c1, c2]); toneSets.push([seventh, c1, c2]);
-    toneSets.push([c1, c2, third]); toneSets.push([c1, c2, seventh]);
   }
   return toneSets;
 }

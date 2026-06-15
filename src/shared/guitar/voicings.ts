@@ -935,30 +935,18 @@ export function deriveShellToneSets(
     role !== 'root' && role !== third && role !== seventh && role !== '5th'
   );
 
+  // Every shell keeps BOTH guide tones (3rd + 7th). A color tone only ever replaces the ROOT — never a
+  // guide tone — so we never emit triad-like grips that drop the 7th (e.g. root-♭3-♭5 = a diminished
+  // triad, or root-3-♯5 = an augmented triad). The 7th is exactly what makes a voicing a shell.
   const toneSets: string[][] = [
-    ['root', third, seventh],   // R37
+    ['root', third, seventh],   // R37  (rooted base)
     ['root', seventh, third],   // R73
   ];
   for (const color of colorTones) {
-    toneSets.push([third, seventh, color]);   // 3-7-ext
-    toneSets.push([seventh, third, color]);   // 7-3-ext
-    // Root shells that include the color tone (one guide omitted)
-    toneSets.push(['root', third, color]);     // R-3-ext
-    toneSets.push(['root', seventh, color]);   // R-7-ext
-    // Color tone as bass — rootless with the characteristic color lowest
-    toneSets.push([color, third, seventh]);  // ext-3-7
+    toneSets.push([third, seventh, color]);  // 3-7-ext  (rootless: both guides + one color)
+    toneSets.push([seventh, third, color]);  // 7-3-ext
+    toneSets.push([color, third, seventh]);  // ext-3-7  (color tone in the bass)
     toneSets.push([color, seventh, third]);  // ext-7-3
-  }
-  // For chords with 2+ color tones (13th, dom7alt, etc.): also voice any pair of
-  // color tones with one guide tone — e.g. 3·9·13 and 7·9·13 for dom13.
-  for (let i = 0; i < colorTones.length; i++) {
-    for (let j = i + 1; j < colorTones.length; j++) {
-      const c1 = colorTones[i], c2 = colorTones[j];
-      toneSets.push([third,   c1, c2]);   // 3-ext1-ext2
-      toneSets.push([seventh, c1, c2]);   // 7-ext1-ext2
-      toneSets.push([c1, c2,  third]);    // ext1-ext2-3
-      toneSets.push([c1, c2,  seventh]);  // ext1-ext2-7
-    }
   }
   return toneSets;
 }
