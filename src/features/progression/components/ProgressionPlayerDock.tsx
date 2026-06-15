@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { THEMES, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
 import * as Haptics from 'expo-haptics';
@@ -65,13 +66,25 @@ export default function ProgressionPlayerDock({
   playingIdx, isPlayingSystem, isLooping, toggleLooping, handlePlayProgression,
   stopPlayback, onOpenSave, onOpenLib, onClear
 }: Props) {
+  // Narrow selector so the dock (which runs mixer logic on render) only re-renders for its own
+  // fields, not every global settings change.
   const {
     theme, metronomeEnabled, setMetronomeEnabled, bassEnabled, setBassEnabled,
     voiceLeading, setVoiceLeading, voiceLeadDir, setVoiceLeadDir,
     mixChordVol, setMixChordVol,
     mixBassVol,  setMixBassVol,
     mixClickVol, setMixClickVol,
-  } = useSettingsStore();
+  } = useSettingsStore(
+    useShallow((s) => ({
+      theme: s.theme, metronomeEnabled: s.metronomeEnabled, setMetronomeEnabled: s.setMetronomeEnabled,
+      bassEnabled: s.bassEnabled, setBassEnabled: s.setBassEnabled,
+      voiceLeading: s.voiceLeading, setVoiceLeading: s.setVoiceLeading,
+      voiceLeadDir: s.voiceLeadDir, setVoiceLeadDir: s.setVoiceLeadDir,
+      mixChordVol: s.mixChordVol, setMixChordVol: s.setMixChordVol,
+      mixBassVol: s.mixBassVol, setMixBassVol: s.setMixBassVol,
+      mixClickVol: s.mixClickVol, setMixClickVol: s.setMixClickVol,
+    }))
+  );
 
   // Tap cycles: OFF → Zone → Bounce → Down → Up → OFF
   const VL_CYCLE: Array<{ dir: 'zone' | 'up' | 'down' | 'bounce' | null; label: string; icon: string }> = [

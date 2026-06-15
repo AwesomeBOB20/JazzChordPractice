@@ -228,6 +228,10 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
   const usableH = MAP_H - padY * 2;
   const yForString = (s: number) => padY + (STR_COUNT - 1 - s) * (usableH / (STR_COUNT - 1)); // high E (5) on top
   const xForFret = (f: number) => f === 0 ? NUT_X * 0.5 : NUT_X + (f - 0.5) * fretW;
+  // Vertical lines (nut + fret dividers) terminate AT the outer E strings rather than the map edges,
+  // so they don't overhang past the 1st/6th strings and read as extra (phantom) string slots.
+  const neckTopY = yForString(STR_COUNT - 1); // high-E string
+  const neckBotY = yForString(0);             // low-E string
 
   // Highlight window covers the windowed fret range (open zone included for open shapes).
   const boxLeft = startF === 0 ? 0 : NUT_X + startF * fretW;
@@ -268,9 +272,9 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
         ))}
 
         {/* Nut — thick line. Fret dividers + inlay markers match the nut colour. */}
-        <Line x1={NUT_X} y1={0} x2={NUT_X} y2={MAP_H} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={2} opacity={isDark ? 0.75 : 1} />
+        <Line x1={NUT_X} y1={neckTopY} x2={NUT_X} y2={neckBotY} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={2} opacity={isDark ? 0.75 : 1} />
         {Array.from({ length: TOTAL_FRETS - 1 }).map((_, i) => (
-          <Line key={`mf-${i}`} x1={NUT_X + (i + 1) * fretW} y1={0} x2={NUT_X + (i + 1) * fretW} y2={MAP_H} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={1} opacity={isDark ? 0.35 : 0.5} />
+          <Line key={`mf-${i}`} x1={NUT_X + (i + 1) * fretW} y1={neckTopY} x2={NUT_X + (i + 1) * fretW} y2={neckBotY} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={1} opacity={isDark ? 0.35 : 0.5} />
         ))}
 
         {/* Inlay markers */}
@@ -1384,10 +1388,15 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
             const idx = uniqueArpBoxNames.indexOf(activeArpBoxName);
             handleBoxChange(uniqueArpBoxNames[(idx - 1 + Math.max(1, uniqueArpBoxNames.length)) % Math.max(1, uniqueArpBoxNames.length)]);
           } else {
-            setGroupIdx((safeGroupIdx + 1) % Math.max(1, displayGroups.length));
+            // Left chevron moves the bass toward the low-E string. Drop sets are listed thin→thick
+            // (4-3-2-1 → 6-5-4-3) so low-E is the NEXT index; shells are listed thick→thin (E→A→D)
+            // so for them low-E is the PREVIOUS index — i.e. shells advance on the RIGHT chevron.
+            const step = currentVoicing?.type === 'shell' ? -1 : 1;
+            const n = Math.max(1, displayGroups.length);
+            setGroupIdx((safeGroupIdx + step + n) % n);
             setVoicingIdx(0);
           }
-          onNavigate?.(); 
+          onNavigate?.();
         }}>
           <Text style={[styles.navArrow, { color: theme.txt1 }]}>‹</Text>
         </TouchableOpacity>
@@ -1417,10 +1426,13 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
             const idx = uniqueArpBoxNames.indexOf(activeArpBoxName);
             handleBoxChange(uniqueArpBoxNames[(idx + 1) % Math.max(1, uniqueArpBoxNames.length)]);
           } else {
-            setGroupIdx((safeGroupIdx - 1 + Math.max(1, displayGroups.length)) % Math.max(1, displayGroups.length));
+            // Right chevron moves the bass toward the high-e string — the opposite of the left one.
+            const step = currentVoicing?.type === 'shell' ? 1 : -1;
+            const n = Math.max(1, displayGroups.length);
+            setGroupIdx((safeGroupIdx + step + n) % n);
             setVoicingIdx(0);
           }
-          onNavigate?.(); 
+          onNavigate?.();
         }}>
           <Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text>
         </TouchableOpacity>

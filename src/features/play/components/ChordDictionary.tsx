@@ -156,7 +156,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
   // Each corner label sits in a pill anchored flush to that cell corner (only its inner corner is
   // rounded), echoing the old root ribbon. Root is accent-filled; the rest are subtle chips.
   const pill = (text: string | undefined, anchor: any, accent?: boolean) => !text ? null : (
-    <View style={[styles.cornerPill, anchor, accent ? { backgroundColor: t.accent } : { backgroundColor: t.bg2, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
+    <View style={[styles.cornerPill, anchor, accent ? { backgroundColor: t.accent } : { backgroundColor: t.bg2 }]}>
       <Text numberOfLines={1} style={{ fontSize: L.cornerFs, fontWeight: accent ? '800' : '700', color: accent ? '#fff' : t.txt3, maxWidth: L.cellW * 0.5 }}>{text}</Text>
     </View>
   );
@@ -165,7 +165,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
   const formulaPill = (tokens: string[] | undefined, fallback: string | undefined, anchor: any) => {
     if (!tokens || !tokens.length) return pill(fallback, anchor);
     return (
-      <View style={[styles.cornerPill, anchor, { backgroundColor: t.bg2, borderColor: t.border, borderWidth: StyleSheet.hairlineWidth }]}>
+      <View style={[styles.cornerPill, anchor, { backgroundColor: t.bg2 }]}>
         <Text numberOfLines={1} style={{ fontSize: L.cornerFs, fontWeight: '700', maxWidth: L.cellW * 0.5 }}>
           {tokens.map((tk, i) => (
             // fontWeight pinned to match the other corners (the Android Text patch otherwise renders a
@@ -177,7 +177,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
     );
   };
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: DIVIDER, borderLeftWidth: DIVIDER, borderColor: t.border }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderLeftWidth: DIVIDER, borderColor: t.border }}>
       {shownItems.map(it => {
         // Guitar cells carry four corner pills in place of the old caption; piano keeps its caption.
         const c = instrument === 'guitar' ? dictCorners(it, category, rootSemi, allRoots) : null;
@@ -618,13 +618,13 @@ export default function ChordDictionary({ t }: Props) {
               const content = !keepMounted ? null : (
                 <View
                   key={`c-${item.key}`}
-                  style={{ height: open ? undefined : 0, overflow: 'hidden', borderBottomWidth: open ? DIVIDER : 0, borderBottomColor: t.border }}
+                  style={{ height: open ? undefined : 0, overflow: 'hidden' }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
                       Tap a chip to ARM that chord; the label switches to a prompt and the next diagram
                       tap opens it on the Chord screen at that exact grip/box. */}
                   {!!item.foundIn?.length && (
-                    <View style={styles.foundInRow}>
+                    <View style={[styles.foundInRow, { borderBottomWidth: DIVIDER, borderBottomColor: t.border }]}>
                       <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: '700', color: (armedHere || diagArmedHere) ? t.accent : t.txt3 }}>
                         {diagArmedHere ? 'Pick a chord for this voicing' : armedHere ? `Tap a diagram for ${armedHere.label}` : foundInLabel}
                       </Text>
