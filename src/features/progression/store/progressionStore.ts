@@ -2,18 +2,20 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getChordIntervals } from '@shared/theory/musicTheory';
+import { STRING_SETS_BY_TYPE } from '@shared/guitar';
 import { ProgressionChord, SavedSong } from '@shared/types/models'; // We will create this type file next!
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
 // Global guitar voicing-type override for the Song screen. 'auto' keeps the
 // voice-leading auto-pick; any other value constrains every chord's diagram to
 // that family (falling back to the full pool when a chord lacks it).
-export type SongVoicingType = 'auto' | 'triads' | 'drop2' | 'drop3' | 'shells';
+export type SongVoicingType = 'auto' | 'open' | 'barre' | 'triads' | 'drop2' | 'drop3' | 'shells';
 
-// Picking a voicing type (incl. triads / drop chords) defaults the string lock to "Any"
-// (null) — the user opted into a type, not a specific string set, so leave it unlocked and
-// let voice leading pick. They can still cycle to a concrete set via the STRINGS pill.
-const defaultStringSetFor = (_t: SongVoicingType): string | null => null;
+// Triads / Shells / Drop chords ALWAYS lock to a concrete string set — never "Any" — so picking one
+// of those types lands on its first set. auto / open / barre have no string-set lock (no entry in
+// STRING_SETS_BY_TYPE), so they stay null.
+const defaultStringSetFor = (t: SongVoicingType): string | null =>
+  STRING_SETS_BY_TYPE[t]?.[0]?.key ?? null;
 
 export interface ProgressionState {
   progression: (ProgressionChord | null)[];
@@ -95,7 +97,7 @@ const buildMinorCircle = (): (ProgressionChord | null)[] => {
 export const DEFAULT_SONGS: SavedSong[] = [
   { id: 'default-ii-v-i', name: 'Major ii-V-I', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMajorCircle() },
   { id: 'minor-ii-v-i', name: 'Minor ii-V-i', bpm: 120, rhythm: 'straight', category: 'Exercises', progression: buildMinorCircle() },
-  { id: 'autumn-leaves', name: 'Autumn Leaves', bpm: 110, rhythm: 'straight', category: 'Standards', progression: [
+  { id: 'autumn-leaves', name: 'Autumn Leaves', bpm: 130, rhythm: 'swing', category: 'Standards', progression: [
     // [ Am7 D7 Gmaj7 Cmaj7 | F#m7b5 B7 Em7 E7 ]
     { rootSemi: 9, chordType: 'min7', namingMode: 'flat', beats: 4, repeatStart: true, section: true },
     { rootSemi: 2, chordType: 'dom7', namingMode: 'flat', beats: 4 },
@@ -132,7 +134,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 4, chordType: 'min7', namingMode: 'flat', beats: 4 },
     { rootSemi: 4, chordType: 'dom7', namingMode: 'flat', beats: 4 },
   ]},
-  { id: 'blue-bossa', name: 'Blue Bossa', bpm: 140, rhythm: 'straight', category: 'Standards', progression: [
+  { id: 'blue-bossa', name: 'Blue Bossa', bpm: 150, rhythm: 'bossanova', category: 'Standards', progression: [
     // [ Cm7 Cm7 Fm7 Bb7
     { rootSemi: 0, chordType: 'min7', namingMode: 'flat', beats: 4, repeatStart: true },
     { rootSemi: 0, chordType: 'min7', namingMode: 'flat', beats: 4 },
@@ -170,7 +172,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 2, chordType: 'hdim7', namingMode: 'flat', beats: 4 },
     { rootSemi: 7, chordType: 'dom7s5', namingMode: 'sharp', beats: 4 },
   ]},
-  { id: 'take-the-a-train', name: 'Take the A Train', bpm: 160, rhythm: 'straight', category: 'Standards', progression: [
+  { id: 'take-the-a-train', name: 'Take the A Train', bpm: 160, rhythm: 'swing', category: 'Standards', progression: [
     // [ C6 C6 D7b5 D7b5
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, repeatStart: true, section: true },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
@@ -215,7 +217,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 2 },
     { rootSemi: 7, chordType: 'dom7', namingMode: 'flat', beats: 2 },
   ]},
-  { id: 'all-of-me', name: 'All of Me', bpm: 120, rhythm: 'straight', category: 'Standards', progression: [
+  { id: 'all-of-me', name: 'All of Me', bpm: 140, rhythm: 'swing', category: 'Standards', progression: [
     // C6 C6 E7 E7
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
@@ -278,7 +280,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 10, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 10, chordType: 'dom7', namingMode: 'flat', beats: 4 },
   ]},
-  { id: 'all-the-things', name: 'All The Things You Are', bpm: 120, rhythm: 'swing', category: 'Standards', pro: true, progression: [
+  { id: 'all-the-things', name: 'All The Things You Are', bpm: 140, rhythm: 'swing', category: 'Standards', pro: true, progression: [
     // A section — Fm7 Bb7 EbMaj7 AbMaj7 / Dm7b5 G7 CMaj7 CMaj7
     { rootSemi: 5,  chordType: 'min7',  namingMode: 'flat',  beats: 4, section: true },
     { rootSemi: 10, chordType: 'dom7',  namingMode: 'flat',  beats: 4 },
@@ -316,7 +318,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 0,  chordType: 'maj7',  namingMode: 'flat',  beats: 4 },
     { rootSemi: 0,  chordType: 'dom7',  namingMode: 'flat',  beats: 4 },
   ]},
-  { id: 'twnbay', name: 'There Will Never Be Another You', bpm: 120, rhythm: 'swing', category: 'Standards', pro: true, progression: [
+  { id: 'twnbay', name: 'There Will Never Be Another You', bpm: 170, rhythm: 'swing', category: 'Standards', pro: true, progression: [
     // A — EbMaj7 | Ebm7/Ab7 | DbMaj7 | Dbm7/Gb7 | Cm7 | F7 | Fm7/Bb7 | EbMaj7
     { rootSemi: 3,  chordType: 'maj7',  namingMode: 'flat',  beats: 4, section: true },
     { rootSemi: 3,  chordType: 'min7',  namingMode: 'flat',  beats: 2 },
@@ -400,48 +402,51 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 9,  chordType: 'min7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 0,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
   ]},
-  { id: 'girl-from-ipanema', name: 'The Girl From Ipanema', bpm: 130, rhythm: 'straight', category: 'Standards', pro: true, progression: [
-    // A section (with repeat) — FMaj7 FMaj7 G7 G7 / Gm7 C7 FMaj7 FMaj7
+  { id: 'girl-from-ipanema', name: 'The Girl From Ipanema', bpm: 130, rhythm: 'bossanova', category: 'Standards', pro: true, progression: [
+    // A section (AABA head) — common 6 bars + 1st/2nd endings (volta):
+    //   FMaj7 FMaj7 / G7 G7 / Gm7 Gb7 / [1. FMaj7 Gb7 :‖] [2. FMaj7 FMaj7] → bridge
+    // (Gb7 in bar 6 is the lead sheet's tritone sub, not C7.)
     { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4, section: true, repeatStart: true },
     { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 7,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 7,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 7,  chordType: 'min7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 0,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4, repeatEnd: true },
-    // B section (16 bars) — GbMaj7×4 / B7×2 Bm7 E7 / Bb7×2 Bbm7/Eb7 Ebm7/Ab7 / Am7/D7 Abm7/Db7 Gm7 C7
-    { rootSemi: 6,  chordType: 'maj7',  namingMode: 'flat', beats: 4, section: true },
-    { rootSemi: 6,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 6,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 6,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 11, chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 11, chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 11, chordType: 'min7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 4,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 10, chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 10, chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 10, chordType: 'min7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 3,  chordType: 'dom7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 3,  chordType: 'min7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 8,  chordType: 'dom7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 9,  chordType: 'min7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 2,  chordType: 'dom7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 8,  chordType: 'min7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 1,  chordType: 'dom7',  namingMode: 'flat', beats: 2 },
-    { rootSemi: 7,  chordType: 'min7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 0,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
-    // A section (last) — same as first A without repeat marks
+    { rootSemi: 6,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
+    // 1st ending — FMaj7 | Gb7 (turnaround back to the top); repeatEnd on the last volta-1 bar
+    { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4, volta: 1 },
+    { rootSemi: 6,  chordType: 'dom7',  namingMode: 'flat', beats: 4, volta: 1, repeatEnd: true },
+    // 2nd ending — FMaj7 | FMaj7 (continues into the bridge)
+    { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4, volta: 2 },
+    { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4, volta: 2 },
+    // B section (16 bars, authentic Jobim bridge) — GbMaj7×2 / B7×2 / F#m7×2 / D7×2 / Gm7×2 / Eb7×2 /
+    // Am7 Db7 / Gm7 C7♭9
+    { rootSemi: 6,  chordType: 'maj7',   namingMode: 'flat',  beats: 4, section: true },
+    { rootSemi: 6,  chordType: 'maj7',   namingMode: 'flat',  beats: 4 },
+    { rootSemi: 11, chordType: 'dom7',   namingMode: 'sharp', beats: 4 },
+    { rootSemi: 11, chordType: 'dom7',   namingMode: 'sharp', beats: 4 },
+    { rootSemi: 6,  chordType: 'min7',   namingMode: 'sharp', beats: 4 }, // F#m7
+    { rootSemi: 6,  chordType: 'min7',   namingMode: 'sharp', beats: 4 },
+    { rootSemi: 2,  chordType: 'dom7',   namingMode: 'sharp', beats: 4 }, // D7
+    { rootSemi: 2,  chordType: 'dom7',   namingMode: 'sharp', beats: 4 },
+    { rootSemi: 7,  chordType: 'min7',   namingMode: 'flat',  beats: 4 }, // Gm7
+    { rootSemi: 7,  chordType: 'min7',   namingMode: 'flat',  beats: 4 },
+    { rootSemi: 3,  chordType: 'dom7',   namingMode: 'flat',  beats: 4 }, // Eb7
+    { rootSemi: 3,  chordType: 'dom7',   namingMode: 'flat',  beats: 4 },
+    { rootSemi: 9,  chordType: 'min7',   namingMode: 'flat',  beats: 4 }, // Am7
+    { rootSemi: 2,  chordType: 'dom7b9', namingMode: 'flat',  beats: 4 }, // D7♭9
+    { rootSemi: 7,  chordType: 'min7',   namingMode: 'flat',  beats: 4 }, // Gm7
+    { rootSemi: 0,  chordType: 'dom7b9', namingMode: 'flat',  beats: 4 }, // C7♭9
+    // A section (last) — same as first A (Gb7 in bar 6), no repeat marks
     { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 7,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 7,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 7,  chordType: 'min7',  namingMode: 'flat', beats: 4 },
-    { rootSemi: 0,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
+    { rootSemi: 6,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
     { rootSemi: 5,  chordType: 'maj7',  namingMode: 'flat', beats: 4 },
   ]},
-  { id: 'summertime', name: 'Summertime', bpm: 60, rhythm: 'swing', category: 'Standards', pro: true, progression: [
+  { id: 'summertime', name: 'Summertime', bpm: 80, rhythm: 'swing', category: 'Standards', pro: true, progression: [
     // A section — Am7 E7 Am7 Am7 / Am7 E7 Am7 E7
     { rootSemi: 9,  chordType: 'min7',  namingMode: 'flat', beats: 4, section: true, repeatStart: true },
     { rootSemi: 4,  chordType: 'dom7',  namingMode: 'flat', beats: 4 },
@@ -479,8 +484,8 @@ export const useProgressionStore = create<ProgressionState>()(
       activeSongId: null,
 
       setGuitarNeckZone: (zone) => set({ guitarNeckZone: zone }),
-      // Changing the type lands on that type's default (middle) string set — the
-      // available sets differ per type, and we always want a concrete set, not "Any".
+      // Changing the type lands on that type's first string set — the available sets
+      // differ per type, and we always want a concrete set, not "Any".
       setSongVoicingType: (t) => set({ songVoicingType: t, songStringSet: defaultStringSetFor(t) }),
       setSongStringSet: (key) => set({ songStringSet: key }),
 

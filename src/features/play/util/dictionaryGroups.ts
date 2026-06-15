@@ -133,6 +133,22 @@ const SHAPE_FAMILIES: { label: string; keys: string[] }[] = [
   { label: 'Scale Shapes', keys: ['lydian_shape', 'phrygian_shape', 'blues_shape'] },
 ];
 
+// A true shell is defined by its GUIDE TONES — the 3rd + 7th that fix the chord quality. Group by that
+// pair, labelled by formula (3 7, 3 ♭7, ♭3 ♭7, …), so every family's "Comp with" list is consistent: a
+// "3 7" shell only fits maj7-family chords, a "3 ♭7" only dominants, "♭3 ♭7" covers minor AND m7♭5
+// (which genuinely share those guide tones). The builder also emits partial/color fragments with NO
+// complete pair (1 3 9, 1 7 9, 3 9 13) — those aren't real shells, so shellGuideTones returns null and
+// the dictionary drops them. Sus shells (4/2 in place of a 3rd) get their own family.
+const SHELL_PAIR_ORDER = ['3|7', '3|b7', 'b3|b7', 'b3|7', 'b3|bb7', '3|bb7', '3|6', 'b3|6', 'sus'];
+function shellGuideTones(tokens: string[]): { key: string; label: string } | null {
+  const has = (t: string) => tokens.includes(t);
+  const third = has('3') ? '3' : has('b3') ? 'b3' : null;
+  const seventh = has('7') ? '7' : has('bb7') ? 'bb7' : has('b7') ? 'b7' : has('6') ? '6' : null;
+  if (!seventh) return null;                                       // no upper guide tone → not a shell
+  if (!third) return (has('4') || has('2')) ? { key: 'sus', label: 'Sus' } : null;
+  return { key: `${third}|${seventh}`, label: formulaString([third, seventh]) };
+}
+
 /** The grouped, collapsible item list for a tab + instrument. */
 export function dictionaryGroups(tab: DictionaryCategory, instrument: 'piano' | 'guitar'): DictGroup[] {
   const kind = tabKind(tab);
@@ -169,6 +185,30 @@ export function dictionaryGroups(tab: DictionaryCategory, instrument: 'piano' | 
     // Distinct formula combos this technique voices, grouped: named combos under
     // their chord-type category (6th/7th…), the rootless/partial slices last.
     const combos = formulaCombos(tab, instrument);
+
+    // Shells: group by guide-tone pair (see shellGuideTones); fragments lacking a complete 3rd+7th
+    // pair return null and are HIDDEN. Each item is labelled by its formula with a "Comp with" list;
+    // rooted forms sort ahead of rootless.
+    if (tab === 'shells') {
+      const byPair = new Map<string, { label: string; list: typeof combos }>();
+      combos.forEach(c => {
+        const gt = shellGuideTones(c.tokens);
+        if (!gt) return;
+        const e = byPair.get(gt.key);
+        if (e) e.list.push(c); else byPair.set(gt.key, { label: gt.label, list: [c] });
+      });
+      const mkShell = (label: string, list: typeof combos): DictGroup => ({
+        label,
+        items: list.slice()
+          .sort((a, b) => (a.rootless ? 1 : 0) - (b.rootless ? 1 : 0) || a.tokens.length - b.tokens.length || a.key.localeCompare(b.key))
+          .map(c => ({ key: c.key, label: formulaString(c.tokens), foundIn: foundInLabels(c.chordTypes) })),
+      });
+      const groups: DictGroup[] = [];
+      SHELL_PAIR_ORDER.forEach(k => { const e = byPair.get(k); if (e) groups.push(mkShell(e.label, e.list)); });
+      byPair.forEach((e, k) => { if (!SHELL_PAIR_ORDER.includes(k)) groups.push(mkShell(e.label, e.list)); });
+      return groups;
+    }
+
     const byCat = new Map<string, typeof combos>();
     combos.forEach(c => { const a = byCat.get(c.category); if (a) a.push(c); else byCat.set(c.category, [c]); });
     // Order combos by their chord's canonical position (same as the command sheets),

@@ -7,6 +7,7 @@ import { Voicing, VoicingGroup, ScaleVoicing } from '@shared/guitar';
 import { CH, spellInterval, formatDegree, SCALES, NOTE_FLAT, NOTE_SHARP, ROLE_SHORT, getGlobalLabel } from '@shared/theory/musicTheory';
 import { ROLE_COLORS_GLOBAL, getNoteColor } from '@shared/ui/themes';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+import { PendingVoicing } from '@features/play/store/chordStore';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { familyForWeight } from '@shared/fonts/fonts';
 
@@ -52,6 +53,11 @@ interface Props {
   onParentScaleChange?: (scaleId: string) => void;
   hideNavigators?: boolean;
   colorModeOverride?: 'theme' | 'roles' | 'selective';
+  // A Dictionary diagram navigated here and wants us to land on this exact grip/box. We resolve it
+  // once (fingerprint → group+voicing; scaleId/scaleName → scale/shape; boxName → box), then call
+  // onTargetVoicingApplied so the parent clears it.
+  targetVoicing?: PendingVoicing | null;
+  onTargetVoicingApplied?: () => void;
   // When true (Triads / Shells / Drop tabs), and the chord decomposes into more than
   // one sub-chord (e.g. the C-major + E-minor triads inside Cmaj7), a top "CHORD"
   // navigator appears and the STRING SET / VOICING rows below it are filtered to the
@@ -906,6 +912,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
   onArpSubsetChange, shapesMode = false, shapeVoicings = [], header, namingMode = 'sharp',
       selectedBoxName, selectedScaleId, onBoxChange, onScaleChange, scaleOverlay = false, overlayNotes = [],
       parentScales = [], activeParentScale, onParentScaleChange, hideNavigators = false, colorModeOverride,
+      targetVoicing, onTargetVoicingApplied,
       chordAxisEnabled = false
     }, fretboardRef) {
   const chordFlashRef = React.useRef<((midi: number) => void) | null>(null);
@@ -1049,6 +1056,64 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
     ...n,
     fret: n.fret !== null ? (n.fret === 0 ? 0 : n.fret + fretShift) : null
   }));
+
+  // A Dictionary diagram asked us to land on a specific grip/box. Resolve it against THIS tab's
+  // freshly built voicings — so the combo key / box name can't falsely match the previous tab —
+  // then clear it (one-shot). Re-runs as the new tab's data arrives (displayGroups/shapeVoicings/
+  // scaleVoicings deps); only clears once it actually applied, so a target set before the rebuild
+  // isn't dropped. (Piano is handled in PlayScreen.)
+  React.useEffect(() => {
+    if (!targetVoicing) return;
+
+    // Arps / Intervals (both render through arpMode here): pick the subset first, then — once that
+    // subset's voicings have rebuilt — the box. arpSubsetIdx maps 1:1 to the dictionary's build order;
+    // intervals match the subset whose pair spans the held semitone (root-based first).
+    if (arpMode) {
+      let wantIdx: number | null = null;
+      if (targetVoicing.arpSubsetIdx != null) {
+        wantIdx = Math.max(0, Math.min(targetVoicing.arpSubsetIdx, arpSubsets.length - 1));
+      } else if (targetVoicing.intervalSemitone != null) {
+        const n = targetVoicing.intervalSemitone;
+        let i = arpSubsets.findIndex((s: any) => s.ivs && s.ivs[0] === 0 && Math.abs(s.ivs[1] - s.ivs[0]) === n);
+        if (i < 0) i = arpSubsets.findIndex((s: any) => s.ivs && Math.abs(s.ivs[1] - s.ivs[0]) === n);
+        if (i >= 0) wantIdx = i;
+      }
+      if (wantIdx != null && wantIdx !== arpSubsetIdx) { onArpSubsetChange?.(wantIdx); return; } // wait for the subset to rebuild
+      if (targetVoicing.boxName) {
+        if (!arpVoicings.length) return;
+        handleBoxChange(targetVoicing.boxName);
+      }
+      onTargetVoicingApplied?.();
+      return;
+    }
+
+    // Wait until THIS tab's voicing/shape data has built before matching (and before clearing the
+    // one-shot), so a grip/shape isn't dropped on the render where the tab is switching.
+    const wantsGrip = !!targetVoicing.fingerprint;
+    const wantsShape = !!targetVoicing.scaleName;
+    if (wantsGrip && !displayGroups.length) return;
+    if (wantsShape && !shapeVoicings.length) return;
+
+    // Chord-voicing tabs: pick the exact group + voicing whose fingerprint matches.
+    if (wantsGrip) {
+      for (let gi = 0; gi < displayGroups.length; gi++) {
+        const vi = displayGroups[gi].voicings.findIndex((v: any) => v.fingerprint === targetVoicing.fingerprint);
+        if (vi >= 0) { setGroupIdx(gi); setVoicingIdx(vi); break; }
+      }
+    }
+    // Scales select by id; shapes match by display name (the two shape builders use different ids but
+    // the same scaleName). Routes through handleScaleChange so the parent's selectedScaleId wins.
+    let scaleId: string | null = null;
+    if (targetVoicing.scaleId && scaleVoicings.some(sv => sv.scaleId === targetVoicing.scaleId)) {
+      scaleId = targetVoicing.scaleId;
+    } else if (wantsShape) {
+      const m = shapeVoicings.find((sv: any) => sv.scaleName === targetVoicing.scaleName);
+      if (m) scaleId = m.scaleId;
+    }
+    if (scaleId) handleScaleChange(scaleId);
+    if (targetVoicing.boxName && (scaleMode || shapesMode)) handleBoxChange(targetVoicing.boxName);
+    onTargetVoicingApplied?.();
+  }, [targetVoicing, displayGroups, scaleVoicings, shapeVoicings, scaleMode, shapesMode, arpMode, arpSubsets, arpSubsetIdx, arpVoicings, onArpSubsetChange, onTargetVoicingApplied]);
 
   React.useImperativeHandle(fretboardRef, () => ({
     flashMidi: (midi: number) => chordFlashRef.current?.(midi), 
@@ -1328,7 +1393,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
             {scaleMode ? formatVoicingName(currentScaleVoicing?.boxName) : 
              shapesMode ? formatVoicingName(currentShapeVoicing?.boxName) : 
              arpMode ? formatVoicingName(currentArpVoicing?.boxName) : 
-             (currentVoicing?.type === 'open' || currentVoicing?.type === 'barre') ? formatVoicingName(currentGroup?.label) : 
+             // Shells move across strings as the voicing order changes (R-3-7 vs R-7-3), so an exact
+             // string set would flicker within one group. They're grouped by BASS string instead, so
+             // show that consistent group label ("E Bass"/"A Bass"/"D Bass") like open/barre do.
+             (currentVoicing?.type === 'open' || currentVoicing?.type === 'barre' || currentVoicing?.type === 'shell') ? formatVoicingName(currentGroup?.label) :
              (currentVoicing?.frets ? currentVoicing.frets.map((f: any, i: number) => f.fret !== null ? 6 - i : null).filter((x: any) => x !== null).join('-') : formatVoicingName(currentGroup?.label))}
           </Text>
           <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{scaleMode ? `${Math.max(0, uniqueBoxNames.indexOf(activeScaleBoxName)) + 1}/${Math.max(1, uniqueBoxNames.length)}` : shapesMode ? `${Math.max(0, uniqueShapesBoxNames.indexOf(activeShapesBoxName)) + 1}/${Math.max(1, uniqueShapesBoxNames.length)}` : arpMode ? `${Math.max(0, uniqueArpBoxNames.indexOf(activeArpBoxName)) + 1}/${Math.max(1, uniqueArpBoxNames.length)}` : `${safeGroupIdx + 1}/${Math.max(1, displayGroups.length)}`}</Text>

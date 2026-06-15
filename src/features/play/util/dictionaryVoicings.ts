@@ -510,6 +510,11 @@ export function getDictionaryVoicingsAllRoots(
     for (const it of items) {
       const s = shapeSignature(it);
       if (!s) continue;
+      // Only the Open tab keeps position-locked (open-string) grips per root — open chords genuinely
+      // can't transpose. Every other tab drops them and shows ONLY the universal movable shapes; their
+      // closed instances at other roots still surface as the "Any" representative, so nothing is lost
+      // and the All view stays uncluttered (one shape, not one-per-note).
+      if (!s.movable && tab !== 'open') continue;
       const prev = chosen.get(s.sig);
       if (!prev) {
         const rootTag = s.movable ? 'Any' : rootNameOf(r);

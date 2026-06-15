@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform, InteractionManager, PixelRatio } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { NOTE_SHARP, NOTE_FLAT } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, CH, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
 import { Theme, getNoteColor } from '@shared/ui/themes';
 import { TYPE } from '@shared/ui/typography';
 import { MiniChordDiagram, MiniPianoDiagram, miniChordFootprint, CountChip } from '@shared/ui';
@@ -23,9 +23,28 @@ import { dictionaryGroups, tabKind, ALL_CATEGORIES, DictGroup } from '@features/
 const FLAT_ROOTS = [0, 1, 3, 5, 8, 10];
 const rootName = (r: number) => (FLAT_ROOTS.includes(r) ? NOTE_FLAT : NOTE_SHARP)[r];
 const ROOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+// An interval diagram has no chord of its own, so long-pressing it jumps to a RANDOM chord that
+// contains that interval (the root + the interval are both chord tones → the chord's Intervals tab
+// will show it). Iterates the full chord table, not the user's active set.
+const ALL_TYPES: string[] = CHORD_CATEGORIES.flatMap((c: any) => c.keys);
+function randomChordWithInterval(semitone: number): string | null {
+  const semi = (((semitone % 12) + 12) % 12);
+  const pool = ALL_TYPES.filter((ct) => {
+    const def: any = (CH as any)[ct];
+    return def && def.iv.some((iv: number) => ((((iv % 12) + 12) % 12)) === semi);
+  });
+  return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+}
 
 const screenW = Dimensions.get('window').width;
 const H_PAD = 12;
+// Divider thickness. On Android's fractional-density screens (e.g. 2.75×) a 1-DP border is ~2.75
+// physical px, which rounds to 2 or 3 px inconsistently (some dividers look darker/lighter). A single
+// physical px (hairlineWidth) is uniform but, when a row's edge lands mid-pixel, splits ~50/50 across
+// two pixel rows and can vanish entirely. TWO physical px is the sweet spot: a whole-pixel width so it
+// never rounds unevenly, and thick enough that it always fully covers at least one pixel regardless of
+// sub-pixel position — so every divider is present and identical. iOS/web render 1 DP crisply → keep 1.
+const DIVIDER = Platform.OS === 'android' ? StyleSheet.hairlineWidth * 2 : 1;
 // Match the tuner/play/progression sticky players: 12 top pad + 56 button + bottom inset.
 const DOCK_H = 12 + 56 + (Platform.OS === 'ios' ? 24 : 12); // bottom dock height (picker floats above it)
 // Root picker: 12 plain circles in a horizontal scroller. NOT a spin dial — no infinite loop,
@@ -58,12 +77,21 @@ function layoutFor(cols: number) {
 // getDictionaryVoicings runs INSIDE this memoized row, keyed on (item, root,
 // instrument, octave), so collapsed sections never build their diagrams.
 const DictSectionRow = React.memo(function DictSectionRow({
-  itemKey, isChordQuality, category, instrument, rootSemi, allRoots, octave, selectedScaleId, labelMode, t, onPlay, L,
+  itemKey, isChordQuality, category, instrument, rootSemi, allRoots, octave, selectedScaleId, labelMode, t, onPlay, armedType, onCommit, onHold, armedDiagramKey, L,
 }: {
   itemKey: string; isChordQuality: boolean; category: DictionaryCategory; instrument: 'piano' | 'guitar';
   rootSemi: number; allRoots: boolean; octave: number; selectedScaleId: string | null;
   labelMode: 'degrees' | 'notes' | 'none'; t: Theme;
-  onPlay: (it: DictMiniItem) => void; L: ReturnType<typeof layoutFor>;
+  onPlay: (it: DictMiniItem) => void;
+  // When a "Comp/Solo with" chip is armed for THIS item, armedType is its chord type and a diagram
+  // tap commits (opens on the Chord screen) instead of playing a preview.
+  armedType: string | null;
+  onCommit: (it: DictMiniItem, type: string, itemKey: string) => void;
+  // Long-press a diagram → the parent decides (open directly for named chords, prompt a chip for
+  // combos/scales/shapes, or pop the chord picker for intervals). armedDiagramKey rings the held one.
+  onHold: (it: DictMiniItem, itemKey: string) => void;
+  armedDiagramKey: string | null;
+  L: ReturnType<typeof layoutFor>;
 }) {
   // Colour the formula corner's degrees with the SAME role colours as the diagram dots, so it
   // respects the user's colour mode (roles / theme / selective) — read from the store like the dots do.
@@ -79,6 +107,20 @@ const DictSectionRow = React.memo(function DictSectionRow({
       : getDictionaryVoicings(category, instrument, rootSemi, itemKey, octave, selectedScaleId),
     [category, instrument, rootSemi, allRoots, itemKey, octave, selectedScaleId]
   );
+  // Progressive mount: the data is already warm (the count memos built it), so the open cost is purely
+  // mounting the react-native-svg diagrams. We render just the FIRST ROW on the opening frame — so the
+  // section shows content instantly with no blank flash and no heavy mount — then ramp the rest in over
+  // the next frames so a big section never lands a heavy mount on one frame. A reserved spacer keeps the
+  // section height stable while it fills.
+  const FIRST = Math.max(1, L.cols);          // one row paints immediately
+  const STEP = Math.max(2, L.cols * 2);        // then a couple of rows per frame
+  const [shown, setShown] = React.useState(() => Math.min(items.length, FIRST));
+  React.useEffect(() => { setShown(Math.min(items.length, FIRST)); }, [items, FIRST]);
+  React.useEffect(() => {
+    if (shown >= items.length) return;
+    const id = requestAnimationFrame(() => setShown(s => Math.min(items.length, s + STEP)));
+    return () => cancelAnimationFrame(id);
+  }, [shown, items.length, STEP]);
   if (!items.length) {
     return <Text style={{ color: t.txt3, fontSize: 12, marginBottom: 16 }}>—</Text>;
   }
@@ -89,12 +131,25 @@ const DictSectionRow = React.memo(function DictSectionRow({
   const innerW = Math.max(40, L.cellW - CELL_PAD * 2);
   const MAX_SCALE = L.cols === 1 ? 4.2 : L.cols === 2 ? 2.8 : 2.0;
   const MAX_BOX_H = L.cols === 1 ? 240 : L.cols === 2 ? 168 : 116;
+  // Round to a whole pixel so every cell in the row is exactly the same height — a fractional box
+  // height lands the row's 1px bottom border on a sub-pixel boundary, making some row dividers render
+  // thicker/sharper than others (the "rows have different border thicknesses" look).
   const boxH = instrument === 'piano'
     ? L.diagramH
-    : Math.min(MAX_BOX_H, Math.max(60, ...items.map(it => {
+    : Math.round(Math.min(MAX_BOX_H, Math.max(60, ...items.map(it => {
         const fp = miniChordFootprint(it.voicing, it.arpShape);
         return fp.h * Math.min(MAX_SCALE, innerW / fp.w);
-      })));
+      }))));
+  // The diagrams streamed in so far, plus a spacer reserving the height of the rows still to mount so
+  // the section (and the list below) doesn't jump while it fills. Cell height ≈ box + vertical padding.
+  const shownItems = items.slice(0, shown);
+  // Guitar cells get a fixed height snapped to a whole physical pixel so every grid row is identical
+  // and its bottom divider lands crisply — same fix as the section headers. Piano keeps a caption, so
+  // leave it content-sized. The inner diagram box centres within the fixed height.
+  const guitarCellH = PixelRatio.roundToNearestPixel(boxH + (L.cornerFs + 9) * 2);
+  const rowH = instrument === 'guitar' ? guitarCellH : boxH + 16 + Math.round(L.labelFs * 1.6);
+  const pendingRows = Math.ceil(items.length / L.cols) - Math.ceil(shownItems.length / L.cols);
+  const spacerH = Math.max(0, pendingRows * rowH);
   // Flat grid (no card panels) — cells tile the full width and share 1px borders, matching the
   // progression measure grid. The container draws the top + left edge; each cell draws its
   // right + bottom edge.
@@ -122,16 +177,18 @@ const DictSectionRow = React.memo(function DictSectionRow({
     );
   };
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 1, borderLeftWidth: 1, borderColor: t.border }}>
-      {items.map(it => {
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: DIVIDER, borderLeftWidth: DIVIDER, borderColor: t.border }}>
+      {shownItems.map(it => {
         // Guitar cells carry four corner pills in place of the old caption; piano keeps its caption.
         const c = instrument === 'guitar' ? dictCorners(it, category, rootSemi, allRoots) : null;
         return (
           <TouchableOpacity
             key={it.key}
             activeOpacity={0.7}
-            onPress={() => onPlay(it)}
-            style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, paddingVertical: instrument === 'guitar' ? L.cornerFs + 9 : 8 }]}
+            onPress={() => (armedType ? onCommit(it, armedType, itemKey) : onPlay(it))}
+            onLongPress={() => onHold(it, itemKey)}
+            delayLongPress={300}
+            style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: instrument === 'guitar' ? guitarCellH : undefined, paddingVertical: instrument === 'guitar' ? 0 : 8 }, armedDiagramKey === it.key ? { backgroundColor: t.accent + '26' } : armedType ? { backgroundColor: t.accent + '14' } : null]}
           >
             <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
               {instrument === 'guitar'
@@ -151,6 +208,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
           </TouchableOpacity>
         );
       })}
+      {spacerH > 0 && <View style={{ width: '100%', height: spacerH }} />}
     </View>
   );
 });
@@ -227,7 +285,7 @@ export default function ChordDictionary({ t }: Props) {
   const selectedScaleId = useChordStore((s: any) => s.selectedScaleId);
   const setChord = useChordStore((s: any) => s.setChord);
   const setPendingVoicingTab = useChordStore((s: any) => s.setPendingVoicingTab);
-  const setPendingVoicingKey = useChordStore((s: any) => s.setPendingVoicingKey);
+  const setPendingVoicing = useChordStore((s: any) => s.setPendingVoicing);
   const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
@@ -294,6 +352,21 @@ export default function ChordDictionary({ t }: Props) {
   // Accordion: items collapsed by default so only opened ones build their diagrams
   // (keeps scrolling smooth + the list short). Category/instrument change collapses all.
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  // Closing a section visually collapses it instantly (clip to height 0), but the heavy unmount of its
+  // SVG diagrams is deferred to idle (pendingUnmount) so the teardown never blocks the tap. Re-opening
+  // before the unmount fires is instant (the diagrams are still mounted).
+  const [pendingUnmount, setPendingUnmount] = React.useState<Set<string>>(new Set());
+  const expandedRef = React.useRef(expanded);
+  expandedRef.current = expanded;
+  // Two-step "Comp/Solo with" flow: tapping a chip ARMS a chord (no nav yet); the next diagram tap
+  // opens THAT chord on the Chord screen at the tapped grip/box. `armed` holds the item + chord type
+  // it belongs to, so only that item's diagrams commit (others still play a preview). Cleared on any
+  // context change (root/category/family/instrument/collapse) so a stale arm can't misfire.
+  const [armed, setArmed] = React.useState<{ itemKey: string; type: string; label: string } | null>(null);
+  // Reverse flow: long-press a diagram in a chip item (combo/scale/shape) to ARM that diagram, then
+  // tap a chip to open it. `armedDiagram` is the held diagram. (Chip-less items jump on long-press —
+  // named chords to their own chord, intervals to a random chord that has them — so no state needed.)
+  const [armedDiagram, setArmedDiagram] = React.useState<{ itemKey: string; key: string; it: DictMiniItem } | null>(null);
   // Sub-category (family) tab within the voicing tab — reset to the first when the tab changes.
   const [familyIdx, setFamilyIdx] = React.useState(0);
   // Floating section header — our own replacement for native stickyHeaderIndices (which renders
@@ -313,7 +386,10 @@ export default function ChordDictionary({ t }: Props) {
   const setItemHeight = React.useCallback((key: string, h: number) => setHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
   const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
   const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setHeights({}); }, [effectiveCategory, instrument]);
+  React.useEffect(() => { setExpanded(new Set()); setPendingUnmount(new Set()); setFamilyIdx(0); setHeights({}); setArmed(null); setArmedDiagram(null); }, [effectiveCategory, instrument]);
+  // Changing the root (or family) re-renders different grips/chords → any armed selection no longer
+  // maps cleanly, so disarm.
+  React.useEffect(() => { setArmed(null); setArmedDiagram(null); }, [rootSemi, familyIdx]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
   // number of items that actually HAVE voicings per family (the family-tab chip, and to hide an
@@ -342,18 +418,82 @@ export default function ChordDictionary({ t }: Props) {
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
   const toggleSection = React.useCallback((key: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+    if (expandedRef.current.has(key)) {
+      // Collapse: hide now (clip to 0), keep the diagrams mounted, and tear them down after the tap
+      // interaction settles so the unmount never blocks the close.
+      setArmed(prev => (prev?.itemKey === key ? null : prev)); // collapsing the armed item disarms it
+      setArmedDiagram(prev => (prev?.itemKey === key ? null : prev));
+      setExpanded(prev => { const n = new Set(prev); n.delete(key); return n; });
+      setPendingUnmount(prev => { const n = new Set(prev); n.add(key); return n; });
+      InteractionManager.runAfterInteractions(() =>
+        setPendingUnmount(prev => { if (!prev.has(key)) return prev; const n = new Set(prev); n.delete(key); return n; }));
+    } else {
+      // Open: mount it, and cancel any pending unmount (re-opening before it fired → instant, no remount).
+      setExpanded(prev => { const n = new Set(prev); n.add(key); return n; });
+      setPendingUnmount(prev => { if (!prev.has(key)) return prev; const n = new Set(prev); n.delete(key); return n; });
+    }
   }, []);
-  // Tap a "Comp with"/"Solo with" chip → load that chord at the dictionary's current root on the
-  // Chord screen (switch Explore out of Dictionary mode). Closes the explore loop.
-  const openChord = React.useCallback((type: string, voicingKey?: string) => {
+  // FORWARD STEP 1 — tap a "Comp with"/"Solo with" chip: arm that chord for this item (no nav yet).
+  // Tapping the same chip again disarms; tapping a different one re-arms. Next diagram tap commits.
+  const armChip = React.useCallback((itemKey: string, type: string, label: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setArmedDiagram(null);
+    setArmed(prev => (prev?.itemKey === itemKey && prev?.type === type ? null : { itemKey, type, label }));
+  }, []);
+  // COMMIT — open `type` at the current root on the Chord screen, landing on this tab AND the exact
+  // grip/box/subset the diagram represents. Used by BOTH directions (tap-chip-then-diagram,
+  // long-press-then-chip) and the direct holds (block/open/barre/arps) + the interval picker.
+  const commitToChord = React.useCallback((it: DictMiniItem, type: string, itemKey: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     stopAudio?.();
+    const kind = tabKind(effectiveCategory);
+    const pending: any = {};
+    if (kind === 'formulaCombo') {
+      pending.fingerprint = it.voicing?.fingerprint;   // guitar: exact grip
+      pending.pcKey = itemKey;                          // piano: the combo pitch-class set key
+    } else if (kind === 'scale') {
+      pending.scaleId = itemKey;                        // the scale to select
+      pending.boxName = it.arpShape?.boxName;           // guitar: the box (piano has none)
+    } else if (kind === 'shape') {
+      pending.scaleName = it.arpShape?.scaleName;       // matched by name across the two shape models
+      pending.boxName = it.arpShape?.boxName;
+    } else if (kind === 'interval') {
+      pending.intervalSemitone = parseInt(itemKey.replace('iv-', ''), 10); // pick the matching subset
+      pending.boxName = it.arpShape?.boxName;           // guitar (best-effort; interval builders differ)
+    } else if (effectiveCategory === 'arps') {
+      const si = parseInt(String(it.key).split('-')[1] ?? '0', 10); // "arps-<si>-<bi>" / "arps-<i>"
+      if (!Number.isNaN(si)) pending.arpSubsetIdx = si;
+      pending.boxName = it.arpShape?.boxName;           // guitar box (piano arp = the subset itself)
+    } else if (effectiveCategory === 'block') {
+      pending.notes = it.notes;                         // piano: the exact inversion
+    } else { // open / barre
+      pending.fingerprint = it.voicing?.fingerprint;
+    }
     setChord(rootSemi, type);
-    setPendingVoicingTab(effectiveCategory);    // land on the same voicing tab we were browsing
-    setPendingVoicingKey(voicingKey ?? null);   // …and on the same voicing (combo pc-key) when known
+    setPendingVoicingTab(effectiveCategory);
+    setPendingVoicing(pending);
+    setArmed(null);
+    setArmedDiagram(null);
     setMode('chord');
-  }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicingKey, setMode, rootSemi, effectiveCategory]);
+  }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicing, setMode, rootSemi, effectiveCategory]);
+  // LONG-PRESS a diagram. Items WITH chips (combo/scale/shape) arm the diagram + prompt a chip. Items
+  // WITHOUT chips jump straight to the Chord screen: named chords (block/open/barre/arps) to their own
+  // chord; an interval (which has no chord) to a RANDOM chord that contains it.
+  const onHold = React.useCallback((it: DictMiniItem, itemKey: string) => {
+    const kind = tabKind(effectiveCategory);
+    const hasChips = kind === 'formulaCombo' || kind === 'scale' || kind === 'shape';
+    if (hasChips) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      stopAudio?.();
+      setArmed(null);
+      setArmedDiagram({ itemKey, key: it.key, it });
+    } else if (kind === 'interval') {
+      const type = randomChordWithInterval(parseInt(itemKey.replace('iv-', ''), 10));
+      if (type) commitToChord(it, type, itemKey); // open a random chord that has this interval
+    } else {
+      commitToChord(it, itemKey, itemKey); // block / open / barre / arps — the item IS the chord
+    }
+  }, [effectiveCategory, stopAudio, commitToChord]);
 
   // One section header — rendered both in the scrolling list and as the floating copy pinned at the
   // top. The in-list copy measures only the header HEIGHT (drives the slide distance); the section's
@@ -465,27 +605,45 @@ export default function ChordDictionary({ t }: Props) {
           ) : (
             visibleItems.map(item => {
               const open = expanded.has(item.key);
+              // Keep a just-closed section's diagrams mounted (clipped to 0) until the deferred unmount.
+              const keepMounted = open || pendingUnmount.has(item.key);
               const header = renderHeader(item, open, false);
+              const armedHere = armed?.itemKey === item.key ? armed : null;
+              const diagArmedHere = armedDiagram?.itemKey === item.key ? armedDiagram : null;
               const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
               // Wrap header + content in one View and measure ITS height. This fires onLayout whenever
               // the section opens/closes (its own size changes) — the only thing the cumulative-sum
-              // position model needs. Closed sections measure to the header height alone.
-              const content = !open ? null : (
+              // position model needs. Closed sections measure to the header height alone. A closing
+              // section is clipped to height 0 (collapsed look) while its diagrams await teardown.
+              const content = !keepMounted ? null : (
                 <View
                   key={`c-${item.key}`}
-                  style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
+                  style={{ height: open ? undefined : 0, overflow: 'hidden', borderBottomWidth: open ? DIVIDER : 0, borderBottomColor: t.border }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
-                      Each chip is tappable → loads that chord at the current root on the Chord screen. */}
+                      Tap a chip to ARM that chord; the label switches to a prompt and the next diagram
+                      tap opens it on the Chord screen at that exact grip/box. */}
                   {!!item.foundIn?.length && (
                     <View style={styles.foundInRow}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
+                      <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: '700', color: (armedHere || diagArmedHere) ? t.accent : t.txt3 }}>
+                        {diagArmedHere ? 'Pick a chord for this voicing' : armedHere ? `Tap a diagram for ${armedHere.label}` : foundInLabel}
+                      </Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
-                        {item.foundIn.map((c: any) => (
-                          <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type, tabKind(effectiveCategory) === 'formulaCombo' ? item.key : undefined)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
-                          </TouchableOpacity>
-                        ))}
+                        {item.foundIn.map((c: any) => {
+                          const isArmed = armedHere?.type === c.type;
+                          // While a diagram is held, every chip is a commit button (faint-strong fill to invite it).
+                          const bg = isArmed ? t.accent : diagArmedHere ? t.accent + '33' : t.accent + '22';
+                          return (
+                            <TouchableOpacity
+                              key={c.type}
+                              activeOpacity={0.7}
+                              onPress={() => (diagArmedHere ? commitToChord(diagArmedHere.it, c.type, item.key) : armChip(item.key, c.type, c.label))}
+                              style={{ backgroundColor: bg, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: isArmed ? '800' : '600', color: isArmed ? '#fff' : t.accent }}>{c.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
                       </ScrollView>
                     </View>
                   )}
@@ -501,6 +659,10 @@ export default function ChordDictionary({ t }: Props) {
                     labelMode={labelMode}
                     t={t}
                     onPlay={handlePlay}
+                    armedType={armedHere?.type ?? null}
+                    onCommit={commitToChord}
+                    onHold={onHold}
+                    armedDiagramKey={diagArmedHere?.key ?? null}
                     L={L}
                   />
                 </View>
@@ -597,21 +759,26 @@ export default function ChordDictionary({ t }: Props) {
 }
 
 const styles = StyleSheet.create({
+  // Bottom border uses a full 1 DP (not the thin DIVIDER) to match the Explore toggle's borderBottom
+  // directly above the voicing tabs — so the bar reads as framed by two identical lines.
   chipBar: { paddingVertical: 8, borderBottomWidth: 1 },
   catTab: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 10, paddingHorizontal: 14 },
   // Family sub-tabs: quiet underline text-tabs, deliberately shorter + flatter than the catTab
   // pills above so the two bars read as a hierarchy (primary pills → secondary underline) not twins.
-  familyBar: { borderBottomWidth: 1 },
+  familyBar: { borderBottomWidth: DIVIDER },
   familyTab: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 11, paddingHorizontal: 12, borderBottomWidth: 2 },
   // width:100% so a DOCKED (sticky) header keeps spanning the full bar — otherwise the sticky wrapper
   // shrinks it to its content width and space-between pulls the chevron in next to the label.
-  sectionHeader: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, paddingVertical: 12, borderBottomWidth: 1 },
+  // Fixed height snapped to a whole physical pixel so every row is identical and its bottom divider
+  // lands on a pixel boundary — a fractional row height makes consecutive dividers alternate
+  // crisp/straddled (thick/thin) on Android. Content stays vertically centred via alignItems:'center'.
+  sectionHeader: { width: '100%', height: PixelRatio.roundToNearestPixel(44), flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: H_PAD, borderBottomWidth: DIVIDER },
   // "Comp with" / "Solo with" row at the top of an expanded item: muted label + a horizontal scroller of
   // borderless soft chips (faint accent fill, accent text), one per chord quality. Slides instead of a
   // "+N more" cap, so every chord is reachable. Label stays fixed; the scroller takes the rest.
   foundInRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: H_PAD, paddingVertical: 8 },
   // Flat grid cell (no card): sharp corners, shared right/bottom 1px borders, content centred.
-  cell: { alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, borderBottomWidth: 1, paddingVertical: 8, paddingHorizontal: 2, position: 'relative', overflow: 'hidden' },
+  cell: { alignItems: 'center', justifyContent: 'center', borderRightWidth: DIVIDER, borderBottomWidth: DIVIDER, paddingVertical: 8, paddingHorizontal: 2, position: 'relative', overflow: 'hidden' },
   // Corner-label pill: flush to the cell corner, only the inner corner rounded (set per-anchor).
   cornerPill: { position: 'absolute', zIndex: 2, paddingHorizontal: 5, paddingVertical: 2 },
   cTL: { top: 0, left: 0, borderBottomRightRadius: 8 },

@@ -97,7 +97,8 @@ const HELP_SECTIONS: HelpSection[] = [
         'When a tab has sub-groups, a second row of family tabs narrows it (e.g. 7th Chords vs 9th Chords).',
         'Tap a row — like "Maj 7" or "Major" — to open it and reveal its diagrams; tap again to close.',
         'When you open a rootless shell/drop/triad or a scale, a row lists the chords it works for: "Comp with" on a voicing (the chords you\'d play it for, e.g. a 3·7·13 grip belongs to Dom13) and "Solo with" on a scale (the chords you\'d improvise over, e.g. Dorian fits Min 7, Min 9, and Min 6).',
-        'Tap any diagram to hear it.',
+        'Tap any diagram to hear it. To open it on the full Chord screen: first tap one of those "Comp with" / "Solo with" chips (it highlights), then tap the diagram you want — that exact voicing or box loads on the Chord screen for the chosen chord.',
+        'Or go the other way: press and hold a diagram. For a named chord (Block / Open / Barre / Arps) it opens straight on the Chord screen at that exact grip / inversion / arp box. For a shell/drop/triad/scale/shape it asks you to pick a chord first ("Pick a chord for this voicing"), then opens. Holding an Interval (which has no chord of its own) jumps to a random chord that contains it, landing on its Intervals tab.',
         'The 1 / 2 / 3 buttons at the bottom-right set how many diagrams fit per row.',
       ] },
       { h: 'Picking the Root (Dictionary)', b: [
@@ -141,8 +142,9 @@ const HELP_SECTIONS: HelpSection[] = [
         'The Voice Lead pill changes how they move: Zone (stay put, smooth), Bounce (drift up and down), or Up / Down (walk the neck). Turn it off for plain root-position chords.',
       ] },
       { h: 'Lock the Voicing (guitar)', b: [
-        'VOICING forces a family — AUTO, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style.',
-        'With a family set, STRINGS pins the shapes to one string set (or leave it ANY).',
+        'VOICING forces a family — AUTO, Open, Barre, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style. AUTO comps with Drop 2 on the top string sets (4-3-2-1 / 5-4-3-2) and falls to Drop 3 for the lower register, picking the smoothest option for you.',
+        'Open and Barre use standard guitar chord shapes. If a chord has no shape in the chosen family (e.g. an extended chord with no barre form), it falls back to its best voicing so a cell is never blank.',
+        'For Triads, Shells, and Drop 2 / 3, STRINGS pins every chord to one of that type\'s string sets — it always uses one (there is no "Any"); cycle it to move the whole song to a different set. For Shells it anchors the two guide tones (3rd + 7th) to a fixed pair of strings and lets the root bounce onto a bass string below — so a descending line slides down the same two strings. "E & A Bass" keeps the guides on the D & G strings (root on the 6th or 5th); "A & D Bass" keeps them on the G & B strings (root on the 5th or 4th).',
       ] },
       { h: 'Chart Marks (like real sheet music)', b: [
         'Repeat signs (𝄆 𝄇) to loop a section.',

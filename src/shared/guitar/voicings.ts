@@ -150,6 +150,12 @@ export const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; vari
     { name: 'A Shape Min7', rootSemi: 9, variation: 'Standard', frets: [null, 0, 2, 0, 1, 0], roles: [null, 'root', '5th', 'b7', 'b3', '5th'] },
     { name: 'A Shape Min7', rootSemi: 9, variation: 'High b7', frets: [null, 0, 2, 0, 1, 3], roles: [null, 'root', '5th', 'b7', 'b3', 'b7'] },
   ],
+  // Half-diminished (m7♭5). Movable 4-note grips (R-♭3-♭5-♭7); the perfect 5th is dropped, so these
+  // aren't full barres but partial-barre grips — root on the 6th (E shape) or 5th (A shape) string.
+  'hdim7': [
+    { name: 'E Shape m7b5', rootSemi: 4, variation: 'Standard', frets: [0, 1, 0, 0, null, null], roles: ['root', 'b5', 'b7', 'b3', null, null] },
+    { name: 'A Shape m7b5', rootSemi: 9, variation: 'Standard', frets: [null, 0, 1, 0, 1, null], roles: [null, 'root', 'b5', 'b7', 'b3', null] },
+  ],
   'dom9': [
     { name: 'E Shape 9', rootSemi: 4, variation: 'Standard', frets: [0, 2, 0, 1, 0, 2], roles: ['root', '5th', 'b7', '3rd', '5th', '9th'] },
     { name: 'A Shape 9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -1, 0, 0, 0], roles: [null, 'root', '3rd', 'b7', '9th', '5th'], fingers: [null, 2, 1, 3, 3, 3] },
@@ -157,6 +163,15 @@ export const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; vari
   'min9': [
     { name: 'E Shape Min9', rootSemi: 4, variation: 'Standard', frets: [0, 2, 0, 0, 0, 2], roles: ['root', '5th', 'b7', 'b3', '5th', '9th'] },
     { name: 'A Shape Min9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -2, 0, 0, 0], roles: [null, 'root', 'b3', 'b7', '9th', '5th'], fingers: [null, 2, 1, 3, 3, 3] },
+  ],
+  // Altered dominants — 4-note grips (R-3-b7-alt9, perfect 5th dropped). 7#9 is the "Hendrix" shape.
+  // Verified R-3-b7-#9 / R-3-b7-b9 at all 12 roots; min relative fret -1, so no negative frets.
+  'dom7s9': [
+    { name: 'E Shape 7#9', rootSemi: 4, variation: 'Standard', frets: [0, -1, 0, 0, null, null], roles: ['root', '3rd', 'b7', '#9', null, null] },
+    { name: 'A Shape 7#9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -1, 0, 1, null], roles: [null, 'root', '3rd', 'b7', '#9', null] },
+  ],
+  'dom7b9': [
+    { name: 'A Shape 7b9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -1, 0, -1, null], roles: [null, 'root', '3rd', 'b7', 'b9', null] },
   ],
 };
 
@@ -572,7 +587,8 @@ const BASS_ROLE_RANK: Record<string, number> = {
 };
 
 function sortVoicingGroups(groups: VoicingGroup[]): VoicingGroup[] {
-  const bassRank = (label: string) => label.includes('D Bass') ? 0 : label.includes('A Bass') ? 1 : label.includes('E Bass') ? 2 : label.charCodeAt(0);
+  // Shell bass groups order by string, thickest first: 6th (E) → 5th (A) → 4th (D).
+  const bassRank = (label: string) => label.includes('E Bass') ? 0 : label.includes('A Bass') ? 1 : label.includes('D Bass') ? 2 : label.charCodeAt(0);
   groups.sort((a, b) => bassRank(a.label) - bassRank(b.label));
   groups.forEach(g => {
     g.voicings.sort((a, b) => {
@@ -919,30 +935,18 @@ export function deriveShellToneSets(
     role !== 'root' && role !== third && role !== seventh && role !== '5th'
   );
 
+  // Every shell keeps BOTH guide tones (3rd + 7th). A color tone only ever replaces the ROOT — never a
+  // guide tone — so we never emit triad-like grips that drop the 7th (e.g. root-♭3-♭5 = a diminished
+  // triad, or root-3-♯5 = an augmented triad). The 7th is exactly what makes a voicing a shell.
   const toneSets: string[][] = [
-    ['root', third, seventh],   // R37
+    ['root', third, seventh],   // R37  (rooted base)
     ['root', seventh, third],   // R73
   ];
   for (const color of colorTones) {
-    toneSets.push([third, seventh, color]);   // 3-7-ext
-    toneSets.push([seventh, third, color]);   // 7-3-ext
-    // Root shells that include the color tone (one guide omitted)
-    toneSets.push(['root', third, color]);     // R-3-ext
-    toneSets.push(['root', seventh, color]);   // R-7-ext
-    // Color tone as bass — rootless with the characteristic color lowest
-    toneSets.push([color, third, seventh]);  // ext-3-7
+    toneSets.push([third, seventh, color]);  // 3-7-ext  (rootless: both guides + one color)
+    toneSets.push([seventh, third, color]);  // 7-3-ext
+    toneSets.push([color, third, seventh]);  // ext-3-7  (color tone in the bass)
     toneSets.push([color, seventh, third]);  // ext-7-3
-  }
-  // For chords with 2+ color tones (13th, dom7alt, etc.): also voice any pair of
-  // color tones with one guide tone — e.g. 3·9·13 and 7·9·13 for dom13.
-  for (let i = 0; i < colorTones.length; i++) {
-    for (let j = i + 1; j < colorTones.length; j++) {
-      const c1 = colorTones[i], c2 = colorTones[j];
-      toneSets.push([third,   c1, c2]);   // 3-ext1-ext2
-      toneSets.push([seventh, c1, c2]);   // 7-ext1-ext2
-      toneSets.push([c1, c2,  third]);    // ext1-ext2-3
-      toneSets.push([c1, c2,  seventh]);  // ext1-ext2-7
-    }
   }
   return toneSets;
 }
@@ -1739,6 +1743,15 @@ export const STRING_SETS_BY_TYPE: Record<string, { key: string; label: string }[
   triads: TRIAD_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop2: DROP2_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop3: DROP3_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
+  // Shell locks are GUIDE-TONE anchored: each pins the 3rd + 7th to one fixed string pair (the top
+  // two voices) and lets the root bounce onto a lower bass string. b01 (E & A) → guides on the D & G
+  // strings, root on the 6th/5th (643/543); b12 (A & D) → guides on the G & B strings, root on the
+  // 5th/4th (532/432). The 'b<digits>' key lists the bass strings the root may take; the guide pair
+  // it implies is mapped in voiceLeading.ts (SHELL_LOCK_GUIDE_STRINGS).
+  shells: [
+    { key: 'b01', label: 'E & A Bass' },
+    { key: 'b12', label: 'A & D Bass' },
+  ],
 };
 
 // Generates all 4-note combinations for chords with >4 notes (like 9ths or 13ths)

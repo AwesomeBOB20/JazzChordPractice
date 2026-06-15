@@ -291,7 +291,16 @@ export default function ProgressionScreen() {
     }
   };
 
-  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet, voiceLeadDir]);
+  // Triads / Shells / Drop chords always lock to a concrete string set (no "Any"); resolve any legacy
+  // null or stale key (e.g. a persisted song from before this) to that type's first set. auto / open /
+  // barre have no string-set lock, so they pass through unchanged (null).
+  const effectiveStringSet = (() => {
+    const sets = STRING_SETS_BY_TYPE[songVoicingType];
+    if (!sets) return songStringSet;
+    return (songStringSet && sets.some(s => s.key === songStringSet)) ? songStringSet : sets[0].key;
+  })();
+
+  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, effectiveStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, effectiveStringSet, voiceLeadDir]);
 
   const pianoVoicings = React.useMemo(() => {
     const result: any[] = [];
@@ -487,9 +496,14 @@ export default function ProgressionScreen() {
 
   const isFocused = useIsFocused();
   useEffect(() => {
-    if (!isFocused) {
-      stopPlayback();
-    }
+    if (isFocused) return;
+    // Stop playback when the screen genuinely leaves — but NOT on a transient unfocus. On Android
+    // cold start the navigator briefly flips focus while settling, which tore down a just-started
+    // progression (highlight froze, audio cut — "stops on the 5th bar, first song after a reload").
+    // Wait a beat: a real leave stays unfocused and still stops; a settle-flip re-focuses, the
+    // cleanup cancels this, and playback continues.
+    const id = setTimeout(() => { stopPlayback(); }, 400);
+    return () => clearTimeout(id);
   }, [isFocused]);
 
   // Drive the universal header arp toggle: ARPS view forces the header to show (and lock to)
@@ -512,12 +526,15 @@ export default function ProgressionScreen() {
   const [newCatName, setNewCatName] = useState('');
   const [moveSongId, setMoveSongId] = useState<string | null>(null);
 
+  // Cells per row in the chart grid (styles.cell is 25% wide).
+  const COLS = 4;
+
   const groupedCells = React.useMemo(() => {
     const groups: any[] = [];
     for (let i = 0; i < progression.length; i++) {
       if (progression[i]?.beats === 2 && i + 1 < progression.length && progression[i+1]?.beats === 2) {
         groups.push({ type: 'split', left: progression[i], right: progression[i+1], leftIdx: i, rightIdx: i+1 });
-        i++; 
+        i++;
       } else {
         groups.push({ type: 'single', chord: progression[i], idx: i });
       }
@@ -525,20 +542,43 @@ export default function ProgressionScreen() {
     return groups;
   }, [progression]);
 
+  // The visual grid is COLS-wide. Section (rehearsal) letters should always begin a row, so before
+  // any section measure that isn't already in the first column we pad the rest of the current row
+  // with inert "auto" spacer cells. These are display-only — no real progression index, not
+  // selectable, skipped by playback/editing — they just push the letterbox to the next row's
+  // column 1. A section already at column 0 (e.g. one a preset hand-indented with real spacers)
+  // gets no padding, so this never double-indents.
+  const displayCells = React.useMemo(() => {
+    const out: any[] = [];
+    let col = 0;
+    let autoKey = 0;
+    for (const g of groupedCells) {
+      const chord = g.type === 'split' ? (g.left ?? g.right) : g.chord;
+      const isSectionStart = !!chord?.section && !chord?.spacer;
+      if (isSectionStart && col !== 0) {
+        for (let k = col; k < COLS; k++) out.push({ type: 'single', auto: true, idx: -1 - (autoKey++) });
+        col = 0;
+      }
+      out.push(g);
+      col = (col + 1) % COLS;
+    }
+    return out;
+  }, [groupedCells]);
+
   // Measure numbers count only cells that contain a chord. Blank (null) cells —
   // e.g. the padding indent inserts to push content to the next row — are empty
   // spaces, not measures, so a chord keeps its number after indenting.
   const measureNumbers = React.useMemo(() => {
     let count = 0;
-    return groupedCells.map((g: any) => {
+    return displayCells.map((g: any) => {
       // Spacers (indent padding) aren't measures, so they don't take a number. A `null`
       // cell IS an empty measure and stays numbered (with its dash), as it was before.
-      const isSpacerCell = g.type === 'single' && !!g.chord?.spacer;
+      const isSpacerCell = g.auto || (g.type === 'single' && !!g.chord?.spacer);
       if (isSpacerCell) return null;
       count += 1;
       return count;
     });
-  }, [groupedCells]);
+  }, [displayCells]);
 
   // Diagram cells grow taller to fit the tallest diagram on screen, so a wide CAGED arp box
   // — or two of them stacked in a split measure — never spills past the cell borders.
@@ -572,7 +612,7 @@ export default function ProgressionScreen() {
   // letter A, B, C… in playback order, so they relabel automatically as you add/remove.
   const sectionLetters = React.useMemo(() => {
     let count = 0;
-    return groupedCells.map((g: any) => {
+    return displayCells.map((g: any) => {
       const chord = g.type === 'split' ? (g.left ?? g.right) : g.chord;
       if (chord?.section) {
         const letter = String.fromCharCode(65 + (count % 26));
@@ -581,7 +621,42 @@ export default function ProgressionScreen() {
       }
       return null;
     });
-  }, [groupedCells]);
+  }, [displayCells]);
+
+  // 1st/2nd-ending (volta) brackets connect across consecutive measures: a run of cells sharing the
+  // same volta number draws ONE bracket — a single opening hook + "n." label on the first cell and a
+  // continuous top line across the rest — instead of a separate box per bar. A run that wraps to a
+  // new row, or meets a different/absent volta, restarts so each row segment reads on its own.
+  const voltaBrackets = React.useMemo(() => {
+    const voltaOf = (g: any): number | null => {
+      if (!g || g.auto) return null;
+      const v = g.type === 'split' ? (g.left?.volta ?? g.right?.volta) : g.chord?.volta;
+      return v ?? null;
+    };
+    return displayCells.map((g: any, gi: number) => {
+      const v = voltaOf(g);
+      if (v == null) return null;
+      const prevV = gi % COLS === 0 ? null : voltaOf(displayCells[gi - 1]);
+      const nextV = gi % COLS === COLS - 1 ? null : voltaOf(displayCells[gi + 1]);
+      return { value: v, isStart: prevV !== v, isEnd: nextV !== v };
+    });
+  }, [displayCells]);
+
+  // Draw the volta bracket for one display cell. Opening hook + label only on the run's first cell;
+  // the top line stretches edge-to-edge on interior cells so adjacent endings read as one bracket.
+  const renderVoltaBracket = (gi: number) => {
+    const vb = voltaBrackets[gi];
+    if (!vb) return null;
+    const leftInset = vb.isStart ? (sectionLetters[gi] ? 22 : 4) : 0;
+    const rightInset = vb.isEnd ? 4 : 0;
+    return (
+      <View style={{ position: 'absolute', top: 4, left: leftInset, right: rightInset, height: 14, zIndex: 11 }} pointerEvents="none">
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
+        {vb.isStart && <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />}
+        {vb.isStart && <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{vb.value}.</Text>}
+      </View>
+    );
+  };
 
   const detectedKey = React.useMemo(() => {
     // Only analyse the first section so multi-key exercises (ii-V-I circle, etc.)
@@ -854,10 +929,10 @@ export default function ProgressionScreen() {
 
   // Indent: find which visual column the selected cell occupies and compute how many
   // blank cells to insert before it to push it to the start of the next row.
-  const selectedGIdx = selectedCell !== null ? groupedCells.findIndex(g =>
+  const selectedGIdx = selectedCell !== null ? displayCells.findIndex(g =>
     g.type === 'split' ? (g.leftIdx === selectedCell || g.rightIdx === selectedCell) : g.idx === selectedCell
   ) : -1;
-  const indentSpaces = selectedGIdx >= 0 ? (4 - selectedGIdx % 4) % 4 : 0;
+  const indentSpaces = selectedGIdx >= 0 ? (COLS - selectedGIdx % COLS) % COLS : 0;
 
   const handleIndent = () => {
     if (selectedCell === null || indentSpaces === 0) return;
@@ -930,14 +1005,14 @@ export default function ProgressionScreen() {
             {instrument === 'guitar' && (
               <TouchableOpacity
                 onPress={() => {
-                  const order = ['auto', 'triads', 'drop2', 'drop3', 'shells'] as const;
+                  const order = ['auto', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3'] as const;
                   setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
                 }}
                 style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
               >
                 <Text style={{ fontSize: 8, fontWeight: '800', color: songVoicingType === 'auto' ? t.txt3 : t.accent }}>VOICING</Text>
                 <Text style={{ fontSize: 11, fontWeight: '700', color: songVoicingType === 'auto' ? t.txt1 : t.accent }}>
-                  {({ auto: 'AUTO', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
+                  {({ auto: 'AUTO', open: 'OPEN', barre: 'BARRE', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
                 </Text>
               </TouchableOpacity>
             )}
@@ -945,19 +1020,18 @@ export default function ProgressionScreen() {
             {/* Strict string-set lock — only for types with a fixed set of string sets
                 (Triads / Drop 2 / Drop 3). Cycles Any → each set, locking the whole song. */}
             {instrument === 'guitar' && STRING_SETS_BY_TYPE[songVoicingType] && (() => {
+              // Triads / Shells / Drop chords always lock to one of their concrete sets — no "Any".
               const sets = STRING_SETS_BY_TYPE[songVoicingType];
-              const active = songStringSet !== null;
-              const curLabel = active ? (sets.find(s => s.key === songStringSet)?.label ?? 'ANY') : 'ANY';
+              const keys = sets.map(s => s.key);
+              const curKey = effectiveStringSet ?? keys[0];
+              const curLabel = sets.find(s => s.key === curKey)?.label ?? curKey;
               return (
                 <TouchableOpacity
-                  onPress={() => {
-                    const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
-                    setSongStringSet(keys[(keys.indexOf(songStringSet) + 1) % keys.length]);
-                  }}
+                  onPress={() => setSongStringSet(keys[(keys.indexOf(curKey) + 1) % keys.length])}
                   style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
                 >
-                  <Text style={{ fontSize: 8, fontWeight: '800', color: active ? t.accent : t.txt3 }}>STRINGS</Text>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: active ? t.accent : t.txt1 }}>{curLabel}</Text>
+                  <Text style={{ fontSize: 8, fontWeight: '800', color: t.accent }}>STRINGS</Text>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: t.accent }}>{curLabel}</Text>
                 </TouchableOpacity>
               );
             })()}
@@ -1089,7 +1163,12 @@ export default function ProgressionScreen() {
         <View style={[styles.card, { backgroundColor: t.bg2, paddingTop: 0 }]}>
           
           <View style={[styles.grid, { borderLeftWidth: 1, borderLeftColor: t.border }]}>
-            {groupedCells.map((group, gIdx) => {
+            {displayCells.map((group, gIdx) => {
+              // Auto-indent padding: an inert, non-interactive blank that pushes the next section
+              // letter to column 1. No chord, no touch handlers — it can never be selected/played.
+              if (group.auto) {
+                return <View key={`auto-${gIdx}`} style={[styles.cell, { backgroundColor: t.bg2, borderColor: t.border, borderRightWidth: 0, borderBottomWidth: 0, height: diagramCellHeight }]} />;
+              }
               const getCellProps = (idx: number) => {
                 const isSelected = selectedCell === idx;
                 const isPlaying = playingIdx === idx;
@@ -1145,7 +1224,7 @@ export default function ProgressionScreen() {
               };
 
               const currentEffectiveBeats = group.type === 'split' ? 4 : (group.chord?.beats || 4);
-              const prevEffectiveBeats = gIdx > 0 ? (groupedCells[gIdx - 1].type === 'split' ? 4 : (groupedCells[gIdx - 1].chord?.beats || 4)) : null;
+              const prevEffectiveBeats = gIdx > 0 ? (displayCells[gIdx - 1].type === 'split' ? 4 : (displayCells[gIdx - 1].chord?.beats || 4)) : null;
               const showTimeSig = gIdx === 0 || currentEffectiveBeats !== prevEffectiveBeats;
 
               const renderContent = (chord: any, idx: number, isPlaying: boolean, isRightHalf: boolean = false, isSplit: boolean = false) => {
@@ -1167,14 +1246,8 @@ export default function ProgressionScreen() {
                         </View>
                       )}
 
-                      {/* Volta Bracket — shifts right of the section box when one is present */}
-                      {!!chord?.volta && (
-                        <View style={{ position: 'absolute', top: 4, left: (!isRightHalf && sectionLetters[gIdx]) ? 22 : 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
-                          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
-                          <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
-                          <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{chord.volta}.</Text>
-                        </View>
-                      )}
+                      {/* Volta bracket — connects across consecutive same-ending measures. */}
+                      {!isRightHalf && renderVoltaBracket(gIdx)}
 
                       {/* Absolute Measure Number — blank cells are empty spaces, not numbered measures */}
                       {!isRightHalf && measureNumbers[gIdx] != null && (
@@ -1360,16 +1433,8 @@ export default function ProgressionScreen() {
                        </View>
                      )}
 
-                     {/* Volta bracket spans the full cell — volta marks the whole measure.
-                         Read from the left chord only; right.volta is a legacy fallback.
-                         Shifts right of the section box when one is present. */}
-                     {!!(left?.volta ?? right?.volta) && (
-                       <View style={{ position: 'absolute', top: 4, left: sectionLetters[gIdx] ? 22 : 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
-                         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
-                         <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
-                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{(left?.volta ?? right?.volta)}.</Text>
-                       </View>
-                     )}
+                     {/* Volta bracket — connects across consecutive same-ending measures. */}
+                     {renderVoltaBracket(gIdx)}
 
                      {/* NOTE: Tappable layer adapts to view mode. Column for diagrams, Row for text. */}
                      <View style={[StyleSheet.absoluteFill, { flexDirection: viewMode === 'text' ? 'row' : 'column', zIndex: 5 }]}>

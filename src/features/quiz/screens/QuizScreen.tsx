@@ -354,11 +354,17 @@ export default function QuizScreen() {
 
   const quizLabelMode = labelMode;
 
+  // Stop the quiz's own audio when it LOSES focus — but never on the initial unfocused mount. The
+  // audio engine is global, and on Android cold start this (background) tab mounts a few seconds
+  // late; an unconditional onStop() there killed a progression already playing on the Song tab.
+  // Only stop on a real focused→unfocused transition (wasFocusedRef), so a backgrounded Quiz can't
+  // touch another screen's audio.
+  const quizWasFocusedRef = useRef(false);
   useEffect(() => {
-    if (!isFocused) {
-      stopSeqFlash();
-      onStop();
-    }
+    if (isFocused) { quizWasFocusedRef.current = true; return; }
+    if (!quizWasFocusedRef.current) return; // never been focused → don't stop global audio
+    stopSeqFlash();
+    onStop();
   }, [isFocused]);
 
   // ── Quiz state ──────────────────────────────────────────────
