@@ -517,12 +517,15 @@ export default function ProgressionScreen() {
   const [newCatName, setNewCatName] = useState('');
   const [moveSongId, setMoveSongId] = useState<string | null>(null);
 
+  // Cells per row in the chart grid (styles.cell is 25% wide).
+  const COLS = 4;
+
   const groupedCells = React.useMemo(() => {
     const groups: any[] = [];
     for (let i = 0; i < progression.length; i++) {
       if (progression[i]?.beats === 2 && i + 1 < progression.length && progression[i+1]?.beats === 2) {
         groups.push({ type: 'split', left: progression[i], right: progression[i+1], leftIdx: i, rightIdx: i+1 });
-        i++; 
+        i++;
       } else {
         groups.push({ type: 'single', chord: progression[i], idx: i });
       }
@@ -530,20 +533,43 @@ export default function ProgressionScreen() {
     return groups;
   }, [progression]);
 
+  // The visual grid is COLS-wide. Section (rehearsal) letters should always begin a row, so before
+  // any section measure that isn't already in the first column we pad the rest of the current row
+  // with inert "auto" spacer cells. These are display-only — no real progression index, not
+  // selectable, skipped by playback/editing — they just push the letterbox to the next row's
+  // column 1. A section already at column 0 (e.g. one a preset hand-indented with real spacers)
+  // gets no padding, so this never double-indents.
+  const displayCells = React.useMemo(() => {
+    const out: any[] = [];
+    let col = 0;
+    let autoKey = 0;
+    for (const g of groupedCells) {
+      const chord = g.type === 'split' ? (g.left ?? g.right) : g.chord;
+      const isSectionStart = !!chord?.section && !chord?.spacer;
+      if (isSectionStart && col !== 0) {
+        for (let k = col; k < COLS; k++) out.push({ type: 'single', auto: true, idx: -1 - (autoKey++) });
+        col = 0;
+      }
+      out.push(g);
+      col = (col + 1) % COLS;
+    }
+    return out;
+  }, [groupedCells]);
+
   // Measure numbers count only cells that contain a chord. Blank (null) cells —
   // e.g. the padding indent inserts to push content to the next row — are empty
   // spaces, not measures, so a chord keeps its number after indenting.
   const measureNumbers = React.useMemo(() => {
     let count = 0;
-    return groupedCells.map((g: any) => {
+    return displayCells.map((g: any) => {
       // Spacers (indent padding) aren't measures, so they don't take a number. A `null`
       // cell IS an empty measure and stays numbered (with its dash), as it was before.
-      const isSpacerCell = g.type === 'single' && !!g.chord?.spacer;
+      const isSpacerCell = g.auto || (g.type === 'single' && !!g.chord?.spacer);
       if (isSpacerCell) return null;
       count += 1;
       return count;
     });
-  }, [groupedCells]);
+  }, [displayCells]);
 
   // Diagram cells grow taller to fit the tallest diagram on screen, so a wide CAGED arp box
   // — or two of them stacked in a split measure — never spills past the cell borders.
@@ -577,7 +603,7 @@ export default function ProgressionScreen() {
   // letter A, B, C… in playback order, so they relabel automatically as you add/remove.
   const sectionLetters = React.useMemo(() => {
     let count = 0;
-    return groupedCells.map((g: any) => {
+    return displayCells.map((g: any) => {
       const chord = g.type === 'split' ? (g.left ?? g.right) : g.chord;
       if (chord?.section) {
         const letter = String.fromCharCode(65 + (count % 26));
@@ -586,7 +612,7 @@ export default function ProgressionScreen() {
       }
       return null;
     });
-  }, [groupedCells]);
+  }, [displayCells]);
 
   const detectedKey = React.useMemo(() => {
     // Only analyse the first section so multi-key exercises (ii-V-I circle, etc.)
@@ -859,10 +885,10 @@ export default function ProgressionScreen() {
 
   // Indent: find which visual column the selected cell occupies and compute how many
   // blank cells to insert before it to push it to the start of the next row.
-  const selectedGIdx = selectedCell !== null ? groupedCells.findIndex(g =>
+  const selectedGIdx = selectedCell !== null ? displayCells.findIndex(g =>
     g.type === 'split' ? (g.leftIdx === selectedCell || g.rightIdx === selectedCell) : g.idx === selectedCell
   ) : -1;
-  const indentSpaces = selectedGIdx >= 0 ? (4 - selectedGIdx % 4) % 4 : 0;
+  const indentSpaces = selectedGIdx >= 0 ? (COLS - selectedGIdx % COLS) % COLS : 0;
 
   const handleIndent = () => {
     if (selectedCell === null || indentSpaces === 0) return;
@@ -1094,7 +1120,12 @@ export default function ProgressionScreen() {
         <View style={[styles.card, { backgroundColor: t.bg2, paddingTop: 0 }]}>
           
           <View style={[styles.grid, { borderLeftWidth: 1, borderLeftColor: t.border }]}>
-            {groupedCells.map((group, gIdx) => {
+            {displayCells.map((group, gIdx) => {
+              // Auto-indent padding: an inert, non-interactive blank that pushes the next section
+              // letter to column 1. No chord, no touch handlers — it can never be selected/played.
+              if (group.auto) {
+                return <View key={`auto-${gIdx}`} style={[styles.cell, { backgroundColor: t.bg2, borderColor: t.border, borderRightWidth: 0, borderBottomWidth: 0, height: diagramCellHeight }]} />;
+              }
               const getCellProps = (idx: number) => {
                 const isSelected = selectedCell === idx;
                 const isPlaying = playingIdx === idx;
@@ -1150,7 +1181,7 @@ export default function ProgressionScreen() {
               };
 
               const currentEffectiveBeats = group.type === 'split' ? 4 : (group.chord?.beats || 4);
-              const prevEffectiveBeats = gIdx > 0 ? (groupedCells[gIdx - 1].type === 'split' ? 4 : (groupedCells[gIdx - 1].chord?.beats || 4)) : null;
+              const prevEffectiveBeats = gIdx > 0 ? (displayCells[gIdx - 1].type === 'split' ? 4 : (displayCells[gIdx - 1].chord?.beats || 4)) : null;
               const showTimeSig = gIdx === 0 || currentEffectiveBeats !== prevEffectiveBeats;
 
               const renderContent = (chord: any, idx: number, isPlaying: boolean, isRightHalf: boolean = false, isSplit: boolean = false) => {
