@@ -142,9 +142,9 @@ const HELP_SECTIONS: HelpSection[] = [
         'The Voice Lead pill changes how they move: Zone (stay put, smooth), Bounce (drift up and down), or Up / Down (walk the neck). Turn it off for plain root-position chords.',
       ] },
       { h: 'Lock the Voicing (guitar)', b: [
-        'VOICING forces a family — AUTO, Open, Barre, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style. AUTO picks the smoothest Drop 2 / Drop 3 voicing for you.',
+        'VOICING forces a family — AUTO, Open, Barre, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style. AUTO comps with Drop 2 on the top string sets (4-3-2-1 / 5-4-3-2) and falls to Drop 3 for the lower register, picking the smoothest option for you.',
         'Open and Barre use standard guitar chord shapes. If a chord has no shape in the chosen family (e.g. an extended chord with no barre form), it falls back to its best voicing so a cell is never blank.',
-        'With a family set, STRINGS pins the shapes to one set (or leave it ANY). For Shells, which shift across strings, it pins the bass string instead — 6th, 5th, or 4th.',
+        'For Triads, Shells, and Drop 2 / 3, STRINGS pins every chord to one of that type\'s string sets — it always uses one (there is no "Any"); cycle it to move the whole song to a different set. For Shells it anchors the two guide tones (3rd + 7th) to a fixed pair of strings and lets the root bounce onto a bass string below — so a descending line slides down the same two strings. "E & A Bass" keeps the guides on the D & G strings (root on the 6th or 5th); "A & D Bass" keeps them on the G & B strings (root on the 5th or 4th).',
       ] },
       { h: 'Chart Marks (like real sheet music)', b: [
         'Repeat signs (𝄆 𝄇) to loop a section.',
