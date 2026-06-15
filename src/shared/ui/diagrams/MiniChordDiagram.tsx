@@ -160,8 +160,11 @@ function MiniChordDiagram({ voicing, arpShape, theme, isMasked, scale, fitWidth,
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 2, marginTop: tighten ? -4 : 0, overflow: 'visible' }}>
       {startF > 0 && (
-        <View style={{ height: fretSpc * s, marginTop: fretNumBoxTop, justifyContent: 'center' }}>
-          <Text style={{ color: theme.txt2, fontSize: 9 * s, fontWeight: '800', transform: [{ translateX: -1 }] }}>
+        // Box is exactly one fret-space tall and flex-centres the digit, landing it dead-centre on the
+        // space it labels. includeFontPadding:false + textAlignVertical:center strip Android's
+        // asymmetric line padding (which otherwise floats the glyph off the space's centre).
+        <View style={{ height: fretSpc * s, marginTop: fretNumBoxTop, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: theme.txt2, fontSize: 9 * s, fontWeight: '800', includeFontPadding: false, textAlignVertical: 'center', textAlign: 'center', transform: [{ translateX: -1 }] }}>
             {startF + 1}
           </Text>
         </View>
