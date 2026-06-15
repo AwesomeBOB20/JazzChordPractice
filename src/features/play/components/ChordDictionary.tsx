@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform, InteractionManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { NOTE_SHARP, NOTE_FLAT, CH, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
@@ -177,6 +177,20 @@ const DictSectionRow = React.memo(function DictSectionRow({
     </View>
   );
 });
+
+// ─── Deferred mount ─────────────────────────────────────────────────────────
+// Opening a section mounts its whole grid of react-native-svg diagrams at once, which blocks the
+// frame and makes the dropdown feel slow. We mount a cheap placeholder (sized to roughly the grid's
+// height so the list doesn't jump), then swap in the real diagrams AFTER the tap interaction settles
+// — so the open is always instant and the heavy work never lands on the same frame as the toggle.
+function DeferredMount({ placeholderHeight, children }: { placeholderHeight: number; children: React.ReactNode }) {
+  const [ready, setReady] = React.useState(false);
+  React.useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => setReady(true));
+    return () => task.cancel();
+  }, []);
+  return ready ? <>{children}</> : <View style={{ height: placeholderHeight }} />;
+}
 
 // ─── Root picker: 12 plain circles in a horizontal scroller ──────────────────
 // NOT a spin dial. The 12 roots are 12 real circular buttons that slide left/right.
@@ -592,24 +606,26 @@ export default function ChordDictionary({ t }: Props) {
                       </ScrollView>
                     </View>
                   )}
-                  <DictSectionRow
-                    itemKey={item.key}
-                    isChordQuality={isChordQuality}
-                    category={effectiveCategory}
-                    instrument={instrument}
-                    rootSemi={rootSemi}
-                    allRoots={effectiveAllRoots}
-                    octave={octave}
-                    selectedScaleId={selectedScaleId}
-                    labelMode={labelMode}
-                    t={t}
-                    onPlay={handlePlay}
-                    armedType={armedHere?.type ?? null}
-                    onCommit={commitToChord}
-                    onHold={onHold}
-                    armedDiagramKey={diagArmedHere?.key ?? null}
-                    L={L}
-                  />
+                  <DeferredMount placeholderHeight={Math.ceil((itemCounts[item.key] || 1) / L.cols) * (L.diagramH + (instrument === 'guitar' ? 40 : 30))}>
+                    <DictSectionRow
+                      itemKey={item.key}
+                      isChordQuality={isChordQuality}
+                      category={effectiveCategory}
+                      instrument={instrument}
+                      rootSemi={rootSemi}
+                      allRoots={effectiveAllRoots}
+                      octave={octave}
+                      selectedScaleId={selectedScaleId}
+                      labelMode={labelMode}
+                      t={t}
+                      onPlay={handlePlay}
+                      armedType={armedHere?.type ?? null}
+                      onCommit={commitToChord}
+                      onHold={onHold}
+                      armedDiagramKey={diagArmedHere?.key ?? null}
+                      L={L}
+                    />
+                  </DeferredMount>
                 </View>
               );
               return (
