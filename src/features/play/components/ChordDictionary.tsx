@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform, InteractionManager } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { NOTE_SHARP, NOTE_FLAT, CH, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
@@ -100,6 +100,20 @@ const DictSectionRow = React.memo(function DictSectionRow({
       : getDictionaryVoicings(category, instrument, rootSemi, itemKey, octave, selectedScaleId),
     [category, instrument, rootSemi, allRoots, itemKey, octave, selectedScaleId]
   );
+  // Progressive mount: the data is already warm (the count memos built it), so the open cost is purely
+  // mounting the react-native-svg diagrams. We render just the FIRST ROW on the opening frame — so the
+  // section shows content instantly with no blank flash and no heavy mount — then ramp the rest in over
+  // the next frames so a big section never lands a heavy mount on one frame. A reserved spacer keeps the
+  // section height stable while it fills.
+  const FIRST = Math.max(1, L.cols);          // one row paints immediately
+  const STEP = Math.max(2, L.cols * 2);        // then a couple of rows per frame
+  const [shown, setShown] = React.useState(() => Math.min(items.length, FIRST));
+  React.useEffect(() => { setShown(Math.min(items.length, FIRST)); }, [items, FIRST]);
+  React.useEffect(() => {
+    if (shown >= items.length) return;
+    const id = requestAnimationFrame(() => setShown(s => Math.min(items.length, s + STEP)));
+    return () => cancelAnimationFrame(id);
+  }, [shown, items.length, STEP]);
   if (!items.length) {
     return <Text style={{ color: t.txt3, fontSize: 12, marginBottom: 16 }}>—</Text>;
   }
@@ -116,6 +130,12 @@ const DictSectionRow = React.memo(function DictSectionRow({
         const fp = miniChordFootprint(it.voicing, it.arpShape);
         return fp.h * Math.min(MAX_SCALE, innerW / fp.w);
       })));
+  // The diagrams streamed in so far, plus a spacer reserving the height of the rows still to mount so
+  // the section (and the list below) doesn't jump while it fills. Cell height ≈ box + vertical padding.
+  const shownItems = items.slice(0, shown);
+  const rowPad = instrument === 'guitar' ? (L.cornerFs + 9) * 2 : 16 + Math.round(L.labelFs * 1.6);
+  const pendingRows = Math.ceil(items.length / L.cols) - Math.ceil(shownItems.length / L.cols);
+  const spacerH = Math.max(0, pendingRows * (boxH + rowPad));
   // Flat grid (no card panels) — cells tile the full width and share 1px borders, matching the
   // progression measure grid. The container draws the top + left edge; each cell draws its
   // right + bottom edge.
@@ -144,7 +164,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
   };
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 1, borderLeftWidth: 1, borderColor: t.border }}>
-      {items.map(it => {
+      {shownItems.map(it => {
         // Guitar cells carry four corner pills in place of the old caption; piano keeps its caption.
         const c = instrument === 'guitar' ? dictCorners(it, category, rootSemi, allRoots) : null;
         return (
@@ -174,23 +194,10 @@ const DictSectionRow = React.memo(function DictSectionRow({
           </TouchableOpacity>
         );
       })}
+      {spacerH > 0 && <View style={{ width: '100%', height: spacerH }} />}
     </View>
   );
 });
-
-// ─── Deferred mount ─────────────────────────────────────────────────────────
-// Opening a section mounts its whole grid of react-native-svg diagrams at once, which blocks the
-// frame and makes the dropdown feel slow. We mount a cheap placeholder (sized to roughly the grid's
-// height so the list doesn't jump), then swap in the real diagrams AFTER the tap interaction settles
-// — so the open is always instant and the heavy work never lands on the same frame as the toggle.
-function DeferredMount({ placeholderHeight, children }: { placeholderHeight: number; children: React.ReactNode }) {
-  const [ready, setReady] = React.useState(false);
-  React.useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => setReady(true));
-    return () => task.cancel();
-  }, []);
-  return ready ? <>{children}</> : <View style={{ height: placeholderHeight }} />;
-}
 
 // ─── Root picker: 12 plain circles in a horizontal scroller ──────────────────
 // NOT a spin dial. The 12 roots are 12 real circular buttons that slide left/right.
@@ -606,26 +613,24 @@ export default function ChordDictionary({ t }: Props) {
                       </ScrollView>
                     </View>
                   )}
-                  <DeferredMount placeholderHeight={Math.ceil((itemCounts[item.key] || 1) / L.cols) * (L.diagramH + (instrument === 'guitar' ? 40 : 30))}>
-                    <DictSectionRow
-                      itemKey={item.key}
-                      isChordQuality={isChordQuality}
-                      category={effectiveCategory}
-                      instrument={instrument}
-                      rootSemi={rootSemi}
-                      allRoots={effectiveAllRoots}
-                      octave={octave}
-                      selectedScaleId={selectedScaleId}
-                      labelMode={labelMode}
-                      t={t}
-                      onPlay={handlePlay}
-                      armedType={armedHere?.type ?? null}
-                      onCommit={commitToChord}
-                      onHold={onHold}
-                      armedDiagramKey={diagArmedHere?.key ?? null}
-                      L={L}
-                    />
-                  </DeferredMount>
+                  <DictSectionRow
+                    itemKey={item.key}
+                    isChordQuality={isChordQuality}
+                    category={effectiveCategory}
+                    instrument={instrument}
+                    rootSemi={rootSemi}
+                    allRoots={effectiveAllRoots}
+                    octave={octave}
+                    selectedScaleId={selectedScaleId}
+                    labelMode={labelMode}
+                    t={t}
+                    onPlay={handlePlay}
+                    armedType={armedHere?.type ?? null}
+                    onCommit={commitToChord}
+                    onHold={onHold}
+                    armedDiagramKey={diagArmedHere?.key ?? null}
+                    L={L}
+                  />
                 </View>
               );
               return (
