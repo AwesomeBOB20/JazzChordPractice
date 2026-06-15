@@ -614,6 +614,41 @@ export default function ProgressionScreen() {
     });
   }, [displayCells]);
 
+  // 1st/2nd-ending (volta) brackets connect across consecutive measures: a run of cells sharing the
+  // same volta number draws ONE bracket — a single opening hook + "n." label on the first cell and a
+  // continuous top line across the rest — instead of a separate box per bar. A run that wraps to a
+  // new row, or meets a different/absent volta, restarts so each row segment reads on its own.
+  const voltaBrackets = React.useMemo(() => {
+    const voltaOf = (g: any): number | null => {
+      if (!g || g.auto) return null;
+      const v = g.type === 'split' ? (g.left?.volta ?? g.right?.volta) : g.chord?.volta;
+      return v ?? null;
+    };
+    return displayCells.map((g: any, gi: number) => {
+      const v = voltaOf(g);
+      if (v == null) return null;
+      const prevV = gi % COLS === 0 ? null : voltaOf(displayCells[gi - 1]);
+      const nextV = gi % COLS === COLS - 1 ? null : voltaOf(displayCells[gi + 1]);
+      return { value: v, isStart: prevV !== v, isEnd: nextV !== v };
+    });
+  }, [displayCells]);
+
+  // Draw the volta bracket for one display cell. Opening hook + label only on the run's first cell;
+  // the top line stretches edge-to-edge on interior cells so adjacent endings read as one bracket.
+  const renderVoltaBracket = (gi: number) => {
+    const vb = voltaBrackets[gi];
+    if (!vb) return null;
+    const leftInset = vb.isStart ? (sectionLetters[gi] ? 22 : 4) : 0;
+    const rightInset = vb.isEnd ? 4 : 0;
+    return (
+      <View style={{ position: 'absolute', top: 4, left: leftInset, right: rightInset, height: 14, zIndex: 11 }} pointerEvents="none">
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
+        {vb.isStart && <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />}
+        {vb.isStart && <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{vb.value}.</Text>}
+      </View>
+    );
+  };
+
   const detectedKey = React.useMemo(() => {
     // Only analyse the first section so multi-key exercises (ii-V-I circle, etc.)
     // display and transpose from their opening key rather than a blended average.
@@ -1203,14 +1238,8 @@ export default function ProgressionScreen() {
                         </View>
                       )}
 
-                      {/* Volta Bracket — shifts right of the section box when one is present */}
-                      {!!chord?.volta && (
-                        <View style={{ position: 'absolute', top: 4, left: (!isRightHalf && sectionLetters[gIdx]) ? 22 : 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
-                          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
-                          <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
-                          <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{chord.volta}.</Text>
-                        </View>
-                      )}
+                      {/* Volta bracket — connects across consecutive same-ending measures. */}
+                      {!isRightHalf && renderVoltaBracket(gIdx)}
 
                       {/* Absolute Measure Number — blank cells are empty spaces, not numbered measures */}
                       {!isRightHalf && measureNumbers[gIdx] != null && (
@@ -1396,16 +1425,8 @@ export default function ProgressionScreen() {
                        </View>
                      )}
 
-                     {/* Volta bracket spans the full cell — volta marks the whole measure.
-                         Read from the left chord only; right.volta is a legacy fallback.
-                         Shifts right of the section box when one is present. */}
-                     {!!(left?.volta ?? right?.volta) && (
-                       <View style={{ position: 'absolute', top: 4, left: sectionLetters[gIdx] ? 22 : 4, right: 4, height: 14, zIndex: 11 }} pointerEvents="none">
-                         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent }} />
-                         <View style={{ position: 'absolute', top: 0, left: 0, width: 2, height: 14, backgroundColor: t.accent }} />
-                         <Text style={{ position: 'absolute', top: 3, left: 5, fontSize: 8, fontWeight: '800', color: t.accent, lineHeight: 10 }}>{(left?.volta ?? right?.volta)}.</Text>
-                       </View>
-                     )}
+                     {/* Volta bracket — connects across consecutive same-ending measures. */}
+                     {renderVoltaBracket(gIdx)}
 
                      {/* NOTE: Tappable layer adapts to view mode. Column for diagrams, Row for text. */}
                      <View style={[StyleSheet.absoluteFill, { flexDirection: viewMode === 'text' ? 'row' : 'column', zIndex: 5 }]}>
