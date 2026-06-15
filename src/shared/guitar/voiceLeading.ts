@@ -131,8 +131,11 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
     // whole progression sits in one place on the neck. Only relax (fall back to the
     // wider pool) when this particular chord can't be voiced on that set at all.
     if (forcedStringSet) {
-      const keyOf = forcedType === 'shells' ? bassStringKey : activeStringKey;
-      const onSet = pool.filter((v: any) => keyOf(v) === forcedStringSet);
+      const onSet = forcedType === 'shells'
+        // Shell keys are 'b<digits>' listing the allowed bass-string indices (b0 / b01 / b12 …), so a
+        // pair lock keeps either string — widening the pool for voice leading. bassStringKey is 'b<idx>'.
+        ? pool.filter((v: any) => forcedStringSet.slice(1).includes(bassStringKey(v).slice(1)))
+        : pool.filter((v: any) => activeStringKey(v) === forcedStringSet);
       if (onSet.length) pool = onSet;
     }
 

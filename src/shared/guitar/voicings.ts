@@ -1755,9 +1755,17 @@ export const STRING_SETS_BY_TYPE: Record<string, { key: string; label: string }[
   triads: TRIAD_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop2: DROP2_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop3: DROP3_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
-  // Shells change strings per voicing order, so they lock to the BASS string rather than an exact set:
-  // bass on the 6th / 5th / 4th string. Keys ('b0/b1/b2') match bassStringKey() in voiceLeading.ts.
-  shells: [{ key: 'b0', label: 'E Bass' }, { key: 'b1', label: 'A Bass' }, { key: 'b2', label: 'D Bass' }],
+  // Shells lock to the BASS string rather than an exact set. Single-string locks (b0/b1/b2) plus two
+  // adjacent-PAIR locks (b01/b12) that widen the pool so voice leading has more to choose from. The
+  // digits after 'b' are the allowed bass-string indices (0=E/6th, 1=A/5th, 2=D/4th), matched in
+  // voiceLeading.ts. Order: singles first, then the two combos.
+  shells: [
+    { key: 'b0', label: 'E Bass' },
+    { key: 'b1', label: 'A Bass' },
+    { key: 'b2', label: 'D Bass' },
+    { key: 'b01', label: 'E & A Bass' },
+    { key: 'b12', label: 'A & D Bass' },
+  ],
 };
 
 // Generates all 4-note combinations for chords with >4 notes (like 9ths or 13ths)
