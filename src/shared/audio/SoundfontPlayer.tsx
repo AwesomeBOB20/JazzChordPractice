@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Audio } from 'expo-av'; // BRING THIS BACK just for OS configuration
@@ -33,9 +33,16 @@ export interface SoundfontPlayerRef {
   updateProgressionNotes: (sequence: ProgressionMeasure[]) => void;
 }
 
-const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
+const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [isEngineReady, setIsEngineReady] = useState(false);
+
+  // Build the audio-engine HTML (with all embedded samples) ONCE. Passing a fresh
+  // `source={{ html: ... }}` object on every render makes react-native-webview reload the
+  // WebView — which tears down the live AudioContext and silently kills any progression that's
+  // mid-playback. Memoizing keeps the source reference stable so the engine mounts exactly once
+  // and is never reloaded by an incidental re-render (e.g. a store rehydrate on first launch).
+  const engineSource = useMemo(() => ({ html: getAudioEngineHtml(AUDIO_ASSETS) }), []);
   
   const progSchedulerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progSeqRef = useRef<ProgressionMeasure[]>([]);
@@ -321,6 +328,7 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
       progTimeShiftRef.current = 0;
 
       const runNextMeasure = () => {
+       try {
         // Tap-ahead diversion: if a measure is queued, redirect the measure we're ABOUT to
         // schedule to the queued one, so it plays right after the current (already-scheduled)
         // measure finishes — no mid-measure interruption. progTimeShiftRef is bumped so the
@@ -356,8 +364,8 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
                 // UI stuck in playback mode after the audio had already stopped).
                 const onEndTargetMs = progBaseTimeRef.current + progLoopOffsetRef.current + progTimeShiftRef.current + progTotalDurationRef.current + 250;
                 const onEndDelay = Math.max(0, onEndTargetMs - Date.now());
-                progSchedulerRef.current = setTimeout(onEnd, onEndDelay); 
-                return; 
+                progSchedulerRef.current = setTimeout(onEnd, onEndDelay);
+                return;
             }
         }
 
@@ -599,6 +607,13 @@ const SoundfontPlayer = forwardRef<SoundfontPlayerRef>((_, ref) => {
 
         progSeqIdxRef.current++;
         progSchedulerRef.current = setTimeout(runNextMeasure, nextCheckDelay);
+       } catch (err) {
+        // Self-heal: a transient error must NOT kill the whole progression. Log it, skip the bad
+        // measure, and keep the chain alive so playback continues instead of silently freezing.
+        console.warn('Progression: skipped a measure after an error, continuing playback.', err);
+        progSeqIdxRef.current++;
+        progSchedulerRef.current = setTimeout(runNextMeasure, 200);
+       }
       };
 
       runNextMeasure();
@@ -626,8 +641,9 @@ return (
       <WebView
         ref={webViewRef}
         originWhitelist={['*']}
-        // Inject the HTML and the Assets simultaneously!
-        source={{ html: getAudioEngineHtml(AUDIO_ASSETS) }} 
+        // Inject the HTML and the Assets simultaneously! (Stable, memoized source — never rebuilt,
+        // so the WebView/audio engine is never reloaded out from under a playing progression.)
+        source={engineSource}
         onMessage={handleWebViewMessage}
         javaScriptEnabled={true}
         allowsInlineMediaPlayback={true}
@@ -635,6 +651,7 @@ return (
       />
     </View>
   );
-});
+}));
+SoundfontPlayer.displayName = 'SoundfontPlayer';
 
 export default SoundfontPlayer;

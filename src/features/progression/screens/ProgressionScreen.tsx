@@ -487,9 +487,14 @@ export default function ProgressionScreen() {
 
   const isFocused = useIsFocused();
   useEffect(() => {
-    if (!isFocused) {
-      stopPlayback();
-    }
+    if (isFocused) return;
+    // Stop playback when the screen genuinely leaves — but NOT on a transient unfocus. On Android
+    // cold start the navigator briefly flips focus while settling, which tore down a just-started
+    // progression (highlight froze, audio cut — "stops on the 5th bar, first song after a reload").
+    // Wait a beat: a real leave stays unfocused and still stops; a settle-flip re-focuses, the
+    // cleanup cancels this, and playback continues.
+    const id = setTimeout(() => { stopPlayback(); }, 400);
+    return () => clearTimeout(id);
   }, [isFocused]);
 
   // Drive the universal header arp toggle: ARPS view forces the header to show (and lock to)

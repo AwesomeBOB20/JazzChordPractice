@@ -188,8 +188,9 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
 
   const { stopAudio } = useAudio();
 
-  // 1. Memoize the listener object so it doesn't destroy navigation performance
-  const tabListeners = React.useMemo(() => ({
+  // 1. Memoize the listener factory so it doesn't destroy navigation performance. (Function form
+  //    so each screen's `blur` can re-check ITS OWN focus before stopping — see below.)
+  const tabListeners = React.useCallback(({ navigation }: any) => ({
     tabPress: () => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setIsSettingsOpen(false);
@@ -200,7 +201,16 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
     // isFocused-based stop never commits — the tone would keep ringing.
     // Same reason we reset the forced-arp header lock here: the focused screen
     // re-asserts it via useFocusEffect, so any leftover lock from another tab clears.
-    blur: () => { stopAudio(); setArpForced(false); },
+    //
+    // BUT: on Android cold start the navigator emits a TRANSIENT blur while it settles the first
+    // focused tab. Stopping immediately there killed a just-started progression (highlight froze,
+    // audio cut) — the "stops on the 5th bar, first song after a reload" bug. So we wait a beat and
+    // only stop if the tab is GENUINELY still blurred (a real leave stays blurred; a settle-flip
+    // re-focuses and we skip). arpForced is safe to clear eagerly (the focused screen re-asserts it).
+    blur: () => {
+      setArpForced(false);
+      setTimeout(() => { if (!navigation.isFocused()) stopAudio(); }, 350);
+    },
   }), [setIsSettingsOpen, stopAudio, setArpForced]);
 
   React.useEffect(() => {
