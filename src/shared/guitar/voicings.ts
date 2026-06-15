@@ -164,6 +164,15 @@ export const BARRE_SHAPES: Record<string, { name: string; rootSemi: number; vari
     { name: 'E Shape Min9', rootSemi: 4, variation: 'Standard', frets: [0, 2, 0, 0, 0, 2], roles: ['root', '5th', 'b7', 'b3', '5th', '9th'] },
     { name: 'A Shape Min9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -2, 0, 0, 0], roles: [null, 'root', 'b3', 'b7', '9th', '5th'], fingers: [null, 2, 1, 3, 3, 3] },
   ],
+  // Altered dominants — 4-note grips (R-3-b7-alt9, perfect 5th dropped). 7#9 is the "Hendrix" shape.
+  // Verified R-3-b7-#9 / R-3-b7-b9 at all 12 roots; min relative fret -1, so no negative frets.
+  'dom7s9': [
+    { name: 'E Shape 7#9', rootSemi: 4, variation: 'Standard', frets: [0, -1, 0, 0, null, null], roles: ['root', '3rd', 'b7', '#9', null, null] },
+    { name: 'A Shape 7#9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -1, 0, 1, null], roles: [null, 'root', '3rd', 'b7', '#9', null] },
+  ],
+  'dom7b9': [
+    { name: 'A Shape 7b9', rootSemi: 9, variation: 'Standard', frets: [null, 0, -1, 0, -1, null], roles: [null, 'root', '3rd', 'b7', 'b9', null] },
+  ],
 };
 
 export const OPEN_SHAPES: Record<string, { rootSemi: number; name: string; variation?: string; frets: (number | null)[]; roles: (string | null)[] }[]> = {
