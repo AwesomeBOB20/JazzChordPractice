@@ -9,6 +9,13 @@ const start = mtSrc.indexOf('export const CH');
 const braceStart = mtSrc.indexOf('= {', start) + 2;
 const objEnd = mtSrc.indexOf('\n};', braceStart);
 const CH = eval('(' + mtSrc.slice(braceStart, objEnd + 2) + ')');
+// Iterate chords in the app's canonical order (formulaCombos uses ORDERED_TYPES) so the deduped
+// combo's representative tokens match the real app — matters for enharmonic pc-9 (6 vs bb7 vs 13).
+const ccStart = mtSrc.indexOf('export const CHORD_CATEGORIES');
+const ccArrStart = mtSrc.indexOf('= [', ccStart) + 2;
+const CHORD_CATEGORIES = eval('(' + mtSrc.slice(ccArrStart, mtSrc.indexOf('\n];', ccArrStart) + 2) + ')');
+const fromCats = CHORD_CATEGORIES.flatMap(c => c.keys);
+const ORDERED_TYPES = [...fromCats, ...Object.keys(CH).filter(k => !fromCats.includes(k))];
 
 const GS = [40, 45, 50, 55, 59, 64];
 const ROLE_SHORT = { 'root':'1','3rd':'3','5th':'5','7th':'7','9th':'9','11th':'11','13th':'13','4th':'4','6th':'6','2nd':'2','b2nd':'b2','#2nd':'#2','b3rd':'b3','#3rd':'#3','b4th':'b4','#4th':'#4','b5th':'b5','#5th':'#5','b6th':'b6','#6th':'#6','b7th':'b7','bb7th':'bb7','#7th':'#7','b9th':'b9','#9th':'#9','b11th':'b11','#11th':'#11','b13th':'b13','#13th':'#13' };
@@ -89,25 +96,21 @@ function comboKeyOf(roles) {
   const pcs = Array.from(new Set(tokens.map(t => FORMULA_IV[t]))).sort((a, b) => a - b);
   return { tokens, key: pcs.join(',') };
 }
-function shellQuality(tokens) {
+function shellGuideTones(tokens) {
   const has = (t) => tokens.includes(t);
-  const third = has('3') ? 'maj' : has('b3') ? 'min' : (has('4') || has('2')) ? 'sus' : 'none';
-  if (has('bb7')) return 'Dim 7';
-  if (third === 'sus') return 'Sus';
-  if (has('6')) return '6th';
-  if (has('7')) return third === 'min' ? 'Min/Maj 7' : 'Maj 7';
-  if (has('b7')) return third === 'min' ? (has('b5') ? 'Min 7♭5' : 'Min 7') : 'Dom 7';
-  // fragments with no 7th/6th: sort by the third (a ♭5 makes a minor fragment half-diminished)
-  if (third === 'maj') return 'Maj 7';
-  if (third === 'min') return has('b5') ? 'Min 7♭5' : 'Min 7';
-  return 'Other';
+  const third = has('3') ? '3' : has('b3') ? 'b3' : null;
+  const seventh = has('7') ? '7' : has('bb7') ? 'bb7' : has('b7') ? 'b7' : has('6') ? '6' : null;
+  if (!seventh) return null;
+  if (!third) return (has('4') || has('2')) ? 'sus' : null;
+  return `${third}|${seventh}`;
 }
 const dictMemberShells = (def) => def.iv.length >= 4 && def.iv.some(iv => iv === 9 || iv === 10 || iv === 11);
 
 // Derive the distinct shell combos exactly as formulaCombos does (root 0, placeable on some string set).
 const combos = new Map();
-for (const [ct, def] of Object.entries(CH)) {
-  if (!dictMemberShells(def)) continue;
+for (const ct of ORDERED_TYPES) {
+  const def = CH[ct];
+  if (!def || !dictMemberShells(def)) continue;
   for (const roles of deriveShellToneSets(def)) {
     let placed = false;
     for (const ss of SHELL_STRING_SETS_3) { if (placeShellToneSet(roles, ss, def, 0)) { placed = true; break; } }
@@ -118,13 +121,18 @@ for (const [ct, def] of Object.entries(CH)) {
   }
 }
 
-const ORDER = ['Maj 7', 'Dom 7', 'Min 7', 'Min/Maj 7', 'Min 7♭5', 'Dim 7', '6th', 'Sus', 'Other'];
-const byQ = new Map();
-for (const c of combos.values()) { const q = shellQuality(c.tokens); (byQ.get(q) || byQ.set(q, []).get(q)).push(c); }
-console.log(`Total distinct shell combos: ${combos.size}\n`);
-for (const q of [...ORDER, ...[...byQ.keys()].filter(k => !ORDER.includes(k))]) {
-  const l = byQ.get(q); if (!l) continue;
+const ORDER = ['3|7', '3|b7', 'b3|b7', 'b3|7', 'b3|bb7', '3|bb7', '3|6', 'b3|6', 'sus'];
+const byPair = new Map();
+let hidden = 0;
+for (const c of combos.values()) {
+  const k = shellGuideTones(c.tokens);
+  if (!k) { hidden++; continue; }
+  (byPair.get(k) || byPair.set(k, []).get(k)).push(c);
+}
+console.log(`Total combos: ${combos.size} — shown ${combos.size - hidden} guide-tone shells, hidden ${hidden} fragments\n`);
+for (const k of [...ORDER, ...[...byPair.keys()].filter(x => !ORDER.includes(x))]) {
+  const l = byPair.get(k); if (!l) continue;
   const rooted = l.filter(c => !c.rootless).length, rl = l.filter(c => c.rootless).length;
   const sample = l.slice(0, 6).map(c => c.tokens.join('-')).join(', ');
-  console.log(`  ${q.padEnd(11)} ${String(l.length).padStart(2)}  (rooted ${rooted}, rootless ${rl})   e.g. ${sample}`);
+  console.log(`  ${k.padEnd(7)} ${String(l.length).padStart(2)}  (rooted ${rooted}, rootless ${rl})   e.g. ${sample}`);
 }

@@ -133,26 +133,20 @@ const SHAPE_FAMILIES: { label: string; keys: string[] }[] = [
   { label: 'Scale Shapes', keys: ['lydian_shape', 'phrygian_shape', 'blues_shape'] },
 ];
 
-// Shells are ALL 3-note voicings — root+3rd+7th (rooted) or 3rd+7th+color (rootless). Matching a
-// 3-note pc-set to a full chord only ever finds coincidental triads (a C6 shell IS an A-minor triad),
-// which is why the old grouping had a goofy 3-item "Triads" family beside giant Rootless/Partial
-// catch-alls. Instead we group by the quality the 3rd+7th imply, so each family holds that quality's
-// rooted AND rootless forms — the way shells are actually taught.
-const SHELL_QUALITY_ORDER = ['Maj 7', 'Dom 7', 'Min 7', 'Min/Maj 7', 'Min 7♭5', 'Dim 7', '6th', 'Sus', 'Other'];
-function shellQuality(tokens: string[]): string {
+// A true shell is defined by its GUIDE TONES — the 3rd + 7th that fix the chord quality. Group by that
+// pair, labelled by formula (3 7, 3 ♭7, ♭3 ♭7, …), so every family's "Comp with" list is consistent: a
+// "3 7" shell only fits maj7-family chords, a "3 ♭7" only dominants, "♭3 ♭7" covers minor AND m7♭5
+// (which genuinely share those guide tones). The builder also emits partial/color fragments with NO
+// complete pair (1 3 9, 1 7 9, 3 9 13) — those aren't real shells, so shellGuideTones returns null and
+// the dictionary drops them. Sus shells (4/2 in place of a 3rd) get their own family.
+const SHELL_PAIR_ORDER = ['3|7', '3|b7', 'b3|b7', 'b3|7', 'b3|bb7', '3|bb7', '3|6', 'b3|6', 'sus'];
+function shellGuideTones(tokens: string[]): { key: string; label: string } | null {
   const has = (t: string) => tokens.includes(t);
-  const third = has('3') ? 'maj' : has('b3') ? 'min' : (has('4') || has('2')) ? 'sus' : 'none';
-  if (has('bb7')) return 'Dim 7';                                  // ♭♭7 is unambiguously diminished
-  if (third === 'sus') return 'Sus';
-  if (has('6')) return '6th';                                      // a 6th stands in for the 7th
-  if (has('7')) return third === 'min' ? 'Min/Maj 7' : 'Maj 7';
-  if (has('b7')) return third === 'min' ? (has('b5') ? 'Min 7♭5' : 'Min 7') : 'Dom 7';
-  // The builder also voices 7-less fragments (root+3rd+ext, ext pairs). They have no defining
-  // seventh, so sort them by their third — a ♭5 makes a minor fragment half-diminished. Because every
-  // shell tone-set carries a 3rd or a 7th, this never falls through to 'Other'.
-  if (third === 'maj') return 'Maj 7';
-  if (third === 'min') return has('b5') ? 'Min 7♭5' : 'Min 7';
-  return 'Other';
+  const third = has('3') ? '3' : has('b3') ? 'b3' : null;
+  const seventh = has('7') ? '7' : has('bb7') ? 'bb7' : has('b7') ? 'b7' : has('6') ? '6' : null;
+  if (!seventh) return null;                                       // no upper guide tone → not a shell
+  if (!third) return (has('4') || has('2')) ? { key: 'sus', label: 'Sus' } : null;
+  return { key: `${third}|${seventh}`, label: formulaString([third, seventh]) };
 }
 
 /** The grouped, collapsible item list for a tab + instrument. */
@@ -192,11 +186,17 @@ export function dictionaryGroups(tab: DictionaryCategory, instrument: 'piano' | 
     // their chord-type category (6th/7th…), the rootless/partial slices last.
     const combos = formulaCombos(tab, instrument);
 
-    // Shells: group by implied quality (see shellQuality) instead of full-chord names. Every item is
-    // labelled by its formula with a "Comp with" chord list; rooted forms sort ahead of rootless.
+    // Shells: group by guide-tone pair (see shellGuideTones); fragments lacking a complete 3rd+7th
+    // pair return null and are HIDDEN. Each item is labelled by its formula with a "Comp with" list;
+    // rooted forms sort ahead of rootless.
     if (tab === 'shells') {
-      const byQ = new Map<string, typeof combos>();
-      combos.forEach(c => { const q = shellQuality(c.tokens); (byQ.get(q) ?? byQ.set(q, []).get(q)!).push(c); });
+      const byPair = new Map<string, { label: string; list: typeof combos }>();
+      combos.forEach(c => {
+        const gt = shellGuideTones(c.tokens);
+        if (!gt) return;
+        const e = byPair.get(gt.key);
+        if (e) e.list.push(c); else byPair.set(gt.key, { label: gt.label, list: [c] });
+      });
       const mkShell = (label: string, list: typeof combos): DictGroup => ({
         label,
         items: list.slice()
@@ -204,8 +204,8 @@ export function dictionaryGroups(tab: DictionaryCategory, instrument: 'piano' | 
           .map(c => ({ key: c.key, label: formulaString(c.tokens), foundIn: foundInLabels(c.chordTypes) })),
       });
       const groups: DictGroup[] = [];
-      SHELL_QUALITY_ORDER.forEach(q => { const l = byQ.get(q); if (l && l.length) groups.push(mkShell(q, l)); });
-      byQ.forEach((l, q) => { if (!SHELL_QUALITY_ORDER.includes(q) && l.length) groups.push(mkShell(q, l)); });
+      SHELL_PAIR_ORDER.forEach(k => { const e = byPair.get(k); if (e) groups.push(mkShell(e.label, e.list)); });
+      byPair.forEach((e, k) => { if (!SHELL_PAIR_ORDER.includes(k)) groups.push(mkShell(e.label, e.list)); });
       return groups;
     }
 
