@@ -8,7 +8,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 // Global guitar voicing-type override for the Song screen. 'auto' keeps the
 // voice-leading auto-pick; any other value constrains every chord's diagram to
 // that family (falling back to the full pool when a chord lacks it).
-export type SongVoicingType = 'auto' | 'triads' | 'drop2' | 'drop3' | 'shells';
+export type SongVoicingType = 'auto' | 'open' | 'barre' | 'triads' | 'drop2' | 'drop3' | 'shells';
 
 // Picking a voicing type (incl. triads / drop chords) defaults the string lock to "Any"
 // (null) — the user opted into a type, not a specific string set, so leave it unlocked and

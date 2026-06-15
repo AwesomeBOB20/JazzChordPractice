@@ -4,7 +4,7 @@ import { ProgressionChord } from '@shared/types/models';
 
 // Kept as a local union (not imported from the progression store) so this shared
 // guitar module has no dependency on a feature store.
-type ForcedVoicingType = 'auto' | 'triads' | 'drop2' | 'drop3' | 'shells';
+type ForcedVoicingType = 'auto' | 'open' | 'barre' | 'triads' | 'drop2' | 'drop3' | 'shells';
 
 // ── Idiomatic-jazz voicing character ──────────────────────────────────────────
 // Score a voicing by how well it spells the chord the way a jazz comper would:
@@ -114,6 +114,8 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
     // has no drop voicing. Everything downstream scores within `pool`, so the neck
     // zone and voice-leading still pick the smoothest option inside the chosen type.
     const forcedSubset =
+      forcedType === 'open'   ? openVoicings :
+      forcedType === 'barre'  ? barreVoicings :
       forcedType === 'triads' ? triadVoicings :
       forcedType === 'drop2'  ? drop2Voicings :
       forcedType === 'drop3'  ? drop3Voicings :

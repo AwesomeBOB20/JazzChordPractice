@@ -996,14 +996,14 @@ export default function ProgressionScreen() {
             {instrument === 'guitar' && (
               <TouchableOpacity
                 onPress={() => {
-                  const order = ['auto', 'triads', 'drop2', 'drop3', 'shells'] as const;
+                  const order = ['auto', 'open', 'barre', 'triads', 'drop2', 'drop3', 'shells'] as const;
                   setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
                 }}
                 style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
               >
                 <Text style={{ fontSize: 8, fontWeight: '800', color: songVoicingType === 'auto' ? t.txt3 : t.accent }}>VOICING</Text>
                 <Text style={{ fontSize: 11, fontWeight: '700', color: songVoicingType === 'auto' ? t.txt1 : t.accent }}>
-                  {({ auto: 'AUTO', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
+                  {({ auto: 'AUTO', open: 'OPEN', barre: 'BARRE', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
                 </Text>
               </TouchableOpacity>
             )}
