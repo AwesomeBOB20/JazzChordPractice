@@ -133,6 +133,28 @@ const SHAPE_FAMILIES: { label: string; keys: string[] }[] = [
   { label: 'Scale Shapes', keys: ['lydian_shape', 'phrygian_shape', 'blues_shape'] },
 ];
 
+// Shells are ALL 3-note voicings — root+3rd+7th (rooted) or 3rd+7th+color (rootless). Matching a
+// 3-note pc-set to a full chord only ever finds coincidental triads (a C6 shell IS an A-minor triad),
+// which is why the old grouping had a goofy 3-item "Triads" family beside giant Rootless/Partial
+// catch-alls. Instead we group by the quality the 3rd+7th imply, so each family holds that quality's
+// rooted AND rootless forms — the way shells are actually taught.
+const SHELL_QUALITY_ORDER = ['Maj 7', 'Dom 7', 'Min 7', 'Min/Maj 7', 'Min 7♭5', 'Dim 7', '6th', 'Sus', 'Other'];
+function shellQuality(tokens: string[]): string {
+  const has = (t: string) => tokens.includes(t);
+  const third = has('3') ? 'maj' : has('b3') ? 'min' : (has('4') || has('2')) ? 'sus' : 'none';
+  if (has('bb7')) return 'Dim 7';                                  // ♭♭7 is unambiguously diminished
+  if (third === 'sus') return 'Sus';
+  if (has('6')) return '6th';                                      // a 6th stands in for the 7th
+  if (has('7')) return third === 'min' ? 'Min/Maj 7' : 'Maj 7';
+  if (has('b7')) return third === 'min' ? (has('b5') ? 'Min 7♭5' : 'Min 7') : 'Dom 7';
+  // The builder also voices 7-less fragments (root+3rd+ext, ext pairs). They have no defining
+  // seventh, so sort them by their third — a ♭5 makes a minor fragment half-diminished. Because every
+  // shell tone-set carries a 3rd or a 7th, this never falls through to 'Other'.
+  if (third === 'maj') return 'Maj 7';
+  if (third === 'min') return has('b5') ? 'Min 7♭5' : 'Min 7';
+  return 'Other';
+}
+
 /** The grouped, collapsible item list for a tab + instrument. */
 export function dictionaryGroups(tab: DictionaryCategory, instrument: 'piano' | 'guitar'): DictGroup[] {
   const kind = tabKind(tab);
@@ -169,6 +191,24 @@ export function dictionaryGroups(tab: DictionaryCategory, instrument: 'piano' | 
     // Distinct formula combos this technique voices, grouped: named combos under
     // their chord-type category (6th/7th…), the rootless/partial slices last.
     const combos = formulaCombos(tab, instrument);
+
+    // Shells: group by implied quality (see shellQuality) instead of full-chord names. Every item is
+    // labelled by its formula with a "Comp with" chord list; rooted forms sort ahead of rootless.
+    if (tab === 'shells') {
+      const byQ = new Map<string, typeof combos>();
+      combos.forEach(c => { const q = shellQuality(c.tokens); (byQ.get(q) ?? byQ.set(q, []).get(q)!).push(c); });
+      const mkShell = (label: string, list: typeof combos): DictGroup => ({
+        label,
+        items: list.slice()
+          .sort((a, b) => (a.rootless ? 1 : 0) - (b.rootless ? 1 : 0) || a.tokens.length - b.tokens.length || a.key.localeCompare(b.key))
+          .map(c => ({ key: c.key, label: formulaString(c.tokens), foundIn: foundInLabels(c.chordTypes) })),
+      });
+      const groups: DictGroup[] = [];
+      SHELL_QUALITY_ORDER.forEach(q => { const l = byQ.get(q); if (l && l.length) groups.push(mkShell(q, l)); });
+      byQ.forEach((l, q) => { if (!SHELL_QUALITY_ORDER.includes(q) && l.length) groups.push(mkShell(q, l)); });
+      return groups;
+    }
+
     const byCat = new Map<string, typeof combos>();
     combos.forEach(c => { const a = byCat.get(c.category); if (a) a.push(c); else byCat.set(c.category, [c]); });
     // Order combos by their chord's canonical position (same as the command sheets),
