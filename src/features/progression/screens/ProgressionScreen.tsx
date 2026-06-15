@@ -291,7 +291,16 @@ export default function ProgressionScreen() {
     }
   };
 
-  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, songStringSet, voiceLeadDir]);
+  // Triads / Shells / Drop chords always lock to a concrete string set (no "Any"); resolve any legacy
+  // null or stale key (e.g. a persisted song from before this) to that type's first set. auto / open /
+  // barre have no string-set lock, so they pass through unchanged (null).
+  const effectiveStringSet = (() => {
+    const sets = STRING_SETS_BY_TYPE[songVoicingType];
+    if (!sets) return songStringSet;
+    return (songStringSet && sets.some(s => s.key === songStringSet)) ? songStringSet : sets[0].key;
+  })();
+
+  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, effectiveStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, effectiveStringSet, voiceLeadDir]);
 
   const pianoVoicings = React.useMemo(() => {
     const result: any[] = [];
@@ -996,7 +1005,7 @@ export default function ProgressionScreen() {
             {instrument === 'guitar' && (
               <TouchableOpacity
                 onPress={() => {
-                  const order = ['auto', 'open', 'barre', 'triads', 'drop2', 'drop3', 'shells'] as const;
+                  const order = ['auto', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3'] as const;
                   setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
                 }}
                 style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
@@ -1011,19 +1020,18 @@ export default function ProgressionScreen() {
             {/* Strict string-set lock — only for types with a fixed set of string sets
                 (Triads / Drop 2 / Drop 3). Cycles Any → each set, locking the whole song. */}
             {instrument === 'guitar' && STRING_SETS_BY_TYPE[songVoicingType] && (() => {
+              // Triads / Shells / Drop chords always lock to one of their concrete sets — no "Any".
               const sets = STRING_SETS_BY_TYPE[songVoicingType];
-              const active = songStringSet !== null;
-              const curLabel = active ? (sets.find(s => s.key === songStringSet)?.label ?? 'ANY') : 'ANY';
+              const keys = sets.map(s => s.key);
+              const curKey = effectiveStringSet ?? keys[0];
+              const curLabel = sets.find(s => s.key === curKey)?.label ?? curKey;
               return (
                 <TouchableOpacity
-                  onPress={() => {
-                    const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
-                    setSongStringSet(keys[(keys.indexOf(songStringSet) + 1) % keys.length]);
-                  }}
+                  onPress={() => setSongStringSet(keys[(keys.indexOf(curKey) + 1) % keys.length])}
                   style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
                 >
-                  <Text style={{ fontSize: 8, fontWeight: '800', color: active ? t.accent : t.txt3 }}>STRINGS</Text>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: active ? t.accent : t.txt1 }}>{curLabel}</Text>
+                  <Text style={{ fontSize: 8, fontWeight: '800', color: t.accent }}>STRINGS</Text>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: t.accent }}>{curLabel}</Text>
                 </TouchableOpacity>
               );
             })()}

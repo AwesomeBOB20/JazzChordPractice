@@ -1743,14 +1743,12 @@ export const STRING_SETS_BY_TYPE: Record<string, { key: string; label: string }[
   triads: TRIAD_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop2: DROP2_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop3: DROP3_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
-  // Shells lock to the BASS string rather than an exact set. Single-string locks (b0/b1/b2) plus two
-  // adjacent-PAIR locks (b01/b12) that widen the pool so voice leading has more to choose from. The
-  // digits after 'b' are the allowed bass-string indices (0=E/6th, 1=A/5th, 2=D/4th), matched in
-  // voiceLeading.ts. Order: singles first, then the two combos.
+  // Shell locks are GUIDE-TONE anchored: each pins the 3rd + 7th to one fixed string pair (the top
+  // two voices) and lets the root bounce onto a lower bass string. b01 (E & A) → guides on the D & G
+  // strings, root on the 6th/5th (643/543); b12 (A & D) → guides on the G & B strings, root on the
+  // 5th/4th (532/432). The 'b<digits>' key lists the bass strings the root may take; the guide pair
+  // it implies is mapped in voiceLeading.ts (SHELL_LOCK_GUIDE_STRINGS).
   shells: [
-    { key: 'b0', label: 'E Bass' },
-    { key: 'b1', label: 'A Bass' },
-    { key: 'b2', label: 'D Bass' },
     { key: 'b01', label: 'E & A Bass' },
     { key: 'b12', label: 'A & D Bass' },
   ],

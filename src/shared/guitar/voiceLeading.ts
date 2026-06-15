@@ -21,12 +21,20 @@ const activeRoles = (v: any): string[] => v.frets.filter((f: any) => f && f.fret
 const activeStringKey = (v: any): string =>
   v.frets.map((f: any, i: number) => (f && f.fret !== null) ? i : null).filter((i: any) => i !== null).join(',');
 
-// Shells move across strings as the voicing order changes (R-3-7 vs R-7-3 sit on different strings),
-// so they can't lock to an exact string SET like drops do. Instead they lock to the BASS string —
-// 6th / 5th / 4th — keyed by the lowest active string index ('b0' = low-E/6th, 'b1' = A/5th, 'b2' = D/4th).
-const bassStringKey = (v: any): string => {
-  const idxs = v.frets.map((f: any, i: number) => (f && f.fret !== null) ? i : -1).filter((i: number) => i >= 0);
-  return idxs.length ? 'b' + Math.min(...idxs) : '';
+// AUTO comps with Drop 2 on the two idiomatic upper string sets only — 4-3-2-1 ([2,3,4,5]) and
+// 5-4-3-2 ([1,2,3,4]) — and leans on Drop 3 for the lower register, instead of letting Drop 2 sink
+// onto the muddy 6-5-4-3 set. Keys are activeStringKey() output (sorted active string indices).
+const AUTO_DROP2_SETS = new Set(['2,3,4,5', '1,2,3,4']);
+
+// Shell string-set lock — GUIDE-TONE anchored. A lock pins the 3rd + 7th to one fixed pair of
+// strings (the top two voices) and lets the root ride whichever bass string sits below them, so
+// the line slides down the same two strings instead of hopping the neck:
+//   b01 (E & A Bass) → guides on the D & G strings (idx 2 & 3); root on the 6th or 5th → 643 / 543
+//   b12 (A & D Bass) → guides on the G & B strings (idx 3 & 4); root on the 5th or 4th → 532 / 432
+// The two strings are the highest in the grip, so the guides are always the top two notes.
+const SHELL_LOCK_GUIDE_STRINGS: Record<string, [number, number]> = {
+  b01: [2, 3],
+  b12: [3, 4],
 };
 
 // Guide-tone pitches (the 3rd and 7th) of a voicing, for shell voice leading. The 3rd may be a sus
@@ -45,6 +53,24 @@ const shellGuides = (frets: any): { g3: number | null; g7: number | null } => {
   });
   return { g3, g7 };
 };
+
+// Which STRING (0 = low E … 5 = high E) each guide tone sits on. Pitch tells us how far the
+// 3 & 7 travel; this tells us whether they travel *on the same string*. Keeping both guides on
+// their prior strings turns a chord change into a tiny same-string slide — the thing that makes
+// a descending ii–V–I shell line feel effortless under the hand.
+const shellGuideStrings = (frets: any): { g3: number | null; g7: number | null } => {
+  let g3: number | null = null, g7: number | null = null;
+  frets.forEach((f: any, i: number) => {
+    if (!f || f.fret === null) return;
+    if (SHELL_G3.has(f.role)) g3 = i;
+    else if (SHELL_G7.has(f.role)) g7 = i;
+  });
+  return { g3, g7 };
+};
+// Cost for each guide tone that hops to a NEW string vs. the previous shell. Sits just under the
+// pitch term (×12/semitone): a genuinely smoother cross-string move still wins, but among options
+// that are equally smooth in pitch this firmly prefers the one that keeps the line on its strings.
+const GUIDE_STRING_PENALTY = 10;
 
 function jazzCharacter(v: any, def: { r: string[] }): number {
   const roles = activeRoles(v);
@@ -139,20 +165,36 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       forcedType === 'drop2'  ? drop2Voicings :
       forcedType === 'drop3'  ? drop3Voicings :
       forcedType === 'shells' ? shellVoicings :
-      // Auto = drop 2 / drop 3 ONLY — no triads, no shells. Falls back to the full set below when a
-      // chord has neither (e.g. a plain triad can't be a drop voicing), so no cell renders blank.
-      forcedType === 'auto'   ? [...drop2Voicings, ...drop3Voicings] : null;
+      // Auto = Drop 2 (only on the 4-3-2-1 / 5-4-3-2 comping sets) + Drop 3 for the lower register —
+      // no triads, no shells. Falls back to the full set below when a chord has neither (e.g. a plain
+      // triad can't be a drop voicing), so no cell renders blank.
+      forcedType === 'auto'   ? [...drop2Voicings.filter((v: any) => AUTO_DROP2_SETS.has(activeStringKey(v))), ...drop3Voicings] : null;
     let pool = (forcedSubset && forcedSubset.length) ? forcedSubset : allVoicings;
 
     // Strict string-set lock: keep every chord on the chosen set of strings so the
     // whole progression sits in one place on the neck. Only relax (fall back to the
     // wider pool) when this particular chord can't be voiced on that set at all.
     if (forcedStringSet) {
-      const onSet = forcedType === 'shells'
-        // Shell keys are 'b<digits>' listing the allowed bass-string indices (b0 / b01 / b12 …), so a
-        // pair lock keeps either string — widening the pool for voice leading. bassStringKey is 'b<idx>'.
-        ? pool.filter((v: any) => forcedStringSet.slice(1).includes(bassStringKey(v).slice(1)))
-        : pool.filter((v: any) => activeStringKey(v) === forcedStringSet);
+      let onSet: typeof pool;
+      if (forcedType === 'shells') {
+        // Pin the two GUIDE TONES to the lock's string pair and require nothing voiced above them,
+        // so the 3rd & 7th are the top two notes on those exact strings and the root just bounces
+        // onto a lower bass string (643/543 for E&A, 532/432 for A&D). An unknown/legacy key
+        // (e.g. a removed single 'b0') matches the pair table as undefined → no filter, acts as ANY.
+        const pair = SHELL_LOCK_GUIDE_STRINGS[forcedStringSet];
+        onSet = pair
+          ? pool.filter((v: any) => {
+              const gs = shellGuideStrings(v.frets);
+              if (gs.g3 === null || gs.g7 === null) return false;
+              const guides = [gs.g3, gs.g7];
+              if (!guides.includes(pair[0]) || !guides.includes(pair[1])) return false;
+              const maxStr = v.frets.reduce((m: number, f: any, i: number) => (f && f.fret !== null && i > m) ? i : m, -1);
+              return maxStr <= pair[1]; // guides are the highest two strings — nothing voiced above them
+            })
+          : pool;
+      } else {
+        onSet = pool.filter((v: any) => activeStringKey(v) === forcedStringSet);
+      }
       if (onSet.length) pool = onSet;
     }
 
@@ -335,6 +377,19 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
               const direct = Math.abs(cur.g3 - prev.g3) + Math.abs(cur.g7 - prev.g7);
               const crossed = Math.abs(cur.g3 - prev.g7) + Math.abs(cur.g7 - prev.g3);
               d += Math.min(direct, crossed) * 12;
+
+              // SAME-STRING CONTINUITY: keep the two guide tones on the strings they already occupy,
+              // so a descending line slides down the same pair instead of hopping the neck. A prior
+              // string set lets EITHER guide land there — so a 7→3 role swap still counts as "stayed",
+              // matching the closer-pairing pitch logic above. Each guide that hops is taxed.
+              const cs = shellGuideStrings(v.frets), ps = shellGuideStrings(lastFrets);
+              if (cs.g3 !== null && cs.g7 !== null) {
+                const prevStrs = new Set([ps.g3, ps.g7]);
+                let jumped = 0;
+                if (!prevStrs.has(cs.g3)) jumped++;
+                if (!prevStrs.has(cs.g7)) jumped++;
+                d += jumped * GUIDE_STRING_PENALTY;
+              }
             } else if (lastMelodyPitch !== null && vMelodyPitch !== null) {
               d += Math.abs(vMelodyPitch - lastMelodyPitch) * 12; // fallback: top-voice motion
             }

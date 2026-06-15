@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getChordIntervals } from '@shared/theory/musicTheory';
+import { STRING_SETS_BY_TYPE } from '@shared/guitar';
 import { ProgressionChord, SavedSong } from '@shared/types/models'; // We will create this type file next!
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
@@ -10,10 +11,11 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 // that family (falling back to the full pool when a chord lacks it).
 export type SongVoicingType = 'auto' | 'open' | 'barre' | 'triads' | 'drop2' | 'drop3' | 'shells';
 
-// Picking a voicing type (incl. triads / drop chords) defaults the string lock to "Any"
-// (null) — the user opted into a type, not a specific string set, so leave it unlocked and
-// let voice leading pick. They can still cycle to a concrete set via the STRINGS pill.
-const defaultStringSetFor = (_t: SongVoicingType): string | null => null;
+// Triads / Shells / Drop chords ALWAYS lock to a concrete string set — never "Any" — so picking one
+// of those types lands on its first set. auto / open / barre have no string-set lock (no entry in
+// STRING_SETS_BY_TYPE), so they stay null.
+const defaultStringSetFor = (t: SongVoicingType): string | null =>
+  STRING_SETS_BY_TYPE[t]?.[0]?.key ?? null;
 
 export interface ProgressionState {
   progression: (ProgressionChord | null)[];
@@ -482,8 +484,8 @@ export const useProgressionStore = create<ProgressionState>()(
       activeSongId: null,
 
       setGuitarNeckZone: (zone) => set({ guitarNeckZone: zone }),
-      // Changing the type lands on that type's default (middle) string set — the
-      // available sets differ per type, and we always want a concrete set, not "Any".
+      // Changing the type lands on that type's first string set — the available sets
+      // differ per type, and we always want a concrete set, not "Any".
       setSongVoicingType: (t) => set({ songVoicingType: t, songStringSet: defaultStringSetFor(t) }),
       setSongStringSet: (key) => set({ songStringSet: key }),
 
