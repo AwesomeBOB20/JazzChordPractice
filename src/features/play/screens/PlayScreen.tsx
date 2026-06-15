@@ -1,4 +1,4 @@
-import React, { useRef, useState, startTransition } from 'react';
+import React, { useRef, useState, useLayoutEffect, startTransition } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Animated, Platform
 } from 'react-native';
@@ -7,6 +7,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import ChordDictionary from '@features/play/components/ChordDictionary';
@@ -32,6 +33,17 @@ const ROLE_WEIGHT: Record<string, number> = {
   'bb7': 7, 'b7': 7, '7th': 7, '7': 7, 'b9': 9, '9th': 9, '9': 9, '#9': 9,
   '11th': 11, '11': 11, '#11': 11, 'b13': 13, '13th': 13, '13': 13, '#13': 13
 };
+
+// Returns a callback whose identity is STABLE for the component's lifetime but always invokes the
+// latest closure — so passing it to a React.memo child never breaks the memo, yet the handler still
+// sees current props/state (no stale closures). This is the standard "useEvent" pattern; we use it to
+// keep the expensive memoized FretboardView/PianoView/ChordCard from re-rendering on every parent
+// render just because their handler props were re-created.
+function useStableCallback<T extends (...args: any[]) => any>(fn: T): T {
+  const ref = useRef(fn);
+  useLayoutEffect(() => { ref.current = fn; });
+  return useRef(((...args: any[]) => ref.current(...args)) as T).current;
+}
 
 function getComplexity(roles: string[]) {
   const valid = roles.filter(Boolean);
@@ -194,7 +206,12 @@ function VoicingExplorer({
 }: VoicingExplorerProps) {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
-  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, sortMode, scaleOverlay } = useSettingsStore();
+  // Narrow selector (not a whole-store subscription): this heavy screen re-renders only when one
+  // of THESE fields changes, so unrelated settings (volumes, colorMode, dictionary prefs, …) no
+  // longer trigger a full Explore re-render + diagram cascade.
+  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, sortMode, scaleOverlay } = useSettingsStore(
+    useShallow((s) => ({ bpm: s.bpm, arp: s.arp, setArp: s.setArp, setArpForced: s.setArpForced, playMode: s.playMode, setPlayMode: s.setPlayMode, octave: s.octave, theme: s.theme, labelMode: s.labelMode, sortMode: s.sortMode, scaleOverlay: s.scaleOverlay }))
+  );
   const { inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
   const playAnim = useRef(new Animated.Value(1)).current;
@@ -1257,44 +1274,40 @@ function VoicingExplorer({
     <VoicingTabBar voicingTab={voicingTab} setVoicingTab={setVoicingTab} tabCounts={tabCounts} t={t} />
   ), [voicingTab, tabCounts, t]);
 
+  // Stable handler identities (see useStableCallback) so the memoized ChordCard / PianoView /
+  // FretboardView keep their memo on every parent render — their data props are already memoized,
+  // so once the handlers stop changing identity, an unrelated re-render no longer touches the diagrams.
+  const sCardPress       = useStableCallback(handlePlay);
+  const sSwipeDown       = useStableCallback(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); userInteractedRef.current = true; shiftRoot('down'); });
+  const sSwipeUp         = useStableCallback(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); userInteractedRef.current = true; shiftRoot('up'); });
+  const sTypeNext        = useStableCallback(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); userInteractedRef.current = true; cycleType('next'); });
+  const sTypePrev        = useStableCallback(() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); userInteractedRef.current = true; cycleType('prev'); });
+  const sCardNotePress   = useStableCallback(handleCardNotePress);
+  const sGuitarNotePress = useStableCallback(handleGuitarNotePress);
+  const sPianoNotePress  = useStableCallback(handlePianoNotePress);
+  const sFretNavigate    = useStableCallback(handleFretboardNavigate);
+  const sFretPlayVoicing = useStableCallback(handleFretboardPlayVoicing);
+  const sArpSubsetChange = useStableCallback(handleArpSubsetChange);
+  const sPrevVoicing     = useStableCallback(() => cycleVoicing('prev'));
+  const sNextVoicing     = useStableCallback(() => cycleVoicing('next'));
+  const sGroupPrev       = useStableCallback(() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const prevIdx = (safeIdx - 1 + pianoGroups.length) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[prevIdx].startIdx); handleManualNavigate(); });
+  const sGroupNext       = useStableCallback(() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const nextIdx = (safeIdx + 1) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[nextIdx].startIdx); handleManualNavigate(); });
+  const sTargetApplied   = useStableCallback((...args: any[]) => (onTargetVoicingApplied as any)?.(...args));
+
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
 
         <ChordCard
           rootSemi={rootSemi} chordType={chordType} namingMode={namingMode} subLabelRoot={subRoot} subLabelType={subType} overrideType={formattedMainType}
-          onPress={handlePlay}
-          onSwipeLeft={() => { 
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-            userInteractedRef.current = true; 
-            shiftRoot('down'); 
-          }}
-          onSwipeRight={() => { 
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-            userInteractedRef.current = true; 
-            shiftRoot('up'); 
-          }}
-          onLeftChevronPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            userInteractedRef.current = true;
-            shiftRoot('down');
-          }}
-          onRightChevronPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            userInteractedRef.current = true;
-            shiftRoot('up');
-          }}
-          onTopChevronPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            userInteractedRef.current = true;
-            cycleType('next');
-          }}
-          onBottomChevronPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            userInteractedRef.current = true;
-            cycleType('prev');
-          }}
-          onNotePress={handleCardNotePress}
+          onPress={sCardPress}
+          onSwipeLeft={sSwipeDown}
+          onSwipeRight={sSwipeUp}
+          onLeftChevronPress={sSwipeDown}
+          onRightChevronPress={sSwipeUp}
+          onTopChevronPress={sTypeNext}
+          onBottomChevronPress={sTypePrev}
+          onNotePress={sCardNotePress}
           octave={octave} theme={t} activeIvs={displayIvs} activeRoles={displayRoles} activeFormula={displayFormula}
         />
 
@@ -1307,31 +1320,31 @@ function VoicingExplorer({
               voicingSubName={voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.subLabel : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.subLabel : pianoVoicings[pianoVoicingIdx]?.name}
               voicingIdx={voicingTab === 'arps' ? safeArpSubsetIdx : voicingTab === 'intervals' ? safeIntervalSubsetIdx : pianoVoicingIdx}
               totalVoicings={voicingTab === 'arps' ? arpSubsets.length : voicingTab === 'intervals' ? intervalSubsets.length : pianoVoicings.length}
-              onPrevVoicing={() => cycleVoicing('prev')}
-              onNextVoicing={() => cycleVoicing('next')}
+              onPrevVoicing={sPrevVoicing}
+              onNextVoicing={sNextVoicing}
               groups={pianoGroups}
-              onGroupPrev={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const prevIdx = (safeIdx - 1 + pianoGroups.length) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[prevIdx].startIdx); handleManualNavigate(); }}
-              onGroupNext={() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const nextIdx = (safeIdx + 1) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[nextIdx].startIdx); handleManualNavigate(); }}
+              onGroupPrev={sGroupPrev}
+              onGroupNext={sGroupNext}
               theme={t}
               noteNames={pianoNoteNames}
               roles={pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r} formulas={pianoVoicings[pianoVoicingIdx]?.formulas || currentChordDef.f} formulaByPC={formulaByPC}
-              onNotePress={handlePianoNotePress}
+              onNotePress={sPianoNotePress}
               octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
             />
           ) : (
             <FretboardView
               ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={0}
-              onNotePress={handleGuitarNotePress} onNavigate={handleFretboardNavigate}
-              onPlayVoicing={handleFretboardPlayVoicing}
+              onNotePress={sGuitarNotePress} onNavigate={sFretNavigate}
+              onPlayVoicing={sFretPlayVoicing}
               rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
               scaleVoicings={scaleVoicings} scaleMode={voicingTab === 'scales'} arpMode={voicingTab === 'arps' || voicingTab === 'intervals'} arpVoicings={voicingTab === 'arps' ? arpVoicings : voicingTab === 'intervals' ? intervalVoicings : EMPTY_ARR} arpSubsets={voicingTab === 'intervals' ? intervalSubsets : arpSubsets} arpSubsetIdx={voicingTab === 'intervals' ? safeIntervalSubsetIdx : safeArpSubsetIdx}
               overlayNotes={guitarOverlayNotes} // Explicitly pass the full-neck array down
-              onArpSubsetChange={handleArpSubsetChange}
+              onArpSubsetChange={sArpSubsetChange}
               shapesMode={voicingTab === 'shapes'} shapeVoicings={shapeVoicings} formulaByPC={formulaByPC}
               chordAxisEnabled={voicingTab === 'triads' || voicingTab === 'shells' || voicingTab === 'drop2' || voicingTab === 'drop3' || voicingTab === 'drop2and4'}
               namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
               selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
-              targetVoicing={targetVoicing} onTargetVoicingApplied={onTargetVoicingApplied}
+              targetVoicing={targetVoicing} onTargetVoicingApplied={sTargetApplied}
             />
           )}
         </View>

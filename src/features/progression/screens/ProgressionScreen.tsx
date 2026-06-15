@@ -7,6 +7,7 @@ import * as Haptics from 'expo-haptics';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 
 import { useSettingsStore } from '@features/settings/store/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { THEMES } from '@shared/ui/themes';
@@ -259,7 +260,11 @@ const ProgressionCell = React.memo(function ProgressionCell({
 
 export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
-  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro } = useSettingsStore();
+  // Narrow selector: re-render this complex screen only when one of these fields changes, not on
+  // every settings mutation (mixer volumes, colorMode, labelMode, etc. don't touch this screen).
+  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro } = useSettingsStore(
+    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro }))
+  );
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
   const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory, activeSongId } = useProgressionStore();
   
