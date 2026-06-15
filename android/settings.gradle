@@ -21,7 +21,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   }
 }
 
-rootProject.name = 'Kord'
+rootProject.name = 'Kordal'
 
 dependencyResolutionManagement {
   versionCatalogs {

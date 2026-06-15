@@ -1,8 +1,8 @@
-# Privacy Policy — Kord
+# Privacy Policy — Kordal
 
 **Effective date:** _[fill in before publishing, e.g. 2026-06-04]_
 
-This Privacy Policy explains how the **Kord** mobile app ("the App", "we", "us") handles your information. By using the App you agree to this policy.
+This Privacy Policy explains how the **Kordal** mobile app ("the App", "we", "us") handles your information. By using the App you agree to this policy.
 
 > **TL;DR:** The App works entirely on your device. We don't have accounts, we don't ask for your name or email, and we don't send your data to a server. The microphone is used only for the on-device guitar tuner, and audio is never recorded or transmitted.
 
