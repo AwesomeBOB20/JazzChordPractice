@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform, InteractionManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { NOTE_SHARP, NOTE_FLAT, CH, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
@@ -124,12 +124,15 @@ const DictSectionRow = React.memo(function DictSectionRow({
   const innerW = Math.max(40, L.cellW - CELL_PAD * 2);
   const MAX_SCALE = L.cols === 1 ? 4.2 : L.cols === 2 ? 2.8 : 2.0;
   const MAX_BOX_H = L.cols === 1 ? 240 : L.cols === 2 ? 168 : 116;
+  // Round to a whole pixel so every cell in the row is exactly the same height — a fractional box
+  // height lands the row's 1px bottom border on a sub-pixel boundary, making some row dividers render
+  // thicker/sharper than others (the "rows have different border thicknesses" look).
   const boxH = instrument === 'piano'
     ? L.diagramH
-    : Math.min(MAX_BOX_H, Math.max(60, ...items.map(it => {
+    : Math.round(Math.min(MAX_BOX_H, Math.max(60, ...items.map(it => {
         const fp = miniChordFootprint(it.voicing, it.arpShape);
         return fp.h * Math.min(MAX_SCALE, innerW / fp.w);
-      })));
+      }))));
   // The diagrams streamed in so far, plus a spacer reserving the height of the rows still to mount so
   // the section (and the list below) doesn't jump while it fills. Cell height ≈ box + vertical padding.
   const shownItems = items.slice(0, shown);
@@ -338,6 +341,12 @@ export default function ChordDictionary({ t }: Props) {
   // Accordion: items collapsed by default so only opened ones build their diagrams
   // (keeps scrolling smooth + the list short). Category/instrument change collapses all.
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  // Closing a section visually collapses it instantly (clip to height 0), but the heavy unmount of its
+  // SVG diagrams is deferred to idle (pendingUnmount) so the teardown never blocks the tap. Re-opening
+  // before the unmount fires is instant (the diagrams are still mounted).
+  const [pendingUnmount, setPendingUnmount] = React.useState<Set<string>>(new Set());
+  const expandedRef = React.useRef(expanded);
+  expandedRef.current = expanded;
   // Two-step "Comp/Solo with" flow: tapping a chip ARMS a chord (no nav yet); the next diagram tap
   // opens THAT chord on the Chord screen at the tapped grip/box. `armed` holds the item + chord type
   // it belongs to, so only that item's diagrams commit (others still play a preview). Cleared on any
@@ -366,7 +375,7 @@ export default function ChordDictionary({ t }: Props) {
   const setItemHeight = React.useCallback((key: string, h: number) => setHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
   const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
   const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setHeights({}); setArmed(null); setArmedDiagram(null); }, [effectiveCategory, instrument]);
+  React.useEffect(() => { setExpanded(new Set()); setPendingUnmount(new Set()); setFamilyIdx(0); setHeights({}); setArmed(null); setArmedDiagram(null); }, [effectiveCategory, instrument]);
   // Changing the root (or family) re-renders different grips/chords → any armed selection no longer
   // maps cleanly, so disarm.
   React.useEffect(() => { setArmed(null); setArmedDiagram(null); }, [rootSemi, familyIdx]);
@@ -398,9 +407,20 @@ export default function ChordDictionary({ t }: Props) {
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
   const toggleSection = React.useCallback((key: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setArmed(prev => (prev?.itemKey === key ? null : prev)); // collapsing the armed item disarms it
-    setArmedDiagram(prev => (prev?.itemKey === key ? null : prev));
-    setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+    if (expandedRef.current.has(key)) {
+      // Collapse: hide now (clip to 0), keep the diagrams mounted, and tear them down after the tap
+      // interaction settles so the unmount never blocks the close.
+      setArmed(prev => (prev?.itemKey === key ? null : prev)); // collapsing the armed item disarms it
+      setArmedDiagram(prev => (prev?.itemKey === key ? null : prev));
+      setExpanded(prev => { const n = new Set(prev); n.delete(key); return n; });
+      setPendingUnmount(prev => { const n = new Set(prev); n.add(key); return n; });
+      InteractionManager.runAfterInteractions(() =>
+        setPendingUnmount(prev => { if (!prev.has(key)) return prev; const n = new Set(prev); n.delete(key); return n; }));
+    } else {
+      // Open: mount it, and cancel any pending unmount (re-opening before it fired → instant, no remount).
+      setExpanded(prev => { const n = new Set(prev); n.add(key); return n; });
+      setPendingUnmount(prev => { if (!prev.has(key)) return prev; const n = new Set(prev); n.delete(key); return n; });
+    }
   }, []);
   // FORWARD STEP 1 — tap a "Comp with"/"Solo with" chip: arm that chord for this item (no nav yet).
   // Tapping the same chip again disarms; tapping a different one re-arms. Next diagram tap commits.
@@ -574,17 +594,20 @@ export default function ChordDictionary({ t }: Props) {
           ) : (
             visibleItems.map(item => {
               const open = expanded.has(item.key);
+              // Keep a just-closed section's diagrams mounted (clipped to 0) until the deferred unmount.
+              const keepMounted = open || pendingUnmount.has(item.key);
               const header = renderHeader(item, open, false);
               const armedHere = armed?.itemKey === item.key ? armed : null;
               const diagArmedHere = armedDiagram?.itemKey === item.key ? armedDiagram : null;
               const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
               // Wrap header + content in one View and measure ITS height. This fires onLayout whenever
               // the section opens/closes (its own size changes) — the only thing the cumulative-sum
-              // position model needs. Closed sections measure to the header height alone.
-              const content = !open ? null : (
+              // position model needs. Closed sections measure to the header height alone. A closing
+              // section is clipped to height 0 (collapsed look) while its diagrams await teardown.
+              const content = !keepMounted ? null : (
                 <View
                   key={`c-${item.key}`}
-                  style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
+                  style={{ height: open ? undefined : 0, overflow: 'hidden', borderBottomWidth: open ? 1 : 0, borderBottomColor: t.border }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
                       Tap a chip to ARM that chord; the label switches to a prompt and the next diagram
