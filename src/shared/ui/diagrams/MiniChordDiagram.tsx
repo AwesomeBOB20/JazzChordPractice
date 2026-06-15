@@ -115,6 +115,11 @@ function MiniChordDiagram({ voicing, arpShape, theme, isMasked, scale, fitWidth,
   // old font-metric fudge (the SVG view shifts up by dotR*s in compact/tighten mode, so subtract it).
   const fretNumBoxTop = (tighten ? topY : topY + dotR) * s;
 
+  // Fret-number horizontal nudge: pull it LEFT in the compact progression grid, but push it RIGHT
+  // (toward the grid) in the dictionary's larger fit-mode diagrams. Scales with `s` so the offset
+  // stays proportional at any diagram size. Positive = right, negative = left.
+  const fretNumShiftX = (fitMode ? 1 : -3) * s;
+
   // In-circle labels are rendered as flexbox-centred RN <Text> overlaid on the SVG rather
   // than as SVG <Text>: react-native-svg's baseline centring (alignmentBaseline) is not
   // honoured on Android and shifts with the font's own ascent/descent metrics, so the glyph
@@ -164,7 +169,7 @@ function MiniChordDiagram({ voicing, arpShape, theme, isMasked, scale, fitWidth,
         // space it labels. includeFontPadding:false + textAlignVertical:center strip Android's
         // asymmetric line padding (which otherwise floats the glyph off the space's centre).
         <View style={{ height: fretSpc * s, marginTop: fretNumBoxTop, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: theme.txt2, fontSize: 9 * s, fontWeight: '800', includeFontPadding: false, textAlignVertical: 'center', textAlign: 'center', transform: [{ translateX: -1 }] }}>
+          <Text style={{ color: theme.txt2, fontSize: 9 * s, fontWeight: '800', includeFontPadding: false, textAlignVertical: 'center', textAlign: 'center', transform: [{ translateX: fretNumShiftX }] }}>
             {startF + 1}
           </Text>
         </View>
