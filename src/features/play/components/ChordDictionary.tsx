@@ -759,7 +759,9 @@ export default function ChordDictionary({ t }: Props) {
 }
 
 const styles = StyleSheet.create({
-  chipBar: { paddingVertical: 8, borderBottomWidth: DIVIDER },
+  // Bottom border uses a full 1 DP (not the thin DIVIDER) to match the Explore toggle's borderBottom
+  // directly above the voicing tabs — so the bar reads as framed by two identical lines.
+  chipBar: { paddingVertical: 8, borderBottomWidth: 1 },
   catTab: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 10, paddingHorizontal: 14 },
   // Family sub-tabs: quiet underline text-tabs, deliberately shorter + flatter than the catTab
   // pills above so the two bars read as a hierarchy (primary pills → secondary underline) not twins.
