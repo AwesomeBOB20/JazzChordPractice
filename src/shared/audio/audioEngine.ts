@@ -467,8 +467,12 @@ export const getAudioEngineHtml = (assets: any) => `
               // sound quiet) and the ear is very sensitive up high (so high strings sound
               // loud). Boost the lows and cut the highs hard to even them out. Centre is
               // ~330 Hz: below that gets louder, above gets quieter.
-              const tilt = 330 / freq; // 2.0 at the low E, 0.5 at the high E
-              level *= Math.max(0.5, Math.min(1.7, tilt));
+              let tilt = 330 / freq; // ~2.0 at the low E, ~0.5 at the high E
+              // Higher strings sit above the ~330 Hz centre (tilt < 1). Steepen ONLY that cut side so
+              // the top notes ease off a little more, while the low-string boost (tilt >= 1) is
+              // untouched. The lower floor lets the high strings actually drop below the old 0.5 clamp.
+              if (tilt < 1) tilt = Math.pow(tilt, 1.3);
+              level *= Math.max(0.35, Math.min(1.7, tilt));
             }
             if (tunerMode) {
               // Round, full tone built from EVEN/octave harmonics only — fundamental +
