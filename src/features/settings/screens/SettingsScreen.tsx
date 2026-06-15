@@ -142,8 +142,9 @@ const HELP_SECTIONS: HelpSection[] = [
         'The Voice Lead pill changes how they move: Zone (stay put, smooth), Bounce (drift up and down), or Up / Down (walk the neck). Turn it off for plain root-position chords.',
       ] },
       { h: 'Lock the Voicing (guitar)', b: [
-        'VOICING forces a family — AUTO, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style.',
-        'With a family set, STRINGS pins the shapes to one string set (or leave it ANY).',
+        'VOICING forces a family — AUTO, Open, Barre, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style. AUTO picks the smoothest Drop 2 / Drop 3 voicing for you.',
+        'Open and Barre use standard guitar chord shapes. If a chord has no shape in the chosen family (e.g. an extended chord with no barre form), it falls back to its best voicing so a cell is never blank.',
+        'With a family set, STRINGS pins the shapes to one set (or leave it ANY). For Shells, which shift across strings, it pins the bass string instead — 6th, 5th, or 4th.',
       ] },
       { h: 'Chart Marks (like real sheet music)', b: [
         'Repeat signs (𝄆 𝄇) to loop a section.',
