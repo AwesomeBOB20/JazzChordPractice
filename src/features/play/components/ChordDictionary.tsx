@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Dimensions, Animated, Easing, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { NOTE_SHARP, NOTE_FLAT } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, CH, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
 import { Theme, getNoteColor } from '@shared/ui/themes';
 import { TYPE } from '@shared/ui/typography';
 import { MiniChordDiagram, MiniPianoDiagram, miniChordFootprint, CountChip } from '@shared/ui';
@@ -23,6 +23,18 @@ import { dictionaryGroups, tabKind, ALL_CATEGORIES, DictGroup } from '@features/
 const FLAT_ROOTS = [0, 1, 3, 5, 8, 10];
 const rootName = (r: number) => (FLAT_ROOTS.includes(r) ? NOTE_FLAT : NOTE_SHARP)[r];
 const ROOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+// An interval diagram has no chord of its own, so long-pressing it jumps to a RANDOM chord that
+// contains that interval (the root + the interval are both chord tones → the chord's Intervals tab
+// will show it). Iterates the full chord table, not the user's active set.
+const ALL_TYPES: string[] = CHORD_CATEGORIES.flatMap((c: any) => c.keys);
+function randomChordWithInterval(semitone: number): string | null {
+  const semi = (((semitone % 12) + 12) % 12);
+  const pool = ALL_TYPES.filter((ct) => {
+    const def: any = (CH as any)[ct];
+    return def && def.iv.some((iv: number) => ((((iv % 12) + 12) % 12)) === semi);
+  });
+  return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+}
 
 const screenW = Dimensions.get('window').width;
 const H_PAD = 12;
@@ -58,12 +70,21 @@ function layoutFor(cols: number) {
 // getDictionaryVoicings runs INSIDE this memoized row, keyed on (item, root,
 // instrument, octave), so collapsed sections never build their diagrams.
 const DictSectionRow = React.memo(function DictSectionRow({
-  itemKey, isChordQuality, category, instrument, rootSemi, allRoots, octave, selectedScaleId, labelMode, t, onPlay, L,
+  itemKey, isChordQuality, category, instrument, rootSemi, allRoots, octave, selectedScaleId, labelMode, t, onPlay, armedType, onCommit, onHold, armedDiagramKey, L,
 }: {
   itemKey: string; isChordQuality: boolean; category: DictionaryCategory; instrument: 'piano' | 'guitar';
   rootSemi: number; allRoots: boolean; octave: number; selectedScaleId: string | null;
   labelMode: 'degrees' | 'notes' | 'none'; t: Theme;
-  onPlay: (it: DictMiniItem) => void; L: ReturnType<typeof layoutFor>;
+  onPlay: (it: DictMiniItem) => void;
+  // When a "Comp/Solo with" chip is armed for THIS item, armedType is its chord type and a diagram
+  // tap commits (opens on the Chord screen) instead of playing a preview.
+  armedType: string | null;
+  onCommit: (it: DictMiniItem, type: string, itemKey: string) => void;
+  // Long-press a diagram → the parent decides (open directly for named chords, prompt a chip for
+  // combos/scales/shapes, or pop the chord picker for intervals). armedDiagramKey rings the held one.
+  onHold: (it: DictMiniItem, itemKey: string) => void;
+  armedDiagramKey: string | null;
+  L: ReturnType<typeof layoutFor>;
 }) {
   // Colour the formula corner's degrees with the SAME role colours as the diagram dots, so it
   // respects the user's colour mode (roles / theme / selective) — read from the store like the dots do.
@@ -130,8 +151,10 @@ const DictSectionRow = React.memo(function DictSectionRow({
           <TouchableOpacity
             key={it.key}
             activeOpacity={0.7}
-            onPress={() => onPlay(it)}
-            style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, paddingVertical: instrument === 'guitar' ? L.cornerFs + 9 : 8 }]}
+            onPress={() => (armedType ? onCommit(it, armedType, itemKey) : onPlay(it))}
+            onLongPress={() => onHold(it, itemKey)}
+            delayLongPress={300}
+            style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, paddingVertical: instrument === 'guitar' ? L.cornerFs + 9 : 8 }, armedDiagramKey === it.key ? { backgroundColor: t.accent + '26' } : armedType ? { backgroundColor: t.accent + '14' } : null]}
           >
             <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
               {instrument === 'guitar'
@@ -227,7 +250,7 @@ export default function ChordDictionary({ t }: Props) {
   const selectedScaleId = useChordStore((s: any) => s.selectedScaleId);
   const setChord = useChordStore((s: any) => s.setChord);
   const setPendingVoicingTab = useChordStore((s: any) => s.setPendingVoicingTab);
-  const setPendingVoicingKey = useChordStore((s: any) => s.setPendingVoicingKey);
+  const setPendingVoicing = useChordStore((s: any) => s.setPendingVoicing);
   const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
@@ -294,6 +317,15 @@ export default function ChordDictionary({ t }: Props) {
   // Accordion: items collapsed by default so only opened ones build their diagrams
   // (keeps scrolling smooth + the list short). Category/instrument change collapses all.
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  // Two-step "Comp/Solo with" flow: tapping a chip ARMS a chord (no nav yet); the next diagram tap
+  // opens THAT chord on the Chord screen at the tapped grip/box. `armed` holds the item + chord type
+  // it belongs to, so only that item's diagrams commit (others still play a preview). Cleared on any
+  // context change (root/category/family/instrument/collapse) so a stale arm can't misfire.
+  const [armed, setArmed] = React.useState<{ itemKey: string; type: string; label: string } | null>(null);
+  // Reverse flow: long-press a diagram in a chip item (combo/scale/shape) to ARM that diagram, then
+  // tap a chip to open it. `armedDiagram` is the held diagram. (Chip-less items jump on long-press —
+  // named chords to their own chord, intervals to a random chord that has them — so no state needed.)
+  const [armedDiagram, setArmedDiagram] = React.useState<{ itemKey: string; key: string; it: DictMiniItem } | null>(null);
   // Sub-category (family) tab within the voicing tab — reset to the first when the tab changes.
   const [familyIdx, setFamilyIdx] = React.useState(0);
   // Floating section header — our own replacement for native stickyHeaderIndices (which renders
@@ -313,7 +345,10 @@ export default function ChordDictionary({ t }: Props) {
   const setItemHeight = React.useCallback((key: string, h: number) => setHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
   const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
   const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
-  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setHeights({}); }, [effectiveCategory, instrument]);
+  React.useEffect(() => { setExpanded(new Set()); setFamilyIdx(0); setHeights({}); setArmed(null); setArmedDiagram(null); }, [effectiveCategory, instrument]);
+  // Changing the root (or family) re-renders different grips/chords → any armed selection no longer
+  // maps cleanly, so disarm.
+  React.useEffect(() => { setArmed(null); setArmedDiagram(null); }, [rootSemi, familyIdx]);
 
   // For the ACTIVE category: option count per item (header chip + to hide empty items) and the
   // number of items that actually HAVE voicings per family (the family-tab chip, and to hide an
@@ -342,18 +377,71 @@ export default function ChordDictionary({ t }: Props) {
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
   const toggleSection = React.useCallback((key: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setArmed(prev => (prev?.itemKey === key ? null : prev)); // collapsing the armed item disarms it
+    setArmedDiagram(prev => (prev?.itemKey === key ? null : prev));
     setExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }, []);
-  // Tap a "Comp with"/"Solo with" chip → load that chord at the dictionary's current root on the
-  // Chord screen (switch Explore out of Dictionary mode). Closes the explore loop.
-  const openChord = React.useCallback((type: string, voicingKey?: string) => {
+  // FORWARD STEP 1 — tap a "Comp with"/"Solo with" chip: arm that chord for this item (no nav yet).
+  // Tapping the same chip again disarms; tapping a different one re-arms. Next diagram tap commits.
+  const armChip = React.useCallback((itemKey: string, type: string, label: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setArmedDiagram(null);
+    setArmed(prev => (prev?.itemKey === itemKey && prev?.type === type ? null : { itemKey, type, label }));
+  }, []);
+  // COMMIT — open `type` at the current root on the Chord screen, landing on this tab AND the exact
+  // grip/box/subset the diagram represents. Used by BOTH directions (tap-chip-then-diagram,
+  // long-press-then-chip) and the direct holds (block/open/barre/arps) + the interval picker.
+  const commitToChord = React.useCallback((it: DictMiniItem, type: string, itemKey: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     stopAudio?.();
+    const kind = tabKind(effectiveCategory);
+    const pending: any = {};
+    if (kind === 'formulaCombo') {
+      pending.fingerprint = it.voicing?.fingerprint;   // guitar: exact grip
+      pending.pcKey = itemKey;                          // piano: the combo pitch-class set key
+    } else if (kind === 'scale') {
+      pending.scaleId = itemKey;                        // the scale to select
+      pending.boxName = it.arpShape?.boxName;           // guitar: the box (piano has none)
+    } else if (kind === 'shape') {
+      pending.scaleName = it.arpShape?.scaleName;       // matched by name across the two shape models
+      pending.boxName = it.arpShape?.boxName;
+    } else if (kind === 'interval') {
+      pending.intervalSemitone = parseInt(itemKey.replace('iv-', ''), 10); // pick the matching subset
+      pending.boxName = it.arpShape?.boxName;           // guitar (best-effort; interval builders differ)
+    } else if (effectiveCategory === 'arps') {
+      const si = parseInt(String(it.key).split('-')[1] ?? '0', 10); // "arps-<si>-<bi>" / "arps-<i>"
+      if (!Number.isNaN(si)) pending.arpSubsetIdx = si;
+      pending.boxName = it.arpShape?.boxName;           // guitar box (piano arp = the subset itself)
+    } else if (effectiveCategory === 'block') {
+      pending.notes = it.notes;                         // piano: the exact inversion
+    } else { // open / barre
+      pending.fingerprint = it.voicing?.fingerprint;
+    }
     setChord(rootSemi, type);
-    setPendingVoicingTab(effectiveCategory);    // land on the same voicing tab we were browsing
-    setPendingVoicingKey(voicingKey ?? null);   // …and on the same voicing (combo pc-key) when known
+    setPendingVoicingTab(effectiveCategory);
+    setPendingVoicing(pending);
+    setArmed(null);
+    setArmedDiagram(null);
     setMode('chord');
-  }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicingKey, setMode, rootSemi, effectiveCategory]);
+  }, [stopAudio, setChord, setPendingVoicingTab, setPendingVoicing, setMode, rootSemi, effectiveCategory]);
+  // LONG-PRESS a diagram. Items WITH chips (combo/scale/shape) arm the diagram + prompt a chip. Items
+  // WITHOUT chips jump straight to the Chord screen: named chords (block/open/barre/arps) to their own
+  // chord; an interval (which has no chord) to a RANDOM chord that contains it.
+  const onHold = React.useCallback((it: DictMiniItem, itemKey: string) => {
+    const kind = tabKind(effectiveCategory);
+    const hasChips = kind === 'formulaCombo' || kind === 'scale' || kind === 'shape';
+    if (hasChips) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      stopAudio?.();
+      setArmed(null);
+      setArmedDiagram({ itemKey, key: it.key, it });
+    } else if (kind === 'interval') {
+      const type = randomChordWithInterval(parseInt(itemKey.replace('iv-', ''), 10));
+      if (type) commitToChord(it, type, itemKey); // open a random chord that has this interval
+    } else {
+      commitToChord(it, itemKey, itemKey); // block / open / barre / arps — the item IS the chord
+    }
+  }, [effectiveCategory, stopAudio, commitToChord]);
 
   // One section header — rendered both in the scrolling list and as the floating copy pinned at the
   // top. The in-list copy measures only the header HEIGHT (drives the slide distance); the section's
@@ -466,6 +554,8 @@ export default function ChordDictionary({ t }: Props) {
             visibleItems.map(item => {
               const open = expanded.has(item.key);
               const header = renderHeader(item, open, false);
+              const armedHere = armed?.itemKey === item.key ? armed : null;
+              const diagArmedHere = armedDiagram?.itemKey === item.key ? armedDiagram : null;
               const foundInLabel = (tabKind(effectiveCategory) === 'scale' || effectiveCategory === 'shapes') ? 'Solo with' : 'Comp with';
               // Wrap header + content in one View and measure ITS height. This fires onLayout whenever
               // the section opens/closes (its own size changes) — the only thing the cumulative-sum
@@ -476,16 +566,29 @@ export default function ChordDictionary({ t }: Props) {
                   style={{ borderBottomWidth: 1, borderBottomColor: t.border }}
                 >
                   {/* "Comp with" (voicings) / "Solo with" (scales/shapes): the chords this item works for.
-                      Each chip is tappable → loads that chord at the current root on the Chord screen. */}
+                      Tap a chip to ARM that chord; the label switches to a prompt and the next diagram
+                      tap opens it on the Chord screen at that exact grip/box. */}
                   {!!item.foundIn?.length && (
                     <View style={styles.foundInRow}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: t.txt3 }}>{foundInLabel}</Text>
+                      <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: '700', color: (armedHere || diagArmedHere) ? t.accent : t.txt3 }}>
+                        {diagArmedHere ? 'Pick a chord for this voicing' : armedHere ? `Tap a diagram for ${armedHere.label}` : foundInLabel}
+                      </Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 12 }}>
-                        {item.foundIn.map((c: any) => (
-                          <TouchableOpacity key={c.type} activeOpacity={0.7} onPress={() => openChord(c.type, tabKind(effectiveCategory) === 'formulaCombo' ? item.key : undefined)} style={{ backgroundColor: t.accent + '22', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: t.accent }}>{c.label}</Text>
-                          </TouchableOpacity>
-                        ))}
+                        {item.foundIn.map((c: any) => {
+                          const isArmed = armedHere?.type === c.type;
+                          // While a diagram is held, every chip is a commit button (faint-strong fill to invite it).
+                          const bg = isArmed ? t.accent : diagArmedHere ? t.accent + '33' : t.accent + '22';
+                          return (
+                            <TouchableOpacity
+                              key={c.type}
+                              activeOpacity={0.7}
+                              onPress={() => (diagArmedHere ? commitToChord(diagArmedHere.it, c.type, item.key) : armChip(item.key, c.type, c.label))}
+                              style={{ backgroundColor: bg, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 }}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: isArmed ? '800' : '600', color: isArmed ? '#fff' : t.accent }}>{c.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
                       </ScrollView>
                     </View>
                   )}
@@ -501,6 +604,10 @@ export default function ChordDictionary({ t }: Props) {
                     labelMode={labelMode}
                     t={t}
                     onPlay={handlePlay}
+                    armedType={armedHere?.type ?? null}
+                    onCommit={commitToChord}
+                    onHold={onHold}
+                    armedDiagramKey={diagArmedHere?.key ?? null}
                     L={L}
                   />
                 </View>

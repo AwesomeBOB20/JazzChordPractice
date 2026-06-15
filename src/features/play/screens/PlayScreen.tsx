@@ -7,7 +7,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
-import { useChordStore } from '@features/play/store/chordStore';
+import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
@@ -179,9 +179,9 @@ interface VoicingExplorerProps {
   sheetVisible: boolean;
   setSheetVisible: (v: boolean) => void;
   playRef?: React.MutableRefObject<() => void>;
-  // A Dictionary chip navigated here and wants us to land on this voicing (root-relative pc-set key);
-  // we select it once, then call onTargetVoicingApplied so the parent clears it.
-  targetVoicingKey?: string | null;
+  // A Dictionary diagram navigated here and wants us to land on this exact grip/box; we select it
+  // once (piano here, guitar inside FretboardView) then call onTargetVoicingApplied to clear it.
+  targetVoicing?: PendingVoicing | null;
   onTargetVoicingApplied?: () => void;
 }
 
@@ -190,7 +190,7 @@ function VoicingExplorer({
   voicingTab, setVoicingTab, shiftRoot, cycleType,
   showChordChrome, showInstrumentToggle,
   sheetVisible, setSheetVisible, playRef,
-  targetVoicingKey, onTargetVoicingApplied,
+  targetVoicing, onTargetVoicingApplied,
 }: VoicingExplorerProps) {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
@@ -200,10 +200,21 @@ function VoicingExplorer({
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastRandomTimeRef = useRef(0);
+  // Whether THIS (Explore/chord) screen is the focused tab, kept in a ref so lifecycle effects can
+  // read the current value at the moment they run. The audio engine is GLOBAL: this screen's
+  // "stop my preview" effects (instrument/octave/tab/sort changes, mount, unmount) call the shared
+  // stopAudio — which, when this screen is in the BACKGROUND, would kill a progression playing on the
+  // Song tab. On Android cold start this screen's subtree mounts a few seconds late (while a Song
+  // progression is already running), and that mount-time stop froze the progression at a "random"
+  // bar. Gating every incidental stop on focus makes a backgrounded Explore screen never touch
+  // another screen's audio. (User-driven stops here always happen while focused, so they're unaffected.)
+  const veFocused = useIsFocused();
+  const veFocusedRef = useRef(veFocused);
+  veFocusedRef.current = veFocused;
 
-  React.useEffect(() => { 
-    stopSeqFlash(); 
-    onStop?.(); 
+  React.useEffect(() => {
+    stopSeqFlash();
+    if (veFocusedRef.current) onStop?.(); // don't stop the Song tab's progression from the background
     setPianoVoicingIdx(0);
     setArpSubsetIdx(0);
     setIntervalSubsetIdx(0);
@@ -235,8 +246,9 @@ function VoicingExplorer({
   const handleStop = () => { stopSeqFlash(); onStop?.(); };
 
   // Toggling Explore mode or leaving the dictionary viewer swaps this component
-  // out without a navigation blur, so stop any sound on unmount explicitly.
-  React.useEffect(() => () => { isLoopingRef.current = false; seqFlashTimers.current.forEach(clearTimeout); seqFlashTimers.current = []; onStop?.(); }, []);
+  // out without a navigation blur, so stop any sound on unmount explicitly — but ONLY if this
+  // screen is focused (a background unmount must not kill another tab's audio).
+  React.useEffect(() => () => { isLoopingRef.current = false; seqFlashTimers.current.forEach(clearTimeout); seqFlashTimers.current = []; if (veFocusedRef.current) onStop?.(); }, []);
 
   const fireSeqFlash = (midiNotes: number[], loop = false) => {
     stopSeqFlash(); isLoopingRef.current = loop;
@@ -507,7 +519,7 @@ function VoicingExplorer({
     return map;
   }, [rootSemi, chordType]);
 
-  React.useEffect(() => { handleStop(); setPianoVoicingIdx(0); }, [voicingTab, sortMode]);
+  React.useEffect(() => { if (veFocusedRef.current) handleStop(); setPianoVoicingIdx(0); }, [voicingTab, sortMode]);
 
   // The grid only ever shows ONE tab, so build only that family per press
   // instead of all six. Drops still come from a single buildDropVoicings call
@@ -876,11 +888,40 @@ function VoicingExplorer({
   // clear it (one-shot). Only matches once THIS tab's voicings have rebuilt, so the combo key can't
   // falsely match the previous tab's list. (Guitar is handled inside FretboardView.)
   React.useEffect(() => {
-    if (!targetVoicingKey || instrument !== 'piano' || !pianoVoicings.length) return;
-    const keyOf = (notes: number[]) => Array.from(new Set(notes.map((m: number) => ((((m % 12) - rootSemi) % 12) + 12) % 12))).sort((a, b) => a - b).join(',');
-    const idx = pianoVoicings.findIndex((pv: any) => keyOf(pv.notes) === targetVoicingKey);
-    if (idx >= 0) { setPianoVoicingIdx(idx); onTargetVoicingApplied?.(); }
-  }, [targetVoicingKey, instrument, pianoVoicings, rootSemi, onTargetVoicingApplied]);
+    if (!targetVoicing || instrument !== 'piano') return;
+    // Arps/intervals select by subset only (a subset is one piano voicing) — applied just below; wait
+    // on the voicing list only when we have an explicit voicing to find (notes for block, pcKey).
+    if (targetVoicing.notes || targetVoicing.pcKey) {
+      if (!pianoVoicings.length) return; // wait for this tab's voicings to rebuild before matching
+      let idx = -1;
+      if (targetVoicing.notes) {
+        const want = [...targetVoicing.notes].sort((a, b) => a - b).join(',');
+        idx = pianoVoicings.findIndex((pv: any) => [...(pv.notes || [])].sort((a: number, b: number) => a - b).join(',') === want);
+      }
+      if (idx < 0 && targetVoicing.pcKey) {
+        const keyOf = (notes: number[]) => Array.from(new Set(notes.map((m: number) => ((((m % 12) - rootSemi) % 12) + 12) % 12))).sort((a, b) => a - b).join(',');
+        idx = pianoVoicings.findIndex((pv: any) => keyOf(pv.notes) === targetVoicing.pcKey);
+      }
+      if (idx >= 0) setPianoVoicingIdx(idx);
+    }
+    // Scales (selectedScaleId) are already applied by the shell; nothing more to do on piano. Clear
+    // the one-shot so it can't re-fire on a later voicing rebuild.
+    onTargetVoicingApplied?.();
+  }, [targetVoicing, instrument, pianoVoicings, rootSemi, onTargetVoicingApplied]);
+
+  // Piano arps/intervals: pick the arp subset (arps) or the interval subset that spans the held
+  // semitone (intervals). Runs alongside the matcher above (both fire with this render's targetVoicing,
+  // so the matcher clearing it doesn't cancel this). Guitar handles its own subset in FretboardView.
+  React.useEffect(() => {
+    if (!targetVoicing || instrument !== 'piano') return;
+    if (targetVoicing.arpSubsetIdx != null) setArpSubsetIdx(targetVoicing.arpSubsetIdx);
+    if (targetVoicing.intervalSemitone != null) {
+      const n = targetVoicing.intervalSemitone;
+      let idx = intervalSubsets.findIndex((s: any) => s.ivs && s.ivs[0] === 0 && Math.abs(s.ivs[1] - s.ivs[0]) === n);
+      if (idx < 0) idx = intervalSubsets.findIndex((s: any) => s.ivs && Math.abs(s.ivs[1] - s.ivs[0]) === n);
+      if (idx >= 0) setIntervalSubsetIdx(idx);
+    }
+  }, [targetVoicing, instrument, intervalSubsets]);
 
   // Spelled note names for the piano keys. Memoized so it stays a STABLE array reference
   // across renders that don't change the chord/voicing — otherwise this inline .map() made
@@ -1288,6 +1329,7 @@ function VoicingExplorer({
               chordAxisEnabled={voicingTab === 'triads' || voicingTab === 'shells' || voicingTab === 'drop2' || voicingTab === 'drop3' || voicingTab === 'drop2and4'}
               namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
               selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
+              targetVoicing={targetVoicing} onTargetVoicingApplied={onTargetVoicingApplied}
             />
           )}
         </View>
@@ -1373,14 +1415,14 @@ function VoicingExplorer({
 // dictionary (the self-contained mini-diagram grid).
 export default function PlayScreen() {
   const { theme, instrument, setInstrument } = useSettingsStore();
-  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab, pendingVoicingKey, setPendingVoicingKey } = useChordStore();
+  const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab, pendingVoicing, setPendingVoicing, setSelectedScaleId } = useChordStore();
   const dict = useDictionaryStore();
   const t = THEMES[theme];
 
   // Chord mode's voicing tab lives here (not in chordStore) so it survives
   // Chord⇄Dictionary toggles.
   const [chordVoicingTab, setChordVoicingTab] = React.useState<VoicingTabKey>('block');
-  const [targetVoicingKey, setTargetVoicingKey] = React.useState<string | null>(null);
+  const [targetVoicing, setTargetVoicing] = React.useState<PendingVoicing | null>(null);
   const [sheetVisible, setSheetVisible] = React.useState(false);
   const livePlayRef = React.useRef<() => void>(() => {});
 
@@ -1392,11 +1434,14 @@ export default function PlayScreen() {
   React.useEffect(() => {
     if (pendingVoicingTab) {
       setChordVoicingTab(pendingVoicingTab as VoicingTabKey);
-      setTargetVoicingKey(pendingVoicingKey);
+      // Scales carry a real scale id — select it now (covers piano + guitar) so it's in place before
+      // the viewer rebuilds. The grip/box itself is applied by the viewer via targetVoicing.
+      if (pendingVoicing?.scaleId) setSelectedScaleId(pendingVoicing.scaleId);
+      setTargetVoicing(pendingVoicing ?? null);
       setPendingVoicingTab(null);
-      setPendingVoicingKey(null);
+      setPendingVoicing(null);
     }
-  }, [pendingVoicingTab, pendingVoicingKey, setPendingVoicingTab, setPendingVoicingKey]);
+  }, [pendingVoicingTab, pendingVoicing, setPendingVoicingTab, setPendingVoicing, setSelectedScaleId]);
 
   if (dict.mode === 'dictionary') {
     return (
@@ -1418,7 +1463,7 @@ export default function PlayScreen() {
         showChordChrome={true} showInstrumentToggle={false}
         sheetVisible={sheetVisible} setSheetVisible={setSheetVisible}
         playRef={livePlayRef}
-        targetVoicingKey={targetVoicingKey} onTargetVoicingApplied={() => setTargetVoicingKey(null)}
+        targetVoicing={targetVoicing} onTargetVoicingApplied={() => setTargetVoicing(null)}
       />
       <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
     </View>

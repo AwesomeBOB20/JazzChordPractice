@@ -3,6 +3,22 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHORD_CATEGORIES, getRandomChord } from '@shared/theory/musicTheory';
 
+// A one-shot "land on this exact voicing" instruction left by the Dictionary's chip→diagram flow.
+// The Chord screen reads whichever fields apply to the current instrument/tab, applies them once,
+// then clears it. Combos carry fingerprint (guitar grip) + pcKey (piano pitch-class set); scales
+// carry scaleId + boxName; shapes carry scaleName (matched by name across the two shape models) +
+// boxName. Everything optional — each matcher uses what it can.
+export interface PendingVoicing {
+  fingerprint?: string;      // guitar chord grip (exact group + voicing)
+  pcKey?: string;            // piano: root-relative pitch-class set, e.g. "0,4,7,11"
+  notes?: number[];          // piano: exact MIDI notes (distinguishes block inversions of one pc-set)
+  scaleId?: string;          // scales: the scale id to select
+  scaleName?: string;        // shapes: display name (e.g. "C Major Shape") matched across shape builders
+  boxName?: string;          // scales/shapes/arps: the box to select
+  arpSubsetIdx?: number;     // arps: which arp subset (1:1 with the dictionary's build order)
+  intervalSemitone?: number; // intervals: select the interval subset whose pair spans this many semitones
+}
+
 export interface ChordState {
   rootSemi: number;
   chordType: string;
@@ -17,13 +33,13 @@ export interface ChordState {
   // tab it was browsing here; the Chord screen reads it once, applies it, then clears it. Transient
   // (not persisted).
   pendingVoicingTab: string | null;
-  // Alongside the tab: the voicing the Dictionary chip was on, as its root-relative pitch-class set
-  // key (e.g. "0,4,9,10"). The Chord screen selects the matching voicing once, then clears it.
-  pendingVoicingKey: string | null;
+  // Alongside the tab: the exact voicing the Dictionary diagram was on (see PendingVoicing). The
+  // Chord screen selects the matching grip/box once, then clears it.
+  pendingVoicing: PendingVoicing | null;
 
   setNamingMode: (mode: 'sharp' | 'flat') => void;
   setPendingVoicingTab: (tab: string | null) => void;
-  setPendingVoicingKey: (key: string | null) => void;
+  setPendingVoicing: (v: PendingVoicing | null) => void;
   setInputMode: (mode: 'random' | 'manual') => void;
   setChord: (rootSemi: number, type: string) => void;
   randomChord: (preferredTypes?: string[]) => void;
@@ -50,11 +66,11 @@ export const useChordStore = create<ChordState>()(
       namingMode: 'sharp',
       inputMode: 'random',
       pendingVoicingTab: null,
-      pendingVoicingKey: null,
+      pendingVoicing: null,
 
       setNamingMode: (namingMode) => set({ namingMode }),
       setPendingVoicingTab: (pendingVoicingTab) => set({ pendingVoicingTab }),
-      setPendingVoicingKey: (pendingVoicingKey) => set({ pendingVoicingKey }),
+      setPendingVoicing: (pendingVoicing) => set({ pendingVoicing }),
       setInputMode: (inputMode) => set({ inputMode }),
 
       setChord: (rootSemi, chordType) => set({ 

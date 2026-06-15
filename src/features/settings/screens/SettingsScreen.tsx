@@ -97,7 +97,8 @@ const HELP_SECTIONS: HelpSection[] = [
         'When a tab has sub-groups, a second row of family tabs narrows it (e.g. 7th Chords vs 9th Chords).',
         'Tap a row — like "Maj 7" or "Major" — to open it and reveal its diagrams; tap again to close.',
         'When you open a rootless shell/drop/triad or a scale, a row lists the chords it works for: "Comp with" on a voicing (the chords you\'d play it for, e.g. a 3·7·13 grip belongs to Dom13) and "Solo with" on a scale (the chords you\'d improvise over, e.g. Dorian fits Min 7, Min 9, and Min 6).',
-        'Tap any diagram to hear it.',
+        'Tap any diagram to hear it. To open it on the full Chord screen: first tap one of those "Comp with" / "Solo with" chips (it highlights), then tap the diagram you want — that exact voicing or box loads on the Chord screen for the chosen chord.',
+        'Or go the other way: press and hold a diagram. For a named chord (Block / Open / Barre / Arps) it opens straight on the Chord screen at that exact grip / inversion / arp box. For a shell/drop/triad/scale/shape it asks you to pick a chord first ("Pick a chord for this voicing"), then opens. Holding an Interval (which has no chord of its own) jumps to a random chord that contains it, landing on its Intervals tab.',
         'The 1 / 2 / 3 buttons at the bottom-right set how many diagrams fit per row.',
       ] },
       { h: 'Picking the Root (Dictionary)', b: [
