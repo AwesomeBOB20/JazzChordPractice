@@ -114,7 +114,9 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
     // has no drop voicing. Everything downstream scores within `pool`, so the neck
     // zone and voice-leading still pick the smoothest option inside the chosen type.
     const forcedSubset =
-      forcedType === 'open'   ? openVoicings :
+      // Open: prefer open chords, but fall back to BARRE (a sibling standard-guitar shape) before the
+      // generic pool — so a chord with no open form shows a barre, not a random drop/shell voicing.
+      forcedType === 'open'   ? (openVoicings.length ? openVoicings : barreVoicings) :
       forcedType === 'barre'  ? barreVoicings :
       forcedType === 'triads' ? triadVoicings :
       forcedType === 'drop2'  ? drop2Voicings :
