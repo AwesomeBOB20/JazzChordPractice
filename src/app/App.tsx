@@ -26,6 +26,8 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { ErrorBoundary } from '@shared/ui/ErrorBoundary';
 import BpmModal from '@shared/ui/BpmModal';
 import SlidingToggle from '@shared/ui/SlidingToggle';
+import PaywallModal from '@features/pro/PaywallModal';
+import { initPurchases } from '@features/pro/purchases';
 
 // Patch React Native's <Text> once so the app-wide font chosen in Settings applies
 // everywhere, mapping each style's fontWeight to the matching weighted family. A Text
@@ -68,6 +70,8 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
   const setArp = useSettingsStore((s: any) => s.setArp);
   const arpForced = useSettingsStore((s: any) => s.arpForced);
   const setIsSettingsOpen = useSettingsStore((s: any) => s.setIsSettingsOpen);
+  const isPro = useSettingsStore((s: any) => s.isPro);
+  const openPaywall = useSettingsStore((s: any) => s.openPaywall);
 
   const quizMode = useQuizStore((s: any) => s.quizMode);
   const setQuizMode = useQuizStore((s: any) => s.setQuizMode);
@@ -132,7 +136,7 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
       <SlidingToggle
         width={cw}
         activeIndex={!(arp || arpForced) ? 0 : 1}
-        onPressSegment={(i) => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(i === 1); }}
+        onPressSegment={(i) => { if (arpForced) return; if (i === 1 && !isPro) { openPaywall('voicings'); return; } Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(i === 1); }}
         segments={[
           <MaterialCommunityIcons name="music-note-quarter" size={16} color={!(arp || arpForced) ? '#fff' : t.txt2} />,
           <Ionicons name="musical-notes" size={16} color={(arp || arpForced) ? '#fff' : t.txt2} />,
@@ -310,6 +314,7 @@ function RootLayout() {
       {/* Floating Global Overlays */}
       <SettingsScreen />
       <BpmModal visible={showBpm} onClose={() => setShowBpm(false)} />
+      <PaywallModal />
     </View>
   );
 }
@@ -327,6 +332,8 @@ export default function App() {
       allowsRecordingIOS: false,
       staysActiveInBackground: false,
     });
+    // Configure the purchase layer once at startup (no-op until RevenueCat is wired).
+    initPurchases();
   }, []);
 
   if (!fontsLoaded) {

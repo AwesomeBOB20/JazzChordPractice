@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHORD_CATEGORIES, getRandomChord } from '@shared/theory/musicTheory';
+import { isChordTypeFree } from '@features/pro/proConstants';
+import { useSettingsStore } from '@features/settings/store/settingsStore';
+
+// The chord qualities a user may land on right now: every type when Pro, only the
+// free essentials otherwise. Used by random/cycle so a free user never gets stuck on
+// a locked chord. (Selecting a locked type from the picker still routes to the paywall.)
+const selectablesFor = (types: string[]) =>
+  useSettingsStore.getState().isPro ? types : types.filter(isChordTypeFree);
 
 // A one-shot "land on this exact voicing" instruction left by the Dictionary's chip→diagram flow.
 // The Chord screen reads whichever fields apply to the current instrument/tab, applies them once,
@@ -94,16 +102,26 @@ export const useChordStore = create<ChordState>()(
           const intersection = activeTypes.filter(t => preferredTypes.includes(t));
           if (intersection.length > 0) pool = intersection;
         }
+        // Free users only ever get the free essentials; fall back to them if the active
+        // pool happens to be all-locked.
+        const free = selectablesFor(pool);
+        pool = free.length > 0 ? free : selectablesFor(CHORD_CATEGORIES.flatMap((c) => c.keys));
         const { type, rootSemi } = getRandomChord(pool);
         const namingMode = [0, 1, 3, 5, 8, 10].includes(rootSemi) ? 'flat' : 'sharp';
         set({ chordType: type, rootSemi, namingMode });
       },
 
       cycleType: (direction) => set((state) => {
-        const allTypes = CHORD_CATEGORIES.flatMap((c) => c.keys);
+        // Cycle only through the qualities this user can actually open (free set when
+        // not Pro), so the next/prev arrows never strand a free user on a locked chord.
+        const allTypes = selectablesFor(CHORD_CATEGORIES.flatMap((c) => c.keys));
         const idx = allTypes.indexOf(state.chordType);
         const delta = direction === 'next' ? 1 : -1;
-        const nextIdx = (idx + delta + allTypes.length) % allTypes.length;
+        // If the current chord isn't in the list (e.g. a locked one persisted), idx = -1;
+        // start from the first free type so 'next' lands on a valid one.
+        const nextIdx = idx === -1
+          ? (direction === 'next' ? 0 : allTypes.length - 1)
+          : (idx + delta + allTypes.length) % allTypes.length;
         return { chordType: allTypes[nextIdx] };
       }),
 

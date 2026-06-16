@@ -12,8 +12,12 @@ import { THEMES, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
 import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { SharedSettingsPanel } from '@shared/ui';
 import { PopUpModal } from '@shared/ui/SharedModals';
+import { restorePro, devSetPro } from '@features/pro/purchases';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+
+// Themes free on every tier (one light, one dark). The rest are Pro.
+const FREE_THEMES = new Set(['light', 'dark']);
 
 // Inline help icons render on the text baseline, which sits them too high — and
 // react-native-web silently drops `verticalAlign`, so that alone doesn't move them.
@@ -276,6 +280,33 @@ const HELP_SECTIONS: HelpSection[] = [
       ] },
     ],
   },
+  {
+    key: 'pro', icon: 'crown', lib: 'mci', title: 'Kordal Pro',
+    paras: [
+      { t: 'Kordal is free to learn on. A single one-time unlock (no subscription) adds the deeper study tools — pay once, keep forever, and Restore Purchase brings it back on a new device.' },
+      { h: 'Free, always', b: [
+        ['Explore on ', I('piano', 'mci'), ' piano and ', I('guitar-acoustic', 'mci'), ' guitar — Block, Open, Barre, Triads and Scales.'],
+        'The essential chords — every triad, 6th, and the five core 7ths (maj7, min7, dom7, m7♭5, dim7).',
+        'Build and play progressions with the metronome, loop and up to 3 saved songs.',
+        [I('puzzle-outline', 'mci'), ' Chord quiz in both ', I('eye'), ' Visual and ', I('ear'), ' Listen (audio) modes, and the ', I('guitar-pick-outline', 'mci'), ' tuner in standard tuning.'],
+        'Light and Dark themes, all fonts and the mixer.',
+      ] },
+      { h: 'What Pro unlocks', b: [
+        [I('book-outline'), ' Dictionary mode — browse every chord, scale, arpeggio and interval by root.'],
+        'Extended & altered chords — 9ths, 11ths, 13ths, altered dominants, add9s and the exotic 7ths.',
+        'Scale overlay and List/Voicing order on the Explore screen.',
+        'Advanced voicings — Drop 2, Drop 3, Drop 2 & 4, Shells, Arpeggios, Intervals and Shapes (locked tabs show a 🔒).',
+        'Progression power tools — transpose, change key, neck/piano zones, swing & bossa feels, and the Pro preset songs.',
+        [I('ear'), ' All quiz categories — the Voicings quiz (scales, arpeggios, intervals & shapes). Chord & Listen modes are free.'],
+        'Tuner — alternate tunings and a custom reference pitch (432/512 Hz).',
+        'Unlimited saved songs and every theme.',
+      ] },
+      { h: 'How to unlock', b: [
+        ['Tap any locked control (a 🔒) or ', I('settings-outline'), ' Settings → Kordal Pro → Unlock.'],
+        'Already bought it? Use Restore Purchase in the Kordal Pro card.',
+      ] },
+    ],
+  },
 ];
 
 const ROLE_LEGEND: { label: string; color: string }[] = [
@@ -290,7 +321,7 @@ const ROLE_LEGEND: { label: string; color: string }[] = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { theme, setTheme, factoryReset, isSettingsOpen, setIsSettingsOpen, fontFamily } = useSettingsStore();
+  const { theme, setTheme, factoryReset, isSettingsOpen, setIsSettingsOpen, fontFamily, isPro, openPaywall } = useSettingsStore();
   const { clearProgression } = useProgressionStore();
   const { resetQuiz } = useQuizStore();
 
@@ -390,12 +421,54 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        
+
+        {/* Pro status / unlock */}
+        <View style={[styles.card, { backgroundColor: t.bg2, borderColor: t.border }]}>
+          <Text style={[styles.sectionLabel, { color: t.accent }]}>KORDAL PRO</Text>
+          {isPro ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
+              <MaterialCommunityIcons name="crown" size={22} color={t.accent} />
+              <Text style={{ flex: 1, color: t.txt1, fontSize: 15, fontWeight: '700' }}>Pro unlocked — thank you!</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={{ color: t.txt2, fontSize: 13, marginBottom: 12, lineHeight: 18 }}>
+                One unlock for the Dictionary, advanced voicings, progression power tools, all quiz categories, alternate tunings, unlimited songs and every theme.
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={{ height: 46, borderRadius: 14, backgroundColor: t.accent, alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => openPaywall('generic')}>
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 }}>Unlock Kordal Pro</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ marginTop: 10, alignItems: 'center', paddingVertical: 4 }}
+                onPress={async () => {
+                  const res = await restorePro();
+                  Alert.alert(res.success ? 'Restored' : 'Nothing to restore', res.success ? 'Your Kordal Pro unlock has been restored.' : (res.error ?? 'No previous purchase was found.'));
+                }}>
+                <Text style={{ color: t.txt2, fontSize: 13, fontWeight: '600' }}>Restore purchase</Text>
+              </TouchableOpacity>
+            </>
+          )}
+          {/* DEV-ONLY toggle: exercise Pro before RevenueCat is wired. Remove (or hide
+              behind __DEV__) when the real purchase flow ships. */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={{ marginTop: 12, alignItems: 'center', paddingVertical: 6, borderTopWidth: 1, borderTopColor: t.border }}
+              onPress={() => devSetPro(!isPro)}>
+              <Text style={{ color: t.txt3, fontSize: 12, fontWeight: '600' }}>{isPro ? '(dev) Lock Pro' : '(dev) Unlock Pro for testing'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* App Theme Picker */}
         <View style={[styles.card, { backgroundColor: t.bg2, borderColor: t.border }]}>
           <Text style={[styles.sectionLabel, { color: t.accent }]}>APP THEME</Text>
           <View style={styles.themeRow}>
-            {Object.entries(THEMES).map(([key, th]) => (
+            {Object.entries(THEMES).map(([key, th]) => {
+              const locked = !FREE_THEMES.has(key) && !isPro;
+              return (
               <TouchableOpacity
                 key={key}
                 activeOpacity={0.7}
@@ -403,12 +476,18 @@ export default function SettingsScreen() {
                   styles.themeCircle,
                   { borderColor: theme === key ? t.txt1 : 'transparent' }
                 ]}
-                onPress={() => setTheme(key)}>
-                <View style={[styles.themeCircleInner, { backgroundColor: th.bg }]}>
+                onPress={() => locked ? openPaywall('themes') : setTheme(key)}>
+                <View style={[styles.themeCircleInner, { backgroundColor: th.bg, opacity: locked ? 0.5 : 1 }]}>
                   <View style={[styles.themeCircleHalf, { backgroundColor: th.accent }]} />
+                  {locked && (
+                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="lock-closed" size={12} color={th.txt1} />
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </View>
         </View>
 
@@ -496,18 +575,18 @@ export default function SettingsScreen() {
         <View style={[styles.card, { backgroundColor: t.bg2, borderColor: '#63992240' }]}>
           <Text style={[styles.sectionLabel, { color: '#639922' }]}>DATA MANAGEMENT</Text>
 
-          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={handleExport}>
+          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => isPro ? handleExport() : openPaywall('saved-songs')}>
             <View style={styles.settingLeft}>
-              <Ionicons name="share-outline" size={18} color="#639922" />
+              <Ionicons name={isPro ? 'share-outline' : 'lock-closed'} size={18} color="#639922" />
               <Text style={[styles.label, { color: t.txt1 }]}>Export Progressions Backup</Text>
             </View>
           </TouchableOpacity>
 
           <View style={[styles.divider, { backgroundColor: t.border }]} />
 
-          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => setIsImportModalVisible(true)}>
+          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => isPro ? setIsImportModalVisible(true) : openPaywall('saved-songs')}>
             <View style={styles.settingLeft}>
-              <Ionicons name="download-outline" size={18} color="#639922" />
+              <Ionicons name={isPro ? 'download-outline' : 'lock-closed'} size={18} color="#639922" />
               <Text style={[styles.label, { color: t.txt1 }]}>Import Progressions Backup</Text>
             </View>
           </TouchableOpacity>

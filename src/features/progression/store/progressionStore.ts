@@ -217,7 +217,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 2 },
     { rootSemi: 7, chordType: 'dom7', namingMode: 'flat', beats: 2 },
   ]},
-  { id: 'all-of-me', name: 'All of Me', bpm: 140, rhythm: 'swing', category: 'Standards', progression: [
+  { id: 'all-of-me', name: 'All of Me', bpm: 140, rhythm: 'swing', category: 'Standards', pro: true, progression: [
     // C6 C6 E7 E7
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4, section: true },
     { rootSemi: 0, chordType: 'maj6', namingMode: 'flat', beats: 4 },
@@ -262,7 +262,7 @@ export const DEFAULT_SONGS: SavedSong[] = [
     { rootSemi: 2, chordType: 'min7', namingMode: 'flat', beats: 2 },
     { rootSemi: 7, chordType: 'dom7', namingMode: 'flat', beats: 2 },
   ]},
-  { id: 'blue-monk', name: 'Blue Monk', bpm: 120, rhythm: 'swing', category: 'Standards', progression: [
+  { id: 'blue-monk', name: 'Blue Monk', bpm: 120, rhythm: 'swing', category: 'Standards', pro: true, progression: [
     // Bb7 Eb7 Bb7 (Fm7 Bb7)
     { rootSemi: 10, chordType: 'dom7', namingMode: 'flat', beats: 4 },
     { rootSemi: 3, chordType: 'dom7', namingMode: 'flat', beats: 4 },

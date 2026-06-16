@@ -10,6 +10,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
+import type { ProFeature } from '@features/pro/proConstants';
 import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
@@ -56,7 +57,11 @@ type VoicingTabKey = 'block' | 'open' | 'barre' | 'triads' | 'shells' | 'drop2' 
 
 
 
-function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab: VoicingTabKey; setVoicingTab: (key: VoicingTabKey) => void; tabCounts: Record<VoicingTabKey, number>; t: Theme; }) {
+// Voicing tabs free on every tier. Everything else (Shells, Drop 2/3/2&4, Intervals,
+// Arps, Shapes) is Pro — see the freemium split.
+const FREE_VOICING_TABS: ReadonlySet<VoicingTabKey> = new Set<VoicingTabKey>(['block', 'open', 'barre', 'triads', 'scales']);
+
+function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, isPro, openPaywall, t }: { voicingTab: VoicingTabKey; setVoicingTab: (key: VoicingTabKey) => void; tabCounts: Record<VoicingTabKey, number>; isPro: boolean; openPaywall: (f: ProFeature) => void; t: Theme; }) {
   const scrollRef = useRef<ScrollView>(null);
   React.useEffect(() => { scrollRef.current?.scrollTo({ x: 0, animated: true }); }, [tabCounts]);
 
@@ -74,8 +79,11 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab
       <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 12 }}>
         {TABS.map(tab => {
           const isActive = voicingTab === tab.key;
+          // Pro tabs stay visible (discoverability) but dim + show a lock; tapping opens the paywall.
+          const locked = !FREE_VOICING_TABS.has(tab.key) && !isPro;
           return (
-            <TouchableOpacity key={tab.key} style={[styles.tabBtn, { flexDirection: 'row', gap: 6, paddingHorizontal: 16 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); startTransition(() => setVoicingTab(tab.key)); }} activeOpacity={0.7}>
+            <TouchableOpacity key={tab.key} style={[styles.tabBtn, { flexDirection: 'row', gap: 6, paddingHorizontal: 16, opacity: locked ? 0.55 : 1 }, isActive && { backgroundColor: t.accent }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); if (locked) { openPaywall('voicings'); return; } startTransition(() => setVoicingTab(tab.key)); }} activeOpacity={0.7}>
+              {locked && <Ionicons name="lock-closed" size={11} color={isActive ? '#fff' : t.txt3} />}
               <Text style={[styles.modeBtnText, { color: isActive ? '#fff' : t.txt3, includeFontPadding: false }]}>{tab.label}</Text>
               <CountChip count={tabCounts[tab.key]} t={t} onAccent={isActive} />
             </TouchableOpacity>
@@ -88,7 +96,7 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, t }: { voicingTab
 
 // ─── INLINE VISUAL SETTINGS ─────────────
 function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMode, activeScaleName, t }: any) {
-  const { sortMode, setSortMode, scaleOverlay, setScaleOverlay } = useSettingsStore();
+  const { sortMode, setSortMode, scaleOverlay, setScaleOverlay, isPro, openPaywall } = useSettingsStore();
   // Block hides the sort toggle: every block entry is an inversion of the SAME chord (one
   // chord label, bottom note lifted an octave each step), so List Order (by bass scale-degree)
   // and Voicing Order (by lowest pitch) climb in lockstep and yield the identical ascending
@@ -106,15 +114,16 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
           activeOpacity={0.7}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            if (!isPro) { openPaywall('voicings'); return; }
             if (voicingTab === 'shapes') {
               setShapeDisplayMode(shapeDisplayMode === 'list' ? 'voicing' : 'list');
             } else {
               setSortMode(sortMode === 'list' ? 'voicings' : 'list');
             }
           }}
-          style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border }]}
+          style={[styles.enginePill, { backgroundColor: t.bg2, borderColor: t.border, opacity: isPro ? 1 : 0.55 }]}
         >
-          <Ionicons name="filter" size={16} color={t.txt2} />
+          <Ionicons name={isPro ? 'filter' : 'lock-closed'} size={16} color={t.txt2} />
           <Text style={[styles.enginePillTxt, { color: t.txt2 }]}>
             {voicingTab === 'shapes' ? (shapeDisplayMode === 'list' ? 'List Order' : 'Voicing Order') : (sortMode === 'list' ? 'List Order' : 'Voicing Order')}
           </Text>
@@ -126,11 +135,12 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
           activeOpacity={0.7}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            if (!isPro) { openPaywall('voicings'); return; }
             setScaleOverlay(!scaleOverlay);
           }}
-          style={[styles.enginePill, { backgroundColor: scaleOverlay ? t.accent : t.bg2, borderColor: scaleOverlay ? t.accent : t.border }]}
+          style={[styles.enginePill, { backgroundColor: scaleOverlay ? t.accent : t.bg2, borderColor: scaleOverlay ? t.accent : t.border, opacity: isPro ? 1 : 0.55 }]}
         >
-          <Ionicons name={scaleOverlay ? 'eye' : 'eye-outline'} size={16} color={scaleOverlay ? '#fff' : t.txt2} />
+          <Ionicons name={!isPro ? 'lock-closed' : (scaleOverlay ? 'eye' : 'eye-outline')} size={16} color={scaleOverlay ? '#fff' : t.txt2} />
           <Text style={[styles.enginePillTxt, { color: scaleOverlay ? '#fff' : t.txt2 }]}>
             {scaleOverlay && activeScaleName ? `Scale: ${activeScaleName}` : 'Scale'}
           </Text>
@@ -143,23 +153,29 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
 
 // ─── EXPLORE MODE TOGGLE (Chord | Dictionary) ───────────────────────────────
 // The single entry point to version 2. Version 1 ("Chord") is always the default.
-function ExploreModeToggle({ mode, setMode, t }: { mode: 'chord' | 'dictionary'; setMode: (m: 'chord' | 'dictionary') => void; t: Theme; }) {
-  const SEGMENTS: { key: 'chord' | 'dictionary'; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+function ExploreModeToggle({ mode, setMode, isPro, openPaywall, t }: { mode: 'chord' | 'dictionary'; setMode: (m: 'chord' | 'dictionary') => void; isPro: boolean; openPaywall: (f: ProFeature) => void; t: Theme; }) {
+  const SEGMENTS: { key: 'chord' | 'dictionary'; label: string; icon: keyof typeof Ionicons.glyphMap; pro?: boolean }[] = [
     { key: 'chord', label: 'Chord', icon: 'albums-outline' },
-    { key: 'dictionary', label: 'Dictionary', icon: 'book-outline' },
+    { key: 'dictionary', label: 'Dictionary', icon: 'book-outline', pro: true },
   ];
   return (
     <View style={{ paddingTop: 8, paddingHorizontal: 12, paddingBottom: 8, backgroundColor: t.bg2, borderBottomWidth: 1, borderBottomColor: t.border, flexDirection: 'row', gap: 8 }}>
       {SEGMENTS.map(seg => {
         const isActive = mode === seg.key;
+        // Dictionary is Pro: when locked, tapping opens the paywall instead of switching,
+        // and a lock glyph replaces the chevron-free segment to signal it.
+        const locked = !!seg.pro && !isPro;
         return (
           <TouchableOpacity
             key={seg.key}
             activeOpacity={0.7}
-            onPress={() => { if (mode !== seg.key) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMode(seg.key); } }}
+            onPress={() => {
+              if (locked) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); openPaywall('dictionary'); return; }
+              if (mode !== seg.key) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMode(seg.key); }
+            }}
             style={[styles.modeTab, isActive && { backgroundColor: t.accent }]}
           >
-            <Ionicons name={seg.icon} size={16} color={isActive ? '#fff' : t.txt3} />
+            <Ionicons name={locked ? 'lock-closed' : seg.icon} size={16} color={isActive ? '#fff' : t.txt3} />
             <Text style={{ fontSize: 14, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{seg.label}</Text>
           </TouchableOpacity>
         );
@@ -209,8 +225,8 @@ function VoicingExplorer({
   // Narrow selector (not a whole-store subscription): this heavy screen re-renders only when one
   // of THESE fields changes, so unrelated settings (volumes, colorMode, dictionary prefs, …) no
   // longer trigger a full Explore re-render + diagram cascade.
-  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, sortMode, scaleOverlay } = useSettingsStore(
-    useShallow((s) => ({ bpm: s.bpm, arp: s.arp, setArp: s.setArp, setArpForced: s.setArpForced, playMode: s.playMode, setPlayMode: s.setPlayMode, octave: s.octave, theme: s.theme, labelMode: s.labelMode, sortMode: s.sortMode, scaleOverlay: s.scaleOverlay }))
+  const { bpm, arp, setArp, setArpForced, playMode, setPlayMode, octave, theme, labelMode, sortMode, scaleOverlay, isPro, openPaywall } = useSettingsStore(
+    useShallow((s) => ({ bpm: s.bpm, arp: s.arp, setArp: s.setArp, setArpForced: s.setArpForced, playMode: s.playMode, setPlayMode: s.setPlayMode, octave: s.octave, theme: s.theme, labelMode: s.labelMode, sortMode: s.sortMode, scaleOverlay: s.scaleOverlay, isPro: s.isPro, openPaywall: s.openPaywall }))
   );
   const { inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
@@ -1275,7 +1291,7 @@ function VoicingExplorer({
   };
 
   const combinedHeader = React.useMemo(() => (
-    <VoicingTabBar voicingTab={voicingTab} setVoicingTab={setVoicingTab} tabCounts={tabCounts} t={t} />
+    <VoicingTabBar voicingTab={voicingTab} setVoicingTab={setVoicingTab} tabCounts={tabCounts} isPro={isPro} openPaywall={openPaywall} t={t} />
   ), [voicingTab, tabCounts, t]);
 
   // Stable handler identities (see useStableCallback) so the memoized ChordCard / PianoView /
@@ -1433,7 +1449,7 @@ function VoicingExplorer({
 // to either chord mode (v1 — VoicingExplorer driven by chordStore) or the
 // dictionary (the self-contained mini-diagram grid).
 export default function PlayScreen() {
-  const { theme, instrument, setInstrument } = useSettingsStore();
+  const { theme, instrument, setInstrument, isPro, openPaywall } = useSettingsStore();
   const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab, pendingVoicing, setPendingVoicing, setSelectedScaleId } = useChordStore();
   const dict = useDictionaryStore();
   const t = THEMES[theme];
@@ -1465,7 +1481,7 @@ export default function PlayScreen() {
   if (dict.mode === 'dictionary') {
     return (
       <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-        <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} t={t} />
+        <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} openPaywall={openPaywall} t={t} />
         <ChordDictionary t={t} />
       </View>
     );
@@ -1473,7 +1489,7 @@ export default function PlayScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-      <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} t={t} />
+      <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} openPaywall={openPaywall} t={t} />
       <VoicingExplorer
         rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
         instrument={instrument} setInstrument={setInstrument}

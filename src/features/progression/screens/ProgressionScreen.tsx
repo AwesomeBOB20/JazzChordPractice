@@ -262,8 +262,8 @@ export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
   // Narrow selector: re-render this complex screen only when one of these fields changes, not on
   // every settings mutation (mixer volumes, colorMode, labelMode, etc. don't touch this screen).
-  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro } = useSettingsStore(
-    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro }))
+  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro, openPaywall } = useSettingsStore(
+    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro, openPaywall: s.openPaywall }))
   );
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
   const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory, activeSongId } = useProgressionStore();
@@ -739,7 +739,7 @@ export default function ProgressionScreen() {
     return () => clearTimeout(timer);
   }, [isDrawerVisible, brushRoot, brushType, drawerRootHeight, drawerQualHeight]);
 
-  const showProAlert = () => Alert.alert('Pro Feature', 'Upgrade to Pro to unlock key changes and zone control.', [{ text: 'OK' }]);
+  const showProAlert = () => openPaywall('progression-tools');
 
   const openDrawer = () => setIsDrawerVisible(true);
   const closeDrawer = () => {
@@ -1459,7 +1459,11 @@ export default function ProgressionScreen() {
       <ProgressionPlayerDock
         playingIdx={playingIdx} isPlayingSystem={isPlayingSystem} isLooping={isLooping} toggleLooping={toggleLooping}
         handlePlayProgression={() => { setSelectedCell(null); handlePlayProgression(); }} stopPlayback={() => stopPlayback()}
-        onOpenSave={() => setIsSaveModalVisible(true)} onOpenLib={() => setIsLibModalVisible(true)}
+        onOpenSave={() => {
+          // Saving progressions is a Pro feature.
+          if (!isPro) { openPaywall('saved-songs'); return; }
+          setIsSaveModalVisible(true);
+        }} onOpenLib={() => setIsLibModalVisible(true)}
         onClear={() => { stopPlayback(); clearProgression(); setSelectedCell(0); }}
       />
 
@@ -1627,7 +1631,7 @@ export default function ProgressionScreen() {
               return visibleSongs.map((song: any) => {
                 const isActive = song.id === activeSongId;
                 return (
-                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: isActive ? t.bg3 : t.bg2, borderColor: isActive ? t.accent : t.border, borderWidth: isActive ? 2 : 1 }]} onPress={() => { stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
+                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: isActive ? t.bg3 : t.bg2, borderColor: isActive ? t.accent : t.border, borderWidth: isActive ? 2 : 1 }]} onPress={() => { if (!isPro && song.pro) { openPaywall('saved-songs'); return; } stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
                   <View style={[styles.songCardIcon, { backgroundColor: isActive ? t.accent : t.bg3, borderColor: t.border }]}><Ionicons name="play" size={20} color={isActive ? '#fff' : t.accent} /></View>
                   <View style={{ flex: 1, paddingHorizontal: 12 }}>
                     <Text style={{ color: t.txt1, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{song.name}</Text>

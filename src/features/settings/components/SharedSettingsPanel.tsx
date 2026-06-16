@@ -22,6 +22,7 @@ export default function SharedSettingsPanel() {
     theme, labelMode, setLabelMode, colorMode, setColorMode, selectiveRoles, toggleSelectiveRole,
     instrument, setInstrument, referenceFrequency, setReferenceFrequency,
     octave, setOctave, octaveNumbering, setOctaveNumbering, fontFamily, setFontFamily,
+    isPro, openPaywall,
   } = useSettingsStore();
   const { namingMode, setNamingMode } = useChordStore();
   const t = THEMES[theme];
@@ -181,7 +182,7 @@ export default function SharedSettingsPanel() {
           </View>
           <Hair />
           <ValueRow icon="pitchfork" mci label="Tuning (A=)" valueLabel={`${referenceFrequency} Hz`} pickerKey="tuning"
-            options={TUNING_OPTS.map(f => ({ value: f, label: `${f} Hz` }))} selected={referenceFrequency} onSelect={(v) => setReferenceFrequency(v)} />
+            options={TUNING_OPTS.map(f => ({ value: f, label: `${f} Hz` }))} selected={referenceFrequency} onSelect={(v) => { if (!isPro && v !== 440) { openPaywall('tuner'); return; } setReferenceFrequency(v); }} />
         </View>
       )}
     </View>

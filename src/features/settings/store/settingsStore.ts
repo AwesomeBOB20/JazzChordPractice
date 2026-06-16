@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { THEMES } from '@shared/ui/themes';
 import type { FontKey } from '@shared/fonts/fonts';
+import type { ProFeature } from '@features/pro/proConstants';
 
 const DEFAULT_BPM = 120;
 const DEFAULT_PIANO_OCTAVE = 4;
@@ -49,6 +50,9 @@ export interface SettingsState {
   isSettingsOpen: boolean;
   octaveNumbering: boolean;
   isPro: boolean;
+  // Which Pro feature triggered the paywall, or null when the paywall is closed.
+  // Drives the global PaywallModal overlay (mounted once in App, like SettingsScreen).
+  paywallFeature: ProFeature | null;
 
   // Mixer
   mixChordVol:  number; // 0-100  chord instrument level         (default 80)
@@ -85,6 +89,9 @@ export interface SettingsState {
   setMixClickVol:  (v: number) => void;
   setOctaveNumbering: (enabled: boolean) => void;
   setIsPro: (isPro: boolean) => void;
+  // Open the paywall, attributing it to the feature the user just hit. closePaywall() dismisses.
+  openPaywall: (feature: ProFeature) => void;
+  closePaywall: () => void;
   factoryReset: () => void;
 }
 
@@ -117,6 +124,7 @@ export const useSettingsStore = create<SettingsState>()(
       isSettingsOpen: false,
       octaveNumbering: false,
       isPro: false,
+      paywallFeature: null,
 
       // Mixer defaults
       mixChordVol:  70,
@@ -168,6 +176,8 @@ export const useSettingsStore = create<SettingsState>()(
       setMixClickVol:  (mixClickVol)  => set({ mixClickVol }),
       setOctaveNumbering: (octaveNumbering) => set({ octaveNumbering }),
       setIsPro: (isPro) => set({ isPro }),
+      openPaywall: (paywallFeature) => set({ paywallFeature }),
+      closePaywall: () => set({ paywallFeature: null }),
 
       factoryReset: () => set({
         bpm: DEFAULT_BPM,
@@ -241,7 +251,11 @@ export const useSettingsStore = create<SettingsState>()(
         const max = isGuitar ? MAX_GUITAR_OCTAVE : MAX_PIANO_OCTAVE;
         const def = isGuitar ? DEFAULT_GUITAR_OCTAVE : DEFAULT_PIANO_OCTAVE;
         merged.octave = Math.max(min, Math.min(max, merged.octave ?? def));
-        merged.isPro = true; // dev override — remove when shipping real paywall
+        // isPro now comes straight from persisted state (default false). The blanket
+        // dev override was removed when the paywall shipped — use the "Unlock for testing"
+        // toggle in Settings (devSetPro) to exercise Pro until RevenueCat is live.
+        // The paywall is a transient UI overlay, never persisted.
+        merged.paywallFeature = null;
         return merged;
       },
     }

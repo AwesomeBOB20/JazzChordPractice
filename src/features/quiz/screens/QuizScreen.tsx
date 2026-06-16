@@ -15,6 +15,7 @@ import { THEMES } from '@shared/ui/themes';
 import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, preferredAccidentalForRoot, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CommandSheet } from '@shared/ui';
+import { isChordTypeFree } from '@features/pro/proConstants';
 import { useAudio } from '@shared/audio/AudioContext';
 import { 
   buildTriadVoicings, 
@@ -344,7 +345,7 @@ function expandCorrectIdxs(
 export default function QuizScreen() {
   const insets = useSafeAreaInsets();
   const { playChord: onPlay, stopAudio: onStop, playSingleNote: onNotePress } = useAudio();
-  const { octave, labelMode, theme, arp, instrument, isSettingsOpen, bpm } = useSettingsStore();
+  const { octave, labelMode, theme, arp, instrument, isSettingsOpen, bpm, isPro } = useSettingsStore();
   const setArpForced = useSettingsStore(s => s.setArpForced);
   const { activeTypes, namingMode } = useChordStore();
   const { quizMode, quizScore, quizTotal, quizStreak, resetQuiz, incrementQuiz, activeVoicingTypes, activeInversions } = useQuizStore();
@@ -753,7 +754,13 @@ export default function QuizScreen() {
       setSafeArpSubsetIdx(0);
       setSafeIntervalSubsetIdx(0);
 
-      const basePool = activeTypes.length > 0 ? activeTypes : ALL_CHORD_KEYS;
+      // Free users are only quizzed on the free essentials, even if locked types linger in
+      // the saved pool (the chip picker blocks adding them, but a pre-Pro pool may persist).
+      const rawPool = activeTypes.length > 0 ? activeTypes : ALL_CHORD_KEYS;
+      const freePool = rawPool.filter(isChordTypeFree);
+      const basePool = isPro
+        ? rawPool
+        : (freePool.length > 0 ? freePool : ALL_CHORD_KEYS.filter(isChordTypeFree));
       const allowedVoicings = instrument === 'piano'
         ? ['block', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales']
         : ['open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'];

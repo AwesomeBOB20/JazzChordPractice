@@ -10,6 +10,7 @@ import { THEMES } from '@shared/ui/themes';
 import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { CH, NOTE_FLAT, NOTE_SHARP, CHORD_CATEGORIES } from '@shared/theory/musicTheory';
 import { anyTypeSupportsVoicingTab } from '@shared/guitar';
+import { isChordTypeFree } from '@features/pro/proConstants';
 
 const ROOTS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
@@ -29,10 +30,10 @@ export default function CommandSheet({
   visible, onClose, onExecute, onLivePreview, forceMode,
   executeLabel, executeIcon = 'play', isQuiz
 }: CommandSheetProps) {
-  const { theme, octave, instrument } = useSettingsStore();
+  const { theme, octave, instrument, isPro, openPaywall } = useSettingsStore();
   const {
-    inputMode, setInputMode, rootSemi, chordType, setChord, 
-    activeTypes, toggleType, setActiveTypes, namingMode 
+    inputMode, setInputMode, rootSemi, chordType, setChord,
+    activeTypes, toggleType, setActiveTypes, namingMode, setNamingMode
   } = useChordStore();
   
   const { activeVoicingTypes, toggleVoicingType, setActiveVoicingTypes, activeInversions, toggleInversion, setActiveInversions } = useQuizStore();
@@ -87,6 +88,9 @@ export default function CommandSheet({
   
   const currentMode = forceMode ?? inputMode;
   const ALL_TYPES = CHORD_CATEGORIES.flatMap((c: { label: string, keys: string[] }) => c.keys);
+  // The chord types a user may actually add to the pool: all when Pro, only the free
+  // essentials otherwise. Bulk toggles operate on this so a free user can't pool a locked chord.
+  const POOL_TYPES = isPro ? ALL_TYPES : ALL_TYPES.filter(isChordTypeFree);
 
   // Auto-Scrolling Layout Tracking
   const rootScrollRef = useRef<ScrollView>(null);
@@ -202,7 +206,10 @@ export default function CommandSheet({
     }
   }, [visible]);
   
-  const handleToggleCategory = (keys: string[]) => {
+  const handleToggleCategory = (rawKeys: string[]) => {
+    // Free users only toggle the free keys within a category; locked ones never enter the pool.
+    const keys = isPro ? rawKeys : rawKeys.filter(isChordTypeFree);
+    if (keys.length === 0) { openPaywall('chords'); return; }
     const allCatSelected = keys.every((k: string) => activeTypes.includes(k));
     if (allCatSelected) {
       const next = activeTypes.filter(k => !keys.includes(k));
@@ -241,8 +248,21 @@ export default function CommandSheet({
             <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.border }} />
           </View>
 
-          {/* Left Column (Empty for now) */}
-          <View style={{ flex: 1, alignItems: 'flex-start' }}></View>
+          {/* Left Column — global accidental (♭/♯) toggle, shown only in the manual picker
+              where the root spellings actually change. Drives the same global namingMode
+              as the Settings "Accidentals" preference. */}
+          <View style={{ flex: 1, alignItems: 'flex-start' }}>
+            {!isQuiz && currentMode === 'manual' && (
+              <View style={{ flexDirection: 'row', backgroundColor: t.bg3, borderRadius: 16, padding: 3, borderWidth: 1, borderColor: t.border }}>
+                <TouchableOpacity onPress={() => setNamingMode('flat')} style={{ width: 30, height: 28, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: namingMode === 'flat' ? t.accent : 'transparent' }}>
+                  <Text style={{ fontSize: 17, fontWeight: '700', lineHeight: 17, includeFontPadding: false, transform: [{ translateY: 1 }], color: namingMode === 'flat' ? '#fff' : t.txt2 }}>♭</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setNamingMode('sharp')} style={{ width: 30, height: 28, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: namingMode === 'sharp' ? t.accent : 'transparent' }}>
+                  <Text style={{ fontSize: 17, fontWeight: '700', lineHeight: 17, includeFontPadding: false, color: namingMode === 'sharp' ? '#fff' : t.txt2 }}>♯</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
 
           {/* Center Column */}
           <View style={{ flex: 2, alignItems: 'center' }}>
@@ -251,7 +271,8 @@ export default function CommandSheet({
                 <TouchableOpacity onPress={() => setTimeout(() => setQuizSubTab('chords'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'chords' ? t.accent : 'transparent' }}>
                   <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: quizSubTab === 'chords' ? '#fff' : t.txt2 }}>CHORDS</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setTimeout(() => setQuizSubTab('voicings'), 0)} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'voicings' ? t.accent : 'transparent' }}>
+                <TouchableOpacity onPress={() => { if (!isPro) { openPaywall('quiz-categories'); return; } setTimeout(() => setQuizSubTab('voicings'), 0); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, backgroundColor: quizSubTab === 'voicings' ? t.accent : 'transparent' }}>
+                  {!isPro && <Ionicons name="lock-closed" size={11} color={quizSubTab === 'voicings' ? '#fff' : t.txt2} />}
                   <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: quizSubTab === 'voicings' ? '#fff' : t.txt2 }}>VOICINGS</Text>
                 </TouchableOpacity>
               </View>
@@ -288,22 +309,25 @@ export default function CommandSheet({
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
                       activeOpacity={0.6}
                       onPress={() => {
-                        const isAllSelected = ALL_TYPES.every((k: string) => activeTypes.includes(k));
+                        const isAllSelected = POOL_TYPES.every((k: string) => activeTypes.includes(k));
                         if (isAllSelected) {
-                          setActiveTypes([ALL_TYPES[0]]); // Keep at least one to prevent crash
+                          setActiveTypes([POOL_TYPES[0]]); // Keep at least one to prevent crash
                         } else {
-                          setActiveTypes(ALL_TYPES);
+                          setActiveTypes(POOL_TYPES);
                         }
                       }}
                     >
-                      <Ionicons name={ALL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                      <Ionicons name={POOL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
                       <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
                     </TouchableOpacity>
                     <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: t.txt3 }}>{activeTypes.length} Selected</Text>
                   </View>
                   <View>
                     {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
-                      const allCatSelected = cat.keys.every((k: string) => activeTypes.includes(k));
+                      // "All selected" is measured against the keys this user can pool (free set
+                      // when not Pro), so a category of free chords still reads as fully selected.
+                      const poolKeys = isPro ? cat.keys : cat.keys.filter(isChordTypeFree);
+                      const allCatSelected = poolKeys.length > 0 && poolKeys.every((k: string) => activeTypes.includes(k));
                       return (
                         <View key={cat.label} style={{ marginBottom: 20 }}>
                           <TouchableOpacity 
@@ -317,10 +341,12 @@ export default function CommandSheet({
                             {cat.keys.map((key: string) => {
                               const isActive = activeTypes.includes(key);
                               if (!CH[key]) return null;
+                              const locked = !isPro && !isChordTypeFree(key);
                               return (
                                 <TouchableOpacity key={key} activeOpacity={0.7}
-                                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
-                                  onPress={() => toggleType(key)}>
+                                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
+                                  onPress={() => locked ? openPaywall('chords') : toggleType(key)}>
+                                  {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
                                   <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                                 </TouchableOpacity>
                               );
@@ -502,16 +528,19 @@ export default function CommandSheet({
                           {cat.keys.map((key: string) => {
                             if (!CH[key]) return null;
                             const isActive = chordType === key;
+                            const locked = !isPro && !isChordTypeFree(key);
                             return (
                               <TouchableOpacity key={key} activeOpacity={0.7}
                               onLayout={(e) => qualItemY.current[key] = e.nativeEvent.layout.y}
-                              style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
                               onPress={() => {
+                                if (locked) { openPaywall('chords'); return; }
                                 setTimeout(() => {
                                   setChord(rootSemi, key);
                                   onLivePreview?.(rootSemi, key);
                                 }, 0);
                               }}>
+                                {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
                                 <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
@@ -534,43 +563,48 @@ export default function CommandSheet({
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 24 }} nestedScrollEnabled>
               <View style={{ gap: 8 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
                     activeOpacity={0.6}
                     onPress={() => {
-                      const isAllSelected = ALL_TYPES.every((k: string) => activeTypes.includes(k));
+                      const isAllSelected = POOL_TYPES.every((k: string) => activeTypes.includes(k));
                       if (isAllSelected) {
-                        setActiveTypes([ALL_TYPES[0]]); // Keep at least one to prevent crash
+                        setActiveTypes([POOL_TYPES[0]]); // Keep at least one to prevent crash
                       } else {
-                        setActiveTypes(ALL_TYPES);
+                        setActiveTypes(POOL_TYPES);
                       }
                     }}
                   >
-                    <Ionicons name={ALL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
+                    <Ionicons name={POOL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
                     <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
                   </TouchableOpacity>
                   <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: t.txt3 }}>{activeTypes.length} Selected</Text>
                 </View>
                 <View>
                   {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
-                    const allCatSelected = cat.keys.every((k: string) => activeTypes.includes(k));
+                    // "All selected" measured against the keys this user can pool (free set
+                    // when not Pro), so a category of free chords still reads as fully selected.
+                    const poolKeys = isPro ? cat.keys : cat.keys.filter(isChordTypeFree);
+                    const allCatSelected = poolKeys.length > 0 && poolKeys.every((k: string) => activeTypes.includes(k));
                     return (
                       <View key={cat.label} style={{ marginBottom: 20 }}>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                           style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
                           onPress={() => handleToggleCategory(cat.keys)} activeOpacity={0.6}>
                           <Ionicons name={allCatSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={allCatSelected ? t.accent : t.txt3} />
                           <Text style={{ ...TYPE.heading, color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
                         </TouchableOpacity>
-                        
+
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {cat.keys.map((key: string) => {
                             const isActive = activeTypes.includes(key);
                             if (!CH[key]) return null;
+                            const locked = !isPro && !isChordTypeFree(key);
                             return (
                               <TouchableOpacity key={key} activeOpacity={0.7}
-                                style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }}
-                                onPress={() => toggleType(key)}>
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
+                                onPress={() => locked ? openPaywall('chords') : toggleType(key)}>
+                                {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
                                 <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
