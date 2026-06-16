@@ -287,11 +287,11 @@ export default function ChordCard({
 }
 const styles = StyleSheet.create({
   card: { borderBottomWidth: 1, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'stretch', height: 150, position: 'relative' },
-  
-  left: { width: '42%', paddingVertical: 20, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
+  row: { flexDirection: 'row', alignItems: 'stretch', height: 138, position: 'relative' },
+
+  left: { width: '42%', paddingVertical: 16, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
   divider: { width: 1, alignSelf: 'stretch' },
-  right: { width: '58%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, paddingHorizontal: 8, gap: 6 },
+  right: { width: '58%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, paddingHorizontal: 8, gap: 6 },
   pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
   
   nameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center', gap: 4, marginBottom: 4 },

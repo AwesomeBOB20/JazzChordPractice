@@ -87,7 +87,7 @@ const getRank = (item: any) => {
 const GS_MIDI = [40, 45, 50, 55, 59, 64];
 const STRING_LABELS = ['E','A','D','G','B','E'];
 const STR_SPACING = 46;
-const FRET_SPACING = 36;
+const FRET_SPACING = 33;
 const MARGIN_LEFT = 72;
 const MARGIN_TOP = 40;
 const MARGIN_BOTTOM = 32;
@@ -1447,6 +1447,34 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
         }}>
           <Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text>
         </TouchableOpacity>
+
+        <View style={{ width: 1, alignSelf: 'stretch', marginVertical: 5, marginHorizontal: 6, backgroundColor: theme.border }} />
+
+        <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+          import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+          if (shapesMode) { const idx = uniqueShapeScaleIds.indexOf(activeShapeScaleId); handleScaleChange(uniqueShapeScaleIds[(idx - 1 + uniqueShapeScaleIds.length) % uniqueShapeScaleIds.length]); }
+          else if (arpMode) { onArpSubsetChange?.((arpSubsetIdx - 1 + arpSubsets.length) % arpSubsets.length); }
+          else if (scaleMode) { const idx = uniqueScaleIds.indexOf(activeScaleId); handleScaleChange(uniqueScaleIds[(idx - 1 + uniqueScaleIds.length) % uniqueScaleIds.length]); }
+          else { setVoicingIdx((safeVoicingIdx - 1 + currentVoicings.length) % currentVoicings.length); }
+          onNavigate?.();
+        }}>
+          <Text style={[styles.navArrow, { color: theme.txt1 }]}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.navLabelWrap}>
+          <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>{scaleMode ? 'SCALE' : shapesMode ? 'SHAPE' : arpMode ? 'TYPE' : 'VOICING'}</Text>
+          <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1}>{shapesMode ? formatVoicingName(currentShapeVoicing?.scaleName) : arpMode ? formatVoicingName(arpSubsets[arpSubsetIdx]?.label) : scaleMode ? formatVoicingName(currentScaleVoicing?.scaleName) : `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${isChordNameVoicing ? '' : slashSuffix}`}</Text>
+          <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{shapesMode ? `${Math.max(0, uniqueShapeScaleIds.indexOf(activeShapeScaleId)) + 1}/${Math.max(1, uniqueShapeScaleIds.length)}` : arpMode ? `${arpSubsetIdx + 1}/${Math.max(1, arpSubsets.length)}` : scaleMode ? `${Math.max(0, uniqueScaleIds.indexOf(activeScaleId)) + 1}/${Math.max(1, uniqueScaleIds.length)}` : `${safeVoicingIdx + 1}/${Math.max(1, currentVoicings.length)}`}</Text>
+        </View>
+        <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+          import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
+          if (shapesMode) { const idx = uniqueShapeScaleIds.indexOf(activeShapeScaleId); handleScaleChange(uniqueShapeScaleIds[(idx + 1) % uniqueShapeScaleIds.length]); }
+          else if (arpMode) { onArpSubsetChange?.((arpSubsetIdx + 1) % arpSubsets.length); }
+          else if (scaleMode) { const idx = uniqueScaleIds.indexOf(activeScaleId); handleScaleChange(uniqueScaleIds[(idx + 1) % uniqueScaleIds.length]); }
+          else { setVoicingIdx((safeVoicingIdx + 1) % currentVoicings.length); }
+          onNavigate?.();
+        }}>
+          <Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text>
+        </TouchableOpacity>
       </View>
       )}
 
@@ -1474,10 +1502,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
         </View>
       )}
 
-      {!hideNavigators && (
+      {false && !hideNavigators && (
       <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
-      <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => { 
-        import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)); 
+      <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+        import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
         if (shapesMode) {
           const idx = uniqueShapeScaleIds.indexOf(activeShapeScaleId);
           const nextIdx = (idx - 1 + uniqueShapeScaleIds.length) % uniqueShapeScaleIds.length;
@@ -1533,7 +1561,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       )}
 
       {currentVoicing || currentScaleVoicing || currentArpVoicing || currentShapeVoicing ? (
-        <View style={{ paddingTop: 16, paddingBottom: 0 }}>
+        <View style={{ paddingTop: 6, paddingBottom: 0 }}>
           {shapesMode ? ( <ScaleDiagram scaleVoicing={currentShapeVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> ) :
            scaleMode ? ( <ScaleDiagram scaleVoicing={currentScaleVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} colorModeOverride={colorModeOverride} /> ) : 
            arpMode ? ( <ScaleDiagram scaleVoicing={currentArpVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> ) : 
@@ -1553,14 +1581,15 @@ export default FretboardView;
 
 const styles = StyleSheet.create({
   container: { overflow: 'hidden', paddingTop: 0 },
-  navContainer: { 
-  flexDirection: 'row', 
-  alignItems: 'center', 
-  justifyContent: 'space-between', 
-  padding: 12,
+  navContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingHorizontal: 12,
+  paddingVertical: 6,
   borderBottomWidth: 1, // Added line
 },
-  navBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  navBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   navArrow: { fontSize: 24, fontWeight: '700', lineHeight: 28, marginTop: -2 },
   navLabelWrap: { flex: 1, alignItems: 'center' },
   navLabelTag: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 },

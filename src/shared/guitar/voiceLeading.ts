@@ -324,7 +324,10 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       // Staircase wrap chord (Up/Down only): on this one chord we IGNORE smoothness so the
       // hand snaps cleanly to the far end of the neck, then the walk resumes. Without gating
       // smoothness off, the ×15 soprano term would pin it near the top and it'd never reset.
-      const inWrap = wrapResetNext && (voiceLeadDir === 'up' || voiceLeadDir === 'down');
+      // Reset the walk at the start of a lettered section (rehearsal A/B/C…) as well as at the neck
+      // extremes, so each section gets its own clean ascending/descending arc. With no section markers
+      // `chord.section` is never set, so this falls back to the neck-extreme wrap exactly as before.
+      const inWrap = (wrapResetNext || !!chord.section) && (voiceLeadDir === 'up' || voiceLeadDir === 'down');
 
       for (const v of candidates) {
         let d = 0;
