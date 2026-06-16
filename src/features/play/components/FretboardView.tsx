@@ -41,6 +41,9 @@ interface Props {
   shapesMode?: boolean;
   shapeVoicings?: ScaleVoicing[];
   header?: React.ReactNode;
+  // The ChordCard, rendered as the LEFT column of the top band; the navigators become the
+  // right column beside it. Kept as a slot so all nav state stays inside this component.
+  leftSlot?: React.ReactNode;
   namingMode?: 'sharp' | 'flat';
   selectedBoxName?: string | null;
   selectedScaleId?: string | null;
@@ -926,7 +929,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
   groups, theme, onNotePress, onPlayVoicing, onNavigate, rootSemi, chordName = '', chordType, triggerFlash = 0,
   labelMode = 'degrees', scaleVoicings = [], scaleMode = false, formulaByPC = {},
   defaultGroupIdx = 0, arpMode = false, arpVoicings = [], arpSubsets = [], arpSubsetIdx = 0,
-  onArpSubsetChange, shapesMode = false, shapeVoicings = [], header, namingMode = 'sharp',
+  onArpSubsetChange, shapesMode = false, shapeVoicings = [], header, leftSlot, namingMode = 'sharp',
       selectedBoxName, selectedScaleId, onBoxChange, onScaleChange, scaleOverlay = false, overlayNotes = [],
       parentScales = [], activeParentScale, onParentScaleChange, hideNavigators = false, colorModeOverride,
       targetVoicing, onTargetVoicingApplied,
@@ -1357,9 +1360,17 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
     <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
       {header}
 
+      {/* Top band: ChordCard (left column) + navigators (right column). The navigators that
+          used to be full-width rows are stacked vertically here so they fit the half-width
+          column, freeing the space the old standalone nav row took up below the diagram. */}
+      <View style={[styles.band, { borderBottomColor: theme.border }]}>
+        {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
+        {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
+        <View style={styles.bandNav}>
+
       {/* Navigator 0: CHORD (sub-chord filter) — only when the chord yields more than one */}
       {!hideNavigators && hasChordAxis && (
-        <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
+        <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
             import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
             setChordIdx((safeChordIdx - 1 + chordAxisLabels.length) % chordAxisLabels.length);
@@ -1370,7 +1381,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           </TouchableOpacity>
           <View style={styles.navLabelWrap}>
             <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>CHORD</Text>
-            <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1}>{formatVoicingName(activeChordLabel)}</Text>
+            <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1} adjustsFontSizeToFit>{formatVoicingName(activeChordLabel)}</Text>
             <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{`${safeChordIdx + 1}/${chordAxisLabels.length}`}</Text>
           </View>
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
@@ -1384,11 +1395,11 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
         </View>
       )}
 
-      {/* Navigator 1: Group/Position/Shape */}
+      {/* Navigator 1a: Group / Position / String set / Shape */}
       {!hideNavigators && (scaleMode || arpMode || shapesMode || displayGroups.length > 0) && (
-  <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
-        <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => { 
-          import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)); 
+        <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
+        <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+          import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
           if (scaleMode) {
             const idx = uniqueBoxNames.indexOf(activeScaleBoxName);
             handleBoxChange(uniqueBoxNames[(idx - 1 + Math.max(1, uniqueBoxNames.length)) % Math.max(1, uniqueBoxNames.length)]);
@@ -1413,10 +1424,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
         </TouchableOpacity>
         <View style={styles.navLabelWrap}>
           <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>{scaleMode ? 'POSITION' : shapesMode ? 'POSITION' : arpMode ? 'SHAPE' : (currentVoicing?.type === 'open' || currentVoicing?.type === 'barre') ? 'POSITION' : 'STRING SET'}</Text>
-          <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1}>
-            {scaleMode ? formatVoicingName(currentScaleVoicing?.boxName) : 
-             shapesMode ? formatVoicingName(currentShapeVoicing?.boxName) : 
-             arpMode ? formatVoicingName(currentArpVoicing?.boxName) : 
+          <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1} adjustsFontSizeToFit>
+            {scaleMode ? formatVoicingName(currentScaleVoicing?.boxName) :
+             shapesMode ? formatVoicingName(currentShapeVoicing?.boxName) :
+             arpMode ? formatVoicingName(currentArpVoicing?.boxName) :
              // Shells move across strings as the voicing order changes (R-3-7 vs R-7-3), so an exact
              // string set would flicker within one group. They're grouped by BASS string instead, so
              // show that consistent group label ("E Bass"/"A Bass"/"D Bass") like open/barre do.
@@ -1425,8 +1436,8 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           </Text>
           <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{scaleMode ? `${Math.max(0, uniqueBoxNames.indexOf(activeScaleBoxName)) + 1}/${Math.max(1, uniqueBoxNames.length)}` : shapesMode ? `${Math.max(0, uniqueShapesBoxNames.indexOf(activeShapesBoxName)) + 1}/${Math.max(1, uniqueShapesBoxNames.length)}` : arpMode ? `${Math.max(0, uniqueArpBoxNames.indexOf(activeArpBoxName)) + 1}/${Math.max(1, uniqueArpBoxNames.length)}` : `${safeGroupIdx + 1}/${Math.max(1, displayGroups.length)}`}</Text>
         </View>
-        <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => { 
-          import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)); 
+        <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+          import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
           if (scaleMode) {
             const idx = uniqueBoxNames.indexOf(activeScaleBoxName);
             handleBoxChange(uniqueBoxNames[(idx + 1) % Math.max(1, uniqueBoxNames.length)]);
@@ -1447,9 +1458,12 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
         }}>
           <Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text>
         </TouchableOpacity>
+      </View>
+      )}
 
-        <View style={{ width: 1, alignSelf: 'stretch', marginVertical: 5, marginHorizontal: 6, backgroundColor: theme.border }} />
-
+      {/* Navigator 1b: Voicing / Scale / Shape / Type */}
+      {!hideNavigators && (scaleMode || arpMode || shapesMode || displayGroups.length > 0) && (
+        <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
         <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
           import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
           if (shapesMode) { const idx = uniqueShapeScaleIds.indexOf(activeShapeScaleId); handleScaleChange(uniqueShapeScaleIds[(idx - 1 + uniqueShapeScaleIds.length) % uniqueShapeScaleIds.length]); }
@@ -1462,7 +1476,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
         </TouchableOpacity>
         <View style={styles.navLabelWrap}>
           <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>{scaleMode ? 'SCALE' : shapesMode ? 'SHAPE' : arpMode ? 'TYPE' : 'VOICING'}</Text>
-          <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1}>{shapesMode ? formatVoicingName(currentShapeVoicing?.scaleName) : arpMode ? formatVoicingName(arpSubsets[arpSubsetIdx]?.label) : scaleMode ? formatVoicingName(currentScaleVoicing?.scaleName) : `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${isChordNameVoicing ? '' : slashSuffix}`}</Text>
+          <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1} adjustsFontSizeToFit>{shapesMode ? formatVoicingName(currentShapeVoicing?.scaleName) : arpMode ? formatVoicingName(arpSubsets[arpSubsetIdx]?.label) : scaleMode ? formatVoicingName(currentScaleVoicing?.scaleName) : `${bottomMainText.replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}${isChordNameVoicing ? '' : slashSuffix}`}</Text>
           <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{shapesMode ? `${Math.max(0, uniqueShapeScaleIds.indexOf(activeShapeScaleId)) + 1}/${Math.max(1, uniqueShapeScaleIds.length)}` : arpMode ? `${arpSubsetIdx + 1}/${Math.max(1, arpSubsets.length)}` : scaleMode ? `${Math.max(0, uniqueScaleIds.indexOf(activeScaleId)) + 1}/${Math.max(1, uniqueScaleIds.length)}` : `${safeVoicingIdx + 1}/${Math.max(1, currentVoicings.length)}`}</Text>
         </View>
         <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
@@ -1479,9 +1493,9 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       )}
 
       {!hideNavigators && parentScales.length > 0 && (
-        <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
-          <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => { 
-            import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)); 
+        <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
+          <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+            import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
             const idx = parentScales.indexOf(activeParentScale || parentScales[0]);
             onParentScaleChange?.(parentScales[(idx - 1 + parentScales.length) % parentScales.length]);
           }}>
@@ -1489,11 +1503,11 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           </TouchableOpacity>
           <View style={styles.navLabelWrap}>
             <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>PARENT MODE</Text>
-            <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1}>{formatVoicingName(SCALES[activeParentScale || parentScales[0]]?.name || activeParentScale || parentScales[0])}</Text>
+            <Text style={[styles.navLabelTop, { color: theme.txt1 }]} numberOfLines={1} adjustsFontSizeToFit>{formatVoicingName(SCALES[activeParentScale || parentScales[0]]?.name || activeParentScale || parentScales[0])}</Text>
             <Text style={[styles.navLabelBot, { color: theme.txt3 }]}>{`${Math.max(0, parentScales.indexOf(activeParentScale || parentScales[0])) + 1}/${parentScales.length}`}</Text>
           </View>
-          <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => { 
-            import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)); 
+          <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => {
+            import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
             const idx = parentScales.indexOf(activeParentScale || parentScales[0]);
             onParentScaleChange?.(parentScales[(idx + 1) % parentScales.length]);
           }}>
@@ -1501,6 +1515,8 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           </TouchableOpacity>
         </View>
       )}
+        </View>
+      </View>
 
       {false && !hideNavigators && (
       <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
@@ -1581,6 +1597,13 @@ export default FretboardView;
 
 const styles = StyleSheet.create({
   container: { overflow: 'hidden', paddingTop: 0 },
+  // Top band: card (left) + stacked navigators (right), separated by a vertical divider, with a
+  // single full-width bottom border above the diagram.
+  band: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1 },
+  bandLeft: { width: '46%', justifyContent: 'center' },
+  bandDivider: { width: 1, alignSelf: 'stretch' },
+  bandNav: { flex: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8 },
   navContainer: {
   flexDirection: 'row',
   alignItems: 'center',

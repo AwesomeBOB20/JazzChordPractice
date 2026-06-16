@@ -31,6 +31,8 @@ interface Props {
   rootSemi?: number;
   namingMode?: 'sharp' | 'flat';
   header?: React.ReactNode;
+  // The ChordCard, rendered as the LEFT column of the top band; navigators become the right column.
+  leftSlot?: React.ReactNode;
   showAllLabels?: boolean;
   scaleOverlay?: boolean;
   overlayNotes?: number[];
@@ -234,7 +236,7 @@ const BlackKey = React.memo(function BlackKey({ keyColor, keyTextColor, keyBorde
 
 const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView({
   midiNotes, theme, noteNames = [], roles = [], formulas = [], formulaByPC = {}, onNotePress,
-  octave = 4, labelMode = 'degrees', accentColor, rootSemi = 0, namingMode, header,
+  octave = 4, labelMode = 'degrees', accentColor, rootSemi = 0, namingMode, header, leftSlot,
   showAllLabels = false, scaleOverlay = false, overlayNotes = [], overlayRoles = [], overlayFormulas = [], showNavigation = false, groupLabel, voicingLabel, voicingName, voicingSubName, voicingIdx = 0, totalVoicings = 0, onPrevVoicing, onNextVoicing, groups = [], onGroupPrev, onGroupNext,
   parentScales = [], activeParentScale, onParentScaleChange, colorModeOverride, showMiniMap = true,
 }, ref) {
@@ -631,10 +633,15 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   return (
     <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
       {header}
+      {/* Top band: ChordCard (left column) + stacked navigators (right column). */}
+      <View style={[styles.band, { borderBottomColor: theme.border }]}>
+        {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
+        {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
+        <View style={styles.bandNav}>
       {showNavigation && groups && groups.length > 1 && (() => {
         const idx = Math.max(0, groups.findIndex(g => voicingIdx >= g.startIdx && voicingIdx < g.startIdx + g.count));
         return (
-          <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
+          <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
             <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={onGroupPrev}><Text style={[styles.navArrow, { color: theme.txt1 }]}>‹</Text></TouchableOpacity>
             <View style={styles.navLabelWrap}>
               {groupLabel && <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>{groupLabel}</Text>}
@@ -652,7 +659,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
         );
       })()}
       {parentScales.length > 0 && (
-        <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
+        <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={() => { 
             import('expo-haptics').then(Haptics => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)); 
             const idx = parentScales.indexOf(activeParentScale || parentScales[0]);
@@ -675,7 +682,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
         </View>
       )}
       {showNavigation && totalVoicings > 0 && (
-        <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
+        <View style={[styles.navRow, { borderBottomColor: theme.border }]}>
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={onPrevVoicing}><Text style={[styles.navArrow, { color: theme.txt1 }]}>‹</Text></TouchableOpacity>
           <View style={styles.navLabelWrap}>
             {voicingLabel && <Text style={[styles.navLabelTag, { color: theme.txt3 }]}>{voicingLabel}</Text>}
@@ -693,6 +700,8 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={onNextVoicing}><Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text></TouchableOpacity>
         </View>
       )}
+        </View>
+      </View>
       {showMiniMap && (
         <PianoMiniMap
           midiNotes={midiNotes}
@@ -769,7 +778,12 @@ export default PianoView;
 
 const styles = StyleSheet.create({
   container: { overflow: 'hidden', position: 'relative', paddingTop: 0 },
-  navContainer: { 
+  band: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1 },
+  bandLeft: { width: '46%', justifyContent: 'center' },
+  bandDivider: { width: 1, alignSelf: 'stretch' },
+  bandNav: { flex: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8 },
+  navContainer: {
   flexDirection: 'row', 
   alignItems: 'center', 
   justifyContent: 'space-between',

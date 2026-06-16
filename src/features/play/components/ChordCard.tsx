@@ -86,7 +86,6 @@ export default function ChordCard({
   const txt2 = theme?.txt2 ?? '#aaaacc';
   const txt3 = theme?.txt3 ?? '#6666aa';
   const accent = theme?.accent ?? '#D85A30';
-  const border = theme?.border ?? '#333';
 
   // Force a pleasant middle register (Octave 4) for the UI note pills,
   // ignoring the global instrument octave which might be tuned down for the fretboard.
@@ -170,144 +169,108 @@ export default function ChordCard({
   
 
   return (
-    <View style={[styles.card, { backgroundColor: bg, borderColor: border }]}>
-      <View style={styles.row}>
+    <View style={[styles.card, { backgroundColor: bg }]} {...panResponder.panHandlers}>
+      {/* Background Play Button */}
+      <TouchableOpacity
+        style={StyleSheet.absoluteFill}
+        activeOpacity={0.7}
+        onPress={onPress}
+      />
 
-        <View style={[styles.left, { position: 'relative' }]} {...panResponder.panHandlers}>
-          {/* Background Play Button */}
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={0.7}
-            onPress={onPress}
-          />
-
-          {/* Top Chevron */}
-          <TouchableOpacity
-            onPress={onTopChevronPress}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            style={{ position: 'absolute', top: 4, left: '50%', marginLeft: -10, zIndex: 10, padding: 4 }}
-          >
-            <Ionicons name="chevron-up" size={20} color={txt3} style={{ opacity: 0.6 }} />
+      {/* Stacked steppers — root on top, quality below. Sized to read as a matched pair. */}
+      <View style={{ width: '100%', gap: 2 }} pointerEvents="box-none">
+        <View style={styles.stepRow}>
+          <TouchableOpacity onPress={onLeftChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
+            <Ionicons name="chevron-back" size={18} color={txt3} />
           </TouchableOpacity>
-
-          {/* Bottom Chevron */}
-          <TouchableOpacity
-            onPress={onBottomChevronPress}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            style={{ position: 'absolute', bottom: 4, left: '50%', marginLeft: -10, zIndex: 10, padding: 4 }}
-          >
-            <Ionicons name="chevron-down" size={20} color={txt3} style={{ opacity: 0.6 }} />
+          <Text style={[styles.root, { color: txt1, flex: 1, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>{rootName}</Text>
+          <TouchableOpacity onPress={onRightChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
+            <Ionicons name="chevron-forward" size={18} color={txt3} />
           </TouchableOpacity>
+        </View>
+        <View style={styles.stepRow}>
+          <TouchableOpacity onPress={onBottomChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
+            <Ionicons name="chevron-back" size={18} color={txt3} />
+          </TouchableOpacity>
+          <Text style={[styles.type, { color: accent, flex: 1, textAlign: 'center', marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit>{formatChordSymbol(mainSuffix)}</Text>
+          <TouchableOpacity onPress={onTopChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
+            <Ionicons name="chevron-forward" size={18} color={txt3} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
-          {/* Foreground Content Wrapper */}
-          <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center' }} pointerEvents="box-none">
-            <View style={[styles.nameRow, { marginBottom: 0 }]} pointerEvents="none">
-              <Text style={[styles.root, { color: txt1 }]}>{rootName}</Text>
-              <Text
-                style={[styles.type, { color: accent }]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
-                {formatChordSymbol(mainSuffix)}
-              </Text>
-            </View>
-          </View>
+      {subLabelRoot || subLabelType || subLabel || needsFallbackSubLabel ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'nowrap', maxWidth: '100%', marginTop: 2 }} pointerEvents="none">
 
-          <View style={{ height: 4 }} pointerEvents="none" />
-          
-          {subLabelRoot || subLabelType || subLabel || needsFallbackSubLabel ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'nowrap', maxWidth: '100%' }} pointerEvents="none">
-
-              {(subLabelRoot || subLabelType) ? (
-                <>
-                  {subLabelRoot ? <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginRight: 2, flexShrink: 1 }]}>{formatChordSymbol(subLabelRoot)}</Text> : null}
-                  {subLabelType ? <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: accent, marginRight: 4, flexShrink: 1 }]}>{formatChordSymbol(subLabelType)}</Text> : null}
-                  {isSlash && !subLabelTypeHasSlash ? (
-                    <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginLeft: 4, flexShrink: 1 }]}>/ {bassName}</Text>
-                  ) : null}
-                </>
+          {(subLabelRoot || subLabelType) ? (
+            <>
+              {subLabelRoot ? <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginRight: 2, flexShrink: 1 }]}>{formatChordSymbol(subLabelRoot)}</Text> : null}
+              {subLabelType ? <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: accent, marginRight: 4, flexShrink: 1 }]}>{formatChordSymbol(subLabelType)}</Text> : null}
+              {isSlash && !subLabelTypeHasSlash ? (
+                <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginLeft: 4, flexShrink: 1 }]}>/ {bassName}</Text>
               ) : null}
-
-              {subLabel && !subLabelRoot && !subLabelType ? (
-                <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt2, marginRight: 4, flexShrink: 1 }]}>
-                  {formatChordSymbol(subLabel).replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}
-                </Text>
-              ) : null}
-
-              {needsFallbackSubLabel ? (
-                <>
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginRight: 2, flexShrink: 1 }]}>{rootName}</Text>
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: accent, flexShrink: 1 }]}>{formatChordSymbol(mainSuffix)}</Text>
-                  <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginLeft: 4, flexShrink: 1 }]}>/ {bassName}</Text>
-                </>
-              ) : null}
-
-            </View>
+            </>
           ) : null}
-          
-          <Text style={[styles.formula, { color: txt3 }]}>
-            {formulaToUse.map(formatDegree).join(' · ')}
-          </Text>
+
+          {subLabel && !subLabelRoot && !subLabelType ? (
+            <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt2, marginRight: 4, flexShrink: 1 }]}>
+              {formatChordSymbol(subLabel).replace(/\s*\/\s*(?=[A-G])/gi, ' / ')}
+            </Text>
+          ) : null}
+
+          {needsFallbackSubLabel ? (
+            <>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginRight: 2, flexShrink: 1 }]}>{rootName}</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: accent, flexShrink: 1 }]}>{formatChordSymbol(mainSuffix)}</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit style={[styles.subLabel, { color: txt1, marginLeft: 4, flexShrink: 1 }]}>/ {bassName}</Text>
+            </>
+          ) : null}
+
         </View>
+      ) : null}
 
-        <View style={[styles.divider, { backgroundColor: border }]} />
+      <Text style={[styles.formula, { color: txt3 }]}>
+        {formulaToUse.map(formatDegree).join(' · ')}
+      </Text>
 
-        <View style={styles.right}>
+      {/* Note pills — moved into the card's (left) column, stacked under the formula. */}
+      <View style={styles.pillStack} pointerEvents="box-none">
+        <View style={styles.pillRow}>
+          {topRow.map((p, i) => renderPill(p, i))}
+        </View>
+        {bottomRow.length > 0 && (
           <View style={styles.pillRow}>
-            {topRow.map((p, i) => renderPill(p, i))}
+            {bottomRow.map((p, i) => renderPill(p, i + topRow.length))}
           </View>
-          {bottomRow.length > 0 && (
-            <View style={styles.pillRow}>
-              {bottomRow.map((p, i) => renderPill(p, i + topRow.length))}
-            </View>
-          )}
-        </View>
-
-        {/* Left Chevron */}
-        <TouchableOpacity
-          onPress={onLeftChevronPress}
-          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-          style={{ position: 'absolute', left: 4, top: '50%', marginTop: -18, zIndex: 10, height: 36, width: 36, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Ionicons name="chevron-back" size={22} color={txt3} style={{ opacity: 0.6 }} />
-        </TouchableOpacity>
-
-        {/* Right Chevron */}
-        <TouchableOpacity
-          onPress={onRightChevronPress}
-          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-          style={{ position: 'absolute', left: '42%', marginLeft: -40, top: '50%', marginTop: -18, zIndex: 10, height: 36, width: 36, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Ionicons name="chevron-forward" size={22} color={txt3} style={{ opacity: 0.6 }} />
-        </TouchableOpacity>
-
+        )}
       </View>
     </View>
   );
 }
 const styles = StyleSheet.create({
-  card: { borderBottomWidth: 1, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'stretch', height: 138, position: 'relative' },
+  // The card is now a single (left) column: steppers → sub-label → formula → note pills,
+  // all stacked. The POSITION/VOICING navigators sit beside it (provided by the instrument
+  // view as the right column of the band), so the card no longer owns a divider/right split.
+  card: { paddingVertical: 12, paddingHorizontal: 10, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
 
-  left: { width: '42%', paddingVertical: 16, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center' },
-  divider: { width: 1, alignSelf: 'stretch' },
-  right: { width: '58%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, paddingHorizontal: 8, gap: 6 },
+  pillStack: { alignItems: 'center', gap: 6, marginTop: 6 },
   pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  
-  nameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center', gap: 4, marginBottom: 4 },
-  // lineHeight must exceed the 44px font size or the cap of the root letter (e.g. "C")
-  // gets clipped at the top of the line box. ~1.18x gives the ascender headroom.
-  root: { ...TYPE.display, lineHeight: 52, textAlign: 'center' },
-  type: { ...TYPE.subtitle, fontWeight: FONT_WEIGHT.semibold, textAlign: 'center', marginBottom: 4 },
-  subLabel: { ...TYPE.label, textAlign: 'center', marginBottom: 4 },
-  formula: { ...TYPE.caption, letterSpacing: 1, textAlign: 'center' },
-  
+
+  stepRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' },
+  stepBtn: { paddingHorizontal: 4, paddingVertical: 2 },
+  // Root + quality are sized as a matched pair (title over subtitle) so the two steppers read
+  // together. lineHeight gives the cap/ascenders headroom so the glyphs aren't clipped.
+  root: { ...TYPE.title, lineHeight: 30, textAlign: 'center' },
+  type: { ...TYPE.subtitle, fontWeight: FONT_WEIGHT.semibold, textAlign: 'center', lineHeight: 26 },
+  subLabel: { ...TYPE.label, textAlign: 'center', marginBottom: 2 },
+  formula: { ...TYPE.caption, letterSpacing: 1, textAlign: 'center', marginTop: 4 },
+
   pillContainer: { alignItems: 'center', gap: 0 },
-  pill: { 
-    width: 38, 
-    height: 38, 
-    borderRadius: 19, // Perfect circle!
-    alignItems: 'center', 
+  pill: {
+    width: 34,
+    height: 34,
+    borderRadius: 17, // Perfect circle!
+    alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 2,
     shadowColor: '#000',
