@@ -1177,6 +1177,8 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       .replace(/ \[.*?Str\]/g, '') // Remove developer tags like [A Str]
       .replace(/\s*\[\d(?:-\d)+\]/g, '') // Remove injected string sets like [5-4-3-2]
       .replace(/\s*\([A-G]\s*(Pos|Shape)\)/gi, '') // Remove redundant shape/pos labels
+      .replace(/\s*\(Barre at \d+\)/gi, '') // "E Shape (Barre at 8)" → "E Shape"; the fret is obvious from the diagram
+      .replace(/\s*\(Open\)/gi, '') // "E Shape (Open)" → "E Shape"; likewise obvious from the diagram
       .replace(/(?:from|on)\s+(?:b|#|♭|♯)?\w+\s*\((.*?)\)/gi, '$1')
       .replace(/Root Pattern\s*\((.*?)\)/gi, '$1')
       .replace(/(?:from|on)\s+(?:b|#|♭|♯)?\w+/gi, '')

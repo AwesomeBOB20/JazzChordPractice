@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet, Dimensions } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { THEMES } from '@shared/ui/themes';
@@ -21,6 +21,10 @@ export default function PaywallModal() {
   const visible = feature !== null;
   const [price, setPrice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Cap the card to the screen so it never overflows; the benefits list scrolls
+  // within whatever space is left after the (pinned) header + buttons.
+  const maxCardHeight = Dimensions.get('window').height - 120;
 
   // Load the (localized) price the first time the paywall is opened.
   useEffect(() => {
@@ -61,7 +65,7 @@ export default function PaywallModal() {
 
   return (
     <PopUpModal visible={visible} onClose={closePaywall}>
-      <View style={[styles.box, { backgroundColor: t.bg2, borderColor: t.border }]}>
+      <View style={[styles.box, { backgroundColor: t.bg2, borderColor: t.border, maxHeight: maxCardHeight }]}>
         <TouchableOpacity style={styles.closeBtn} onPress={closePaywall} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="close" size={22} color={t.txt3} />
         </TouchableOpacity>
@@ -74,7 +78,7 @@ export default function PaywallModal() {
           <Text style={[styles.subtitle, { color: t.txt2 }]}>One unlock. Yours forever. No subscription.</Text>
         </View>
 
-        <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.benefits} contentContainerStyle={{ paddingBottom: 2 }} showsVerticalScrollIndicator={true}>
           {PRO_BENEFITS.map((b) => (
             <View key={b.title} style={styles.benefitRow}>
               {b.iconLib === 'ion'
@@ -115,6 +119,7 @@ const styles = StyleSheet.create({
   box: { width: '100%', padding: 24, borderRadius: 24, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
   closeBtn: { position: 'absolute', top: 14, right: 14, zIndex: 2, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   header: { alignItems: 'center', marginBottom: 20 },
+  benefits: { flexShrink: 1 },
   crown: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   title: { fontSize: 22, fontWeight: '800', letterSpacing: 0.3, textAlign: 'center' },
   subtitle: { fontSize: 13, fontWeight: '600', marginTop: 6, textAlign: 'center' },

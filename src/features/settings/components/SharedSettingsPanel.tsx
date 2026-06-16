@@ -48,8 +48,8 @@ export default function SharedSettingsPanel() {
   );
 
   // A row showing the current value; tapping expands an inline picker below it.
-  const ValueRow = ({ icon, label, valueLabel, valueFont, pickerKey, options, selected, onSelect, mci }: {
-    icon: string; label: string; valueLabel: string; valueFont?: string; pickerKey: string; mci?: boolean;
+  const ValueRow = ({ icon, label, valueLabel, valueFont, pickerKey, options, selected, onSelect, mci, locked }: {
+    icon: string; label: string; valueLabel: string; valueFont?: string; pickerKey: string; mci?: boolean; locked?: boolean;
     options: { value: any; label: string; font?: string }[]; selected: any; onSelect: (v: any) => void;
   }) => {
     const open = openPicker === pickerKey;
@@ -58,6 +58,7 @@ export default function SharedSettingsPanel() {
         <TouchableOpacity activeOpacity={0.6} onPress={() => setOpenPicker(open ? null : pickerKey)} style={styles.row}>
           <Left icon={icon} label={label} mci={mci} />
           <View style={styles.valueRight}>
+            {locked && <Ionicons name="lock-closed" size={13} color={t.txt3} />}
             <Text style={[styles.valueText, { color: t.txt2 }, valueFont ? { fontFamily: valueFont } : null]}>{valueLabel}</Text>
             <Ionicons name={open ? 'chevron-up' : 'chevron-forward'} size={16} color={t.txt3} />
           </View>
@@ -181,7 +182,7 @@ export default function SharedSettingsPanel() {
             </View>
           </View>
           <Hair />
-          <ValueRow icon="pitchfork" mci label="Tuning (A=)" valueLabel={`${referenceFrequency} Hz`} pickerKey="tuning"
+          <ValueRow icon="pitchfork" mci label="Tuning (A=)" valueLabel={`${referenceFrequency} Hz`} pickerKey="tuning" locked={!isPro}
             options={TUNING_OPTS.map(f => ({ value: f, label: `${f} Hz` }))} selected={referenceFrequency} onSelect={(v) => { if (!isPro && v !== 440) { openPaywall('tuner'); return; } setReferenceFrequency(v); }} />
         </View>
       )}

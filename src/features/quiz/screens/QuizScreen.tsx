@@ -15,7 +15,7 @@ import { THEMES } from '@shared/ui/themes';
 import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, preferredAccidentalForRoot, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CommandSheet } from '@shared/ui';
-import { isChordTypeFree } from '@features/pro/proConstants';
+import { isChordTypeFree, FREE_VOICING_TABS } from '@features/pro/proConstants';
 import { useAudio } from '@shared/audio/AudioContext';
 import { 
   buildTriadVoicings, 
@@ -348,7 +348,10 @@ export default function QuizScreen() {
   const { octave, labelMode, theme, arp, instrument, isSettingsOpen, bpm, isPro } = useSettingsStore();
   const setArpForced = useSettingsStore(s => s.setArpForced);
   const { activeTypes, namingMode } = useChordStore();
-  const { quizMode, quizScore, quizTotal, quizStreak, resetQuiz, incrementQuiz, activeVoicingTypes, activeInversions } = useQuizStore();
+  const { quizMode, quizScore, quizTotal, quizStreak, resetQuiz, incrementQuiz, activeVoicingTypes, activeInversions: rawInversions } = useQuizStore();
+  // Free users are quizzed on root position only; 1st/2nd/3rd inversions are Pro. Clamp here
+  // (memoized for stable identity) so every generation site below uses the gated list.
+  const activeInversions = useMemo(() => (isPro ? rawInversions : ['root']), [isPro, rawInversions]);
 
   const t = THEMES[theme];
   const isFocused = useIsFocused();
@@ -761,9 +764,12 @@ export default function QuizScreen() {
       const basePool = isPro
         ? rawPool
         : (freePool.length > 0 ? freePool : ALL_CHORD_KEYS.filter(isChordTypeFree));
-      const allowedVoicings = instrument === 'piano'
+      const allowedVoicings = (instrument === 'piano'
         ? ['block', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales']
-        : ['open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'];
+        : ['open', 'barre', 'triads', 'shells', 'drop2', 'drop3', 'drop2and4', 'intervals', 'arps', 'shapes', 'scales'])
+        // Free users are only quizzed on the freemium voicing families (block/open/barre/triads/
+        // scales) — never the Pro shells/drops/arps/intervals/shapes, even if a pre-Pro pool persists.
+        .filter(v => isPro || FREE_VOICING_TABS.has(v));
       
       const currentVoicingPool = activeVoicingTypes.filter(v => allowedVoicings.includes(v));
       // Honor "what works with what": only draw from voicing categories that at least
@@ -1751,7 +1757,7 @@ export default function QuizScreen() {
               formulas={activeFormulas}
               namingMode={questionNaming}
               theme={t}
-              onNotePress={(midi) => onNotePress?.(midi, 80, false)}
+              onNotePress={(midi) => onNotePress?.(midi, 80, activeQuizInstrument === 'guitar')}
             />
           </View>
         )}

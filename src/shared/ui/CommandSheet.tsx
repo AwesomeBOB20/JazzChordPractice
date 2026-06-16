@@ -330,8 +330,8 @@ export default function CommandSheet({
                       const allCatSelected = poolKeys.length > 0 && poolKeys.every((k: string) => activeTypes.includes(k));
                       return (
                         <View key={cat.label} style={{ marginBottom: 20 }}>
-                          <TouchableOpacity 
-                            style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8, opacity: poolKeys.length === 0 ? 0.4 : 1 }}
                             onPress={() => handleToggleCategory(cat.keys)} activeOpacity={0.6}>
                             <Ionicons name={allCatSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={allCatSelected ? t.accent : t.txt3} />
                             <Text style={{ ...TYPE.heading, color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
@@ -342,12 +342,15 @@ export default function CommandSheet({
                               const isActive = activeTypes.includes(key);
                               if (!CH[key]) return null;
                               const locked = !isPro && !isChordTypeFree(key);
+                              // A locked chord must never paint as "selected" (accent), even if it
+                              // lingers in a persisted activeTypes pool — only free, active chips do.
+                              const showActive = isActive && !locked;
                               return (
                                 <TouchableOpacity key={key} activeOpacity={0.7}
-                                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
+                                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: showActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
                                   onPress={() => locked ? openPaywall('chords') : toggleType(key)}>
                                   {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
-                                  <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                                  <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: showActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                                 </TouchableOpacity>
                               );
                             })}
@@ -529,10 +532,11 @@ export default function CommandSheet({
                             if (!CH[key]) return null;
                             const isActive = chordType === key;
                             const locked = !isPro && !isChordTypeFree(key);
+                            const showActive = isActive && !locked;
                             return (
                               <TouchableOpacity key={key} activeOpacity={0.7}
                               onLayout={(e) => qualItemY.current[key] = e.nativeEvent.layout.y}
-                              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: showActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
                               onPress={() => {
                                 if (locked) { openPaywall('chords'); return; }
                                 setTimeout(() => {
@@ -541,7 +545,7 @@ export default function CommandSheet({
                                 }, 0);
                               }}>
                                 {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
-                                <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                                <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: showActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}
@@ -589,7 +593,7 @@ export default function CommandSheet({
                     return (
                       <View key={cat.label} style={{ marginBottom: 20 }}>
                         <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
+                          style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8, opacity: poolKeys.length === 0 ? 0.4 : 1 }}
                           onPress={() => handleToggleCategory(cat.keys)} activeOpacity={0.6}>
                           <Ionicons name={allCatSelected ? "checkmark-circle" : "ellipse-outline"} size={18} color={allCatSelected ? t.accent : t.txt3} />
                           <Text style={{ ...TYPE.heading, color: allCatSelected ? t.accent : t.txt1 }}>{cat.label}</Text>
@@ -600,12 +604,13 @@ export default function CommandSheet({
                             const isActive = activeTypes.includes(key);
                             if (!CH[key]) return null;
                             const locked = !isPro && !isChordTypeFree(key);
+                            const showActive = isActive && !locked;
                             return (
                               <TouchableOpacity key={key} activeOpacity={0.7}
-                                style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: showActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }}
                                 onPress={() => locked ? openPaywall('chords') : toggleType(key)}>
                                 {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
-                                <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                                <Text style={{ ...TYPE.body, fontWeight: FONT_WEIGHT.bold, color: showActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}

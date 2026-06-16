@@ -10,7 +10,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
-import type { ProFeature } from '@features/pro/proConstants';
+import { FREE_VOICING_TABS, type ProFeature } from '@features/pro/proConstants';
 import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
@@ -54,12 +54,6 @@ function getComplexity(roles: string[]) {
 }
 
 type VoicingTabKey = 'block' | 'open' | 'barre' | 'triads' | 'shells' | 'drop2' | 'drop3' | 'drop2and4' | 'spread' | 'rootless' | 'scales' | 'arps' | 'intervals' | 'shapes';
-
-
-
-// Voicing tabs free on every tier. Everything else (Shells, Drop 2/3/2&4, Intervals,
-// Arps, Shapes) is Pro — see the freemium split.
-const FREE_VOICING_TABS: ReadonlySet<VoicingTabKey> = new Set<VoicingTabKey>(['block', 'open', 'barre', 'triads', 'scales']);
 
 function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, isPro, openPaywall, t }: { voicingTab: VoicingTabKey; setVoicingTab: (key: VoicingTabKey) => void; tabCounts: Record<VoicingTabKey, number>; isPro: boolean; openPaywall: (f: ProFeature) => void; t: Theme; }) {
   const scrollRef = useRef<ScrollView>(null);

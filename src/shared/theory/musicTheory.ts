@@ -322,6 +322,19 @@ function accStr(acc: number): string {
   return acc > 0 ? '♯'.repeat(acc) : '♭'.repeat(-acc);
 }
 
+// True semitone offset of a chord/scale formula above its root, PRESERVING octave extensions
+// (9→14, 11→17, 13→21, bb7→9). Returns 0 for the root and any unparseable token. Use this when
+// you need an ascending stack (e.g. the quiz chord-anatomy) rather than a pitch class.
+const FORMULA_INTERVALS: Record<number, number> = { 1:0, 2:2, 3:4, 4:5, 5:7, 6:9, 7:11, 8:12, 9:14, 10:16, 11:17, 12:19, 13:21 };
+export function formulaSemitones(formula: string): number {
+  if (!formula || formula === '1' || formula === 'R' || formula === 'root') return 0;
+  const match = formula.match(/^([#b]*)(\d+)$/);
+  if (!match) return 0;
+  let accOffset = 0;
+  for (const ch of (match[1] ?? '')) { if (ch === '#') accOffset++; else if (ch === 'b') accOffset--; }
+  return (FORMULA_INTERVALS[parseInt(match[2], 10)] ?? 0) + accOffset;
+}
+
 export function spellInterval(rootSemi: number, formula: string, useFlat = false): string {
   if (!formula) return '';
   const rootNoteName = useFlat ? NOTE_FLAT[rootSemi % 12] : NOTE_SHARP[rootSemi % 12];

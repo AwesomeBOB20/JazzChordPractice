@@ -57,3 +57,12 @@ export const FREE_CHORD_TYPES: ReadonlySet<string> = new Set<string>([
 ]);
 
 export const isChordTypeFree = (type: string): boolean => FREE_CHORD_TYPES.has(type);
+
+// Voicing families free on every tier — mirrors the Explore voicing tabs a free user can open.
+// Everything else (shells, drop 2/3/2&4, arps, intervals, shapes) is Pro. Used by the Explore
+// tab bar AND the quiz pool so a free user is never quizzed on a locked voicing.
+export const FREE_VOICING_TABS: ReadonlySet<string> = new Set<string>([
+  'block', 'open', 'barre', 'triads', 'scales',
+]);
+
+export const isVoicingTabFree = (tab: string): boolean => FREE_VOICING_TABS.has(tab);

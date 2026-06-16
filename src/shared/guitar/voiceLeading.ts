@@ -4,7 +4,7 @@ import { ProgressionChord } from '@shared/types/models';
 
 // Kept as a local union (not imported from the progression store) so this shared
 // guitar module has no dependency on a feature store.
-type ForcedVoicingType = 'auto' | 'open' | 'barre' | 'triads' | 'drop2' | 'drop3' | 'shells';
+type ForcedVoicingType = 'auto' | 'open' | 'barre' | 'triads' | 'drop2' | 'drop3' | 'shells' | 'autoFree';
 
 // ── Idiomatic-jazz voicing character ──────────────────────────────────────────
 // Score a voicing by how well it spells the chord the way a jazz comper would:
@@ -165,6 +165,9 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       forcedType === 'drop2'  ? drop2Voicings :
       forcedType === 'drop3'  ? drop3Voicings :
       forcedType === 'shells' ? shellVoicings :
+      // Free-tier AUTO: only the freemium voicing families (open / barre / triads), preferring
+      // open → barre → triads per chord so a drop or shell never surfaces for a free user.
+      forcedType === 'autoFree' ? (openVoicings.length ? openVoicings : barreVoicings.length ? barreVoicings : triadVoicings) :
       // Auto = Drop 2 (only on the 4-3-2-1 / 5-4-3-2 comping sets) + Drop 3 for the lower register —
       // no triads, no shells. Falls back to the full set below when a chord has neither (e.g. a plain
       // triad can't be a drop voicing), so no cell renders blank.

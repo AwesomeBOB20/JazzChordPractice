@@ -70,8 +70,6 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
   const setArp = useSettingsStore((s: any) => s.setArp);
   const arpForced = useSettingsStore((s: any) => s.arpForced);
   const setIsSettingsOpen = useSettingsStore((s: any) => s.setIsSettingsOpen);
-  const isPro = useSettingsStore((s: any) => s.isPro);
-  const openPaywall = useSettingsStore((s: any) => s.openPaywall);
 
   const quizMode = useQuizStore((s: any) => s.quizMode);
   const setQuizMode = useQuizStore((s: any) => s.setQuizMode);
@@ -136,7 +134,7 @@ function GlobalHeader({ onOpenBpmModal, currentRoute }: { onOpenBpmModal: () => 
       <SlidingToggle
         width={cw}
         activeIndex={!(arp || arpForced) ? 0 : 1}
-        onPressSegment={(i) => { if (arpForced) return; if (i === 1 && !isPro) { openPaywall('voicings'); return; } Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(i === 1); }}
+        onPressSegment={(i) => { if (arpForced) return; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setArp(i === 1); }}
         segments={[
           <MaterialCommunityIcons name="music-note-quarter" size={16} color={!(arp || arpForced) ? '#fff' : t.txt2} />,
           <Ionicons name="musical-notes" size={16} color={(arp || arpForced) ? '#fff' : t.txt2} />,
