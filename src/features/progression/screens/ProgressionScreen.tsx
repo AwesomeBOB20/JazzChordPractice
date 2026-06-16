@@ -290,6 +290,9 @@ export default function ProgressionScreen() {
   // entering arp render mode (arpView stays false), so no paywall interrupts the cycle.
   const [arpLabelOnly, setArpLabelOnly] = useState(false);
   const lastTap = useRef<{ idx: number, time: number }>({ idx: -1, time: 0 });
+  // Double-tap timestamps for the locked toggle buttons (a hold OR double-tap opens the paywall).
+  const lastVoicingTapRef = useRef(0);
+  const lastViewTapRef = useRef(0);
 
   // View cycles: NAME (text) → CHORDS (block voicing diagrams) → ARPS (same voicing,
   // numbered + played note-by-note) → NAME.
@@ -990,7 +993,17 @@ export default function ProgressionScreen() {
       }]}>
         {(
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 44 }} style={{ height: 44 }}>
-            <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={cycleViewMode}>
+            <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]}
+              onPress={() => {
+                // Single tap cycles. A double-tap (or hold) on the locked ARPS view opens the paywall.
+                const now = Date.now();
+                if (arpLabelOnly && now - lastViewTapRef.current < 300) { lastViewTapRef.current = 0; openPaywall('voicings'); return; }
+                lastViewTapRef.current = now;
+                cycleViewMode();
+              }}
+              onLongPress={() => { if (arpLabelOnly) openPaywall('voicings'); }}
+              delayLongPress={300}
+            >
               {(viewMode === 'text' && !arpLabelOnly)
                 ? <MaterialCommunityIcons name="lead-pencil" size={18} color={t.txt2} />
                 : <Ionicons name={(arpView || arpLabelOnly) ? 'musical-notes' : 'grid-outline'} size={18} color={t.accent} />}
@@ -1042,11 +1055,17 @@ export default function ProgressionScreen() {
             {instrument === 'guitar' && (
               <TouchableOpacity
                 onPress={() => {
-                  // Free users still cycle through every family (locked ones show a lock + render
-                  // as the freemium auto) — no paywall interrupts the cycle.
+                  // Single tap cycles through every family (locked ones show a lock + render as the
+                  // freemium auto) — no paywall interrupts the cycle. A hold or double-tap on a
+                  // locked family DOES open the paywall.
+                  const now = Date.now();
+                  if (voicingLocked && now - lastVoicingTapRef.current < 300) { lastVoicingTapRef.current = 0; openPaywall('voicings'); return; }
+                  lastVoicingTapRef.current = now;
                   const order = ['auto', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3'] as const;
                   setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
                 }}
+                onLongPress={() => { if (voicingLocked) openPaywall('voicings'); }}
+                delayLongPress={300}
                 style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
               >
                 <Text style={{ fontSize: 8, fontWeight: '800', color: songVoicingType === 'auto' ? t.txt3 : t.accent }}>VOICING</Text>
@@ -1647,12 +1666,13 @@ export default function ProgressionScreen() {
                 );
               })}
             </ScrollView>
-            <TouchableOpacity onPress={() => { setNewCatName(''); setIsCatModalVisible(true); }} activeOpacity={0.7}
-              style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.bg2, borderColor: t.border }}>
+            <TouchableOpacity onPress={() => { if (!isPro) { openPaywall('saved-songs'); return; } setNewCatName(''); setIsCatModalVisible(true); }} activeOpacity={0.7}
+              style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.bg2, borderColor: t.border, opacity: isPro ? 1 : 0.6 }}>
               <Ionicons name="add" size={20} color={t.accent} />
             </TouchableOpacity>
           </View>
 
+          <View style={{ flex: 1 }}>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
             {(() => {
               // Filter to the selected category, then auto-arrange alphabetically by name
@@ -1694,6 +1714,8 @@ export default function ProgressionScreen() {
               });
             })()}
           </ScrollView>
+          <LinearGradient colors={[t.bg, 'transparent']} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 24, zIndex: 10 }} pointerEvents="none" />
+          </View>
         </View>
       </SlideUpModal>
 

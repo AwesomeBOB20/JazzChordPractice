@@ -74,6 +74,7 @@ export default function ProgressionPlayerDock({
     mixChordVol, setMixChordVol,
     mixBassVol,  setMixBassVol,
     mixClickVol, setMixClickVol,
+    isPro,
   } = useSettingsStore(
     useShallow((s) => ({
       theme: s.theme, metronomeEnabled: s.metronomeEnabled, setMetronomeEnabled: s.setMetronomeEnabled,
@@ -83,6 +84,7 @@ export default function ProgressionPlayerDock({
       mixChordVol: s.mixChordVol, setMixChordVol: s.setMixChordVol,
       mixBassVol: s.mixBassVol, setMixBassVol: s.setMixBassVol,
       mixClickVol: s.mixClickVol, setMixClickVol: s.setMixClickVol,
+      isPro: s.isPro,
     }))
   );
 
@@ -213,7 +215,7 @@ export default function ProgressionPlayerDock({
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={onOpenLib}>
               <Ionicons name="library-outline" size={24} color={t.txt2} />
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={onOpenSave}>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.bg2, borderColor: t.border, opacity: isPro ? 1 : 0.6 }]} onPress={onOpenSave}>
               <Ionicons name="save-outline" size={24} color={t.txt2} />
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={onClear}>

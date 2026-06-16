@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Animated, Dimensions, Share, TextInput, Platform } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { familyForWeight } from '@shared/fonts/fonts';
@@ -448,11 +449,15 @@ export default function SettingsScreen() {
         <View style={{ width: 28 }} />
       </View>
 
+      <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Pro status / unlock */}
         <View style={[styles.card, { backgroundColor: t.bg2, borderColor: t.border }]}>
-          <Text style={[styles.sectionLabel, { color: t.accent }]}>KORDAL PRO</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+            <MaterialCommunityIcons name="crown" size={14} color={t.accent} />
+            <Text style={[styles.sectionLabel, { color: t.accent, marginBottom: 0 }]}>KORDAL PRO</Text>
+          </View>
           {isPro ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
               <MaterialCommunityIcons name="crown" size={22} color={t.accent} />
@@ -461,7 +466,7 @@ export default function SettingsScreen() {
           ) : (
             <>
               <Text style={{ color: t.txt2, fontSize: 13, marginBottom: 12, lineHeight: 18 }}>
-                One unlock for the Dictionary, advanced voicings, progression power tools, all quiz categories, alternate tunings, unlimited songs and every theme.
+                The Dictionary, advanced voicings, progression tools and more — one purchase, yours forever.
               </Text>
               <TouchableOpacity
                 activeOpacity={0.8}
@@ -719,6 +724,8 @@ export default function SettingsScreen() {
         </View>
 
       </ScrollView>
+      <LinearGradient colors={[t.bg, 'transparent']} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 24, zIndex: 10 }} pointerEvents="none" />
+      </View>
 
       {/* Import Modal */}
       <PopUpModal visible={isImportModalVisible} onClose={() => setIsImportModalVisible(false)}>
