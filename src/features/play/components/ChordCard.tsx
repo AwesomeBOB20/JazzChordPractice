@@ -295,7 +295,9 @@ const styles = StyleSheet.create({
   pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
   
   nameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center', gap: 4, marginBottom: 4 },
-  root: { ...TYPE.display, lineHeight: 44, textAlign: 'center' },
+  // lineHeight must exceed the 44px font size or the cap of the root letter (e.g. "C")
+  // gets clipped at the top of the line box. ~1.18x gives the ascender headroom.
+  root: { ...TYPE.display, lineHeight: 52, textAlign: 'center' },
   type: { ...TYPE.subtitle, fontWeight: FONT_WEIGHT.semibold, textAlign: 'center', marginBottom: 4 },
   subLabel: { ...TYPE.label, textAlign: 'center', marginBottom: 4 },
   formula: { ...TYPE.caption, letterSpacing: 1, textAlign: 'center' },

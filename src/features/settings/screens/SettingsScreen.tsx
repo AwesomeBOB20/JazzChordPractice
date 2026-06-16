@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Animated, Dimensions, Share, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Animated, Dimensions, Share, TextInput, Platform } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
@@ -12,267 +12,320 @@ import { THEMES, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
 import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { SharedSettingsPanel } from '@shared/ui';
 import { PopUpModal } from '@shared/ui/SharedModals';
+import { restorePro, devSetPro } from '@features/pro/purchases';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+
+// Themes free on every tier (one light, one dark). The rest are Pro.
+const FREE_THEMES = new Set(['light', 'dark']);
 
 // Inline help icons render on the text baseline, which sits them too high — and
 // react-native-web silently drops `verticalAlign`, so that alone doesn't move them.
 // Relative positioning DOES apply to inline elements (unlike transforms, which inline
 // text drops), so nudge the glyph down a couple px to sit on the 14px / 19px text line.
 // `verticalAlign: 'bottom'` is kept for native, where it is honored.
-const INLINE_ICON_STYLE = { verticalAlign: 'bottom', position: 'relative', top: 2 } as const;
+const INLINE_ICON_STYLE = { verticalAlign: 'bottom', position: 'relative', top: 0 } as const;
 
 // ── Help & Tutorial content ───────────────────────────────────────────────────
 // Static guide text shown in the collapsible Help card. Kept module-level (no theme
 // refs) so it's a single source of truth; colors/rendering happen in the component.
 type HelpIcon = { ic: string; lib?: 'mci' };       // inline icon token; default family is Ionicons
-type HelpSeg = string | HelpIcon;                  // a run of body text and/or inline icons
+type HelpTimeSig = { ts: [number, number] };       // inline stacked time signature (e.g. 3 over 4)
+type HelpBars = { bars: number };                  // inline column-count bars (the Dictionary density buttons)
+type HelpSeg = string | HelpIcon | HelpTimeSig | HelpBars; // a run of body text and/or inline glyphs
 type HelpBody = string | HelpSeg[];                // one paragraph's or bullet's content
 // A block is either a lead paragraph (`t`, no heading) or a headed, collapsible bullet
 // list (`h` + `b`). `legend` renders the note-role color key inside that topic.
-type HelpPara = { h?: string; t?: HelpBody; b?: HelpBody[]; legend?: boolean };
+// `sub` marks a non-collapsible sub-group header (e.g. "Chord" / "Dictionary") that splits a
+// section's topics into labelled lists.
+type HelpPara = { h?: string; t?: HelpBody; b?: HelpBody[]; legend?: boolean; sub?: string };
 type HelpSection = { key: string; icon: string; lib?: 'mci'; title: string; paras: HelpPara[] };
 const I = (ic: string, lib?: 'mci'): HelpIcon => ({ ic, lib }); // shorthand for an inline icon
+const TS = (n: number, d: number): HelpTimeSig => ({ ts: [n, d] }); // shorthand for a time signature
+const BARS = (n: number): HelpBars => ({ bars: n }); // shorthand for the Dictionary density button glyph
+
+// Small stacked time signature, matching the one drawn on the Song-screen grid (serif, accent).
+const TimeSig = ({ n, d, color }: { n: number; d: number; color: string }) => {
+  const glyph = { fontFamily: Platform.OS === 'ios' ? 'Times New Roman' : 'serif', fontSize: 10, fontWeight: 'bold' as const, color, lineHeight: 10 };
+  return (
+    <View style={{ alignItems: 'center', marginHorizontal: 2 }}>
+      <Text style={glyph}>{n}</Text>
+      <Text style={glyph}>{d}</Text>
+    </View>
+  );
+};
+
+// N vertical bars depicting a column count — mirrors the Dictionary "diagrams per row" buttons.
+const Bars = ({ n, color }: { n: number; color: string }) => {
+  const barW = (15 - (n - 1) * 2) / n;
+  return (
+    <View style={{ flexDirection: 'row', gap: 2, marginHorizontal: 3, alignItems: 'center' }}>
+      {Array.from({ length: n }).map((_, i) => (
+        <View key={i} style={{ width: barW, height: 13, borderRadius: 1.5, backgroundColor: color }} />
+      ))}
+    </View>
+  );
+};
 
 const HELP_SECTIONS: HelpSection[] = [
   {
     key: 'overview', icon: 'sparkles-outline', title: 'Overview',
     paras: [
-      { t: 'A tool for learning jazz chords and progressions on piano and guitar — look chords up, hear them, and play along.' },
+      { t: 'Learn jazz chords and progressions on piano and guitar — look them up, hear them, play along.' },
       { h: 'The Main Idea', b: [
-        'A "voicing" is one specific way to arrange a chord\'s notes.',
-        'Most of the app is about seeing, hearing, and choosing voicings — tight ones, wide ones, guitar shapes, and more.',
+        'A "voicing" is one way to arrange a chord\'s notes.',
+        'Most of the app is seeing, hearing, and choosing voicings.',
       ] },
       { h: 'Screens (bottom tabs)', b: [
-        [I('compass-outline'), ' Explore — study one chord in depth, or browse the whole Dictionary.'],
+        [I('compass-outline'), ' Explore — study one chord, or browse the Dictionary.'],
         [I('musical-notes-outline'), ' Song — build and play a progression.'],
         [I('puzzle-outline', 'mci'), ' Quiz — test yourself by sight and ear.'],
         [I('guitar-pick-outline', 'mci'), ' Tuner — tune your instrument.'],
       ] },
-      { h: 'Top Bar (on every screen)', b: [
-        ['Switch between ', I('piano', 'mci'), ' Piano and ', I('guitar-acoustic', 'mci'), ' Guitar.'],
-        ['Toggle ', I('music-note-quarter', 'mci'), ' Block (all notes at once) vs ', I('musical-notes'), ' Arpeggio (one at a time) playback.'],
-        [I('metronome', 'mci'), ' Tap the tempo to set the speed (BPM).'],
-        ['Open ', I('settings-outline'), ' Settings for display and audio options.'],
+      { h: 'Top Bar (every screen)', b: [
+        ['Switch ', I('piano', 'mci'), ' Piano / ', I('guitar-acoustic', 'mci'), ' Guitar.'],
+        [I('music-note-quarter', 'mci'), ' Block vs ', I('musical-notes'), ' Arpeggio playback.'],
+        [I('metronome', 'mci'), ' Tap the tempo to set BPM.'],
+        ['Open ', I('settings-outline'), ' Settings — display and audio.'],
       ] },
     ],
   },
   {
     key: 'play', icon: 'compass-outline', title: 'Explore Screen',
     paras: [
-      { t: 'Pick any chord and explore every way to play it — for learning fingerings, comparing voicings, and drilling one chord at a time.' },
+      { t: 'Pick any chord and see every way to play it.' },
       { h: 'Two Ways to Browse', b: [
-        ['A toggle at the top switches between ', I('albums-outline'), ' Chord and ', I('book-outline'), ' Dictionary.'],
-        'Chord puts one chord on a big diagram to study and drill (the controls just below).',
-        'Dictionary is a scrollable reference grid of every voicing, scale, and shape (covered further down).',
+        ['Top toggle: ', I('albums-outline'), ' Chord or ', I('book-outline'), ' Dictionary.'],
+        'Chord — one chord on a big diagram to study and drill.',
+        'Dictionary — a reference grid of every voicing, scale, and shape.',
       ] },
+      { sub: 'Chord' },
       { h: 'Chord Card', b: [
-        'The card at the top is the current chord; the colored dots are its notes.',
-        'Side chevrons change the root (the letter, like C or F).',
-        'Up/down chevrons change the quality (the type, like maj7 or m7).',
-        'Tap the card to hear the whole chord.',
+        'The top card is the current chord; the colored dots are the notes of whatever\'s on screen (chord, scale, arp, interval…).',
+        'Side arrows change the root (C, F…).',
+        'Up/down arrows change the quality (maj7, m7…).',
+        'Tap the chord to hear it.',
       ] },
       { h: 'Voicing Tabs', b: [
-        'The tabs under the chord switch between families of voicings.',
-        'Triads (basic 3-note chords), Shells (just the essential notes), Drop 2/3 (wider, spread-out voicings), Open and Barre (guitar shapes), plus Scales, Arpeggios, and Intervals.',
-        'Each tab\'s badge shows how many were found; the chevrons step through them.',
-        'Which tabs appear depends on Piano vs Guitar.',
+        'Tabs under the chord switch voicing families.',
+        'Triads (3-note), Shells (essential notes), Drop 2/3/2&4 (wider), Open and Barre (guitar shapes), plus Scales, Arpeggios, Intervals.',
+        'Each badge counts how many were found; arrows step through them.',
+        'Available tabs depend on Piano vs Guitar.',
       ] },
       { h: 'Hear Any Note', b: [
-        'Tap a colored dot — or any piano key or guitar fret — to play just that note.',
-        'Press several at once to pick a voicing apart note by note.',
+        'Tap any dot, piano key, or fret to play that note.',
+        'Press several at once to pick a voicing apart.',
       ] },
       { h: 'Display Options (below the diagram)', b: [
-        [I('repeat'), ' Hold keeps the chord ringing while you study it.'],
-        [I('filter'), ' The order toggle re-sorts the voicings.'],
-        [I('layers'), ' Scale faintly overlays a fitting scale behind the chord — useful for finding notes to solo with.'],
+        [I('repeat'), ' Hold keeps the chord ringing.'],
+        [I('filter'), ' Order re-sorts the voicings.'],
+        [I('eye-outline'), ' Scale overlays a fitting scale to solo with.'],
       ] },
       { h: 'Random or Manual (bottom row)', b: [
-        ['In Random mode, ', I('dice'), ' jumps to a random chord from a pool you set with the ', I('library-outline'), ' library button — good for drilling.'],
-        ['Switch the sheet to Manual to pick a specific chord by hand (the dice becomes the ', I('create'), ' Edit Chord button).'],
-        [I('play'), ' plays the current chord.'],
+        [I('dice'), ' Random jumps to a chord from a pool you set with the ', I('layers'), ' pool button.'],
+        ['Switch to Manual to pick a chord by hand (dice becomes ', I('create'), ' Edit Chord).'],
+        [I('play'), ' Plays the current chord.'],
       ] },
-      { h: 'Dictionary — Browse Everything', b: [
-        'The top tabs choose what to show: Block, Open, Barre, Triads, Shells, Drop 2 / 3 / 2&4, Intervals, Arps, Shapes, and Scales. Each badge counts how many fit the current root.',
-        'When a tab has sub-groups, a second row of family tabs narrows it (e.g. 7th Chords vs 9th Chords).',
-        'Tap a row — like "Maj 7" or "Major" — to open it and reveal its diagrams; tap again to close.',
-        'When you open a rootless shell/drop/triad or a scale, a row lists the chords it works for: "Comp with" on a voicing (the chords you\'d play it for, e.g. a 3·7·13 grip belongs to Dom13) and "Solo with" on a scale (the chords you\'d improvise over, e.g. Dorian fits Min 7, Min 9, and Min 6).',
-        'Tap any diagram to hear it. To open it on the full Chord screen: first tap one of those "Comp with" / "Solo with" chips (it highlights), then tap the diagram you want — that exact voicing or box loads on the Chord screen for the chosen chord.',
-        'Or go the other way: press and hold a diagram. For a named chord (Block / Open / Barre / Arps) it opens straight on the Chord screen at that exact grip / inversion / arp box. For a shell/drop/triad/scale/shape it asks you to pick a chord first ("Pick a chord for this voicing"), then opens. Holding an Interval (which has no chord of its own) jumps to a random chord that contains it, landing on its Intervals tab.',
-        'The 1 / 2 / 3 buttons at the bottom-right set how many diagrams fit per row.',
+      { sub: 'Dictionary' },
+      { h: 'Browse Everything', b: [
+        'Top tabs pick what to show; a family row narrows tabs with sub-groups. Each badge counts matches for the root.',
+        'Tap a row ("Maj 7", "Major") to open its diagrams; tap a diagram to hear it.',
+        'Rootless voicings and scales list the chords they fit ("Comp with" / "Solo with"). Tap a chip, then a diagram, to open it on the Chord screen.',
+        'Or long-press a diagram to open it on the Chord screen (you may be asked to pick a chord first).',
+        ['The ', BARS(1), ' / ', BARS(2), ' / ', BARS(3), ' buttons set diagrams per row.'],
       ] },
-      { h: 'Picking the Root (Dictionary)', b: [
-        'The ‹ › stepper at the bottom moves the root up or down a half step.',
-        'Tap the letter in the middle to pop up a strip of 12 circles — tap one to jump straight to that root.',
-        [I('grid-outline'), ' All (guitar) shows every shape across all 12 roots, each only once — great for learning a movable shape that slides up the neck.'],
+      { h: 'Picking the Root', b: [
+        'The ‹ › stepper moves the root a half step.',
+        'Tap the middle letter for a strip of 12 roots — tap one to jump.',
+        [I('grid-outline'), ' All (guitar) shows every shape across all 12 roots once — for learning movable shapes.'],
       ] },
-      { h: 'The Four Corner Labels (Dictionary)', b: [
-        'Each guitar diagram tags its corners so you can read it at a glance.',
-        'Top-left — the root (the letter), or ANY for movable shapes.',
-        'Top-right — the string set (like 4-3-2-1) for Triads, Shells, and Drops, or the shape name (like "Box 3 (C Shape)") for Arps, Scales, and Shapes.',
-        'Bottom-left — the formula: which scale degrees are in it (e.g. 1 3 5 7).',
-        'Bottom-right — which note is in the bass ("Root in bass", "3rd in bass"…).',
+      { h: 'The Four Corner Labels', b: [
+        'Each guitar diagram tags its corners.',
+        'Top-left — the root, or ANY for movable shapes.',
+        'Top-right — the string set (4-3-2-1) for Triads/Shells/Drops, or the shape name ("Box 3 (C Shape)") for Arps/Scales/Shapes.',
+        'Bottom-left — the formula (e.g. 1 3 5 7).',
+        'Bottom-right — the bass note ("Root in bass", "3rd in bass"…).',
       ] },
     ],
   },
   {
     key: 'song', icon: 'musical-notes-outline', title: 'Song Screen',
     paras: [
-      { t: 'Write out a progression — a sequence of chords — and play it back with a backing band that comps the chords (plays them in rhythm), adds a bass line, and keeps time with a metronome.' },
+      { t: 'Build a chord progression and play it back with a band — comping, bass, and a metronome.' },
       { h: 'The Grid', b: [
-        'Each cell is one measure (bar).',
-        'Tap a cell to select and hear it.',
-        'Long-press or double-tap to open its editor.',
+        'Each cell is one measure — tap to select and hear it.',
+        'Long-press or double-tap a cell to edit it.',
       ] },
-      { h: 'Three Views: Name · Chords · Arps', b: [
-        'The view button at the start of the toolbar cycles how each bar is shown.',
-        [I('lead-pencil', 'mci'), ' NAME shows just the chord letters — the quickest read.'],
-        [I('grid-outline'), ' CHORDS shows a playable diagram (piano or guitar) for every bar.'],
-        [I('musical-notes'), ' ARPS shows those same notes as an arpeggio — a shape you play one note at a time.'],
+      { h: 'The Cell Editor', b: [
+        'Opens when you select or long-press a cell.',
+        'Set the chord for that bar.',
+        'SPLIT divides the bar into two chords; MERGE undoes it.',
       ] },
-      { h: 'Editing a Measure', b: [
-        'Set the chord for the bar.',
-        'Change how many beats the bar lasts (e.g. 3/4).',
-        'Split one bar into two chords.',
-        'The toolbar above adds or removes measures and transposes the whole song (♭ / ♯).',
+      { h: 'The Toolbar', b: [
+        [I('lead-pencil', 'mci'), ' / ', I('grid-outline'), ' / ', I('musical-notes'), ' View — cycle bars: NAME, CHORDS, ARPS.'],
+        'ZONE — where voicings sit (a fret area or register); − / + or AUTO.',
+        'Voice Lead — how voicings move chord-to-chord: Zone, Bounce, Up / Down, or off.',
+        'VOICING — force one family (AUTO, Open, Barre, Triads, Drop 2 / 3, Shells).',
+        'STRINGS — pin Triads/Shells/Drops to one string set.',
+        ['Time signature — set the selected bar\'s beats, like ', TS(3, 4), '.'],
+        'Transpose (♭ / ♯) and Key shift the whole song.',
+        [I('add'), ' / ', I('remove'), ' add or remove measures; ', I('return-down-forward-outline'), ' indents a bar to the next row.'],
       ] },
-      { h: 'Smart Voicings (Zone & Voice Leading)', b: [
-        'The app picks voicings that flow smoothly from one chord to the next instead of jumping around.',
-        'ZONE sets where they sit — a fret area on guitar, or a register like C4 on piano. Use − / + to move it, or AUTO to let the app choose.',
-        'The Voice Lead pill changes how they move: Zone (stay put, smooth), Bounce (drift up and down), or Up / Down (walk the neck). Turn it off for plain root-position chords.',
+      { h: 'Chart Marks', b: [
+        'Repeat signs (𝄆 𝄇) loop a section.',
+        '1st/2nd endings — bars played on specific passes.',
+        'Letters (A, B…) label sections.',
       ] },
-      { h: 'Lock the Voicing (guitar)', b: [
-        'VOICING forces a family — AUTO, Open, Barre, Triads, Drop 2, Drop 3, or Shells — so every chord uses that style. AUTO comps with Drop 2 on the top string sets (4-3-2-1 / 5-4-3-2) and falls to Drop 3 for the lower register, picking the smoothest option for you.',
-        'Open and Barre use standard guitar chord shapes. If a chord has no shape in the chosen family (e.g. an extended chord with no barre form), it falls back to its best voicing so a cell is never blank.',
-        'For Triads, Shells, and Drop 2 / 3, STRINGS pins every chord to one of that type\'s string sets — it always uses one (there is no "Any"); cycle it to move the whole song to a different set. For Shells it anchors the two guide tones (3rd + 7th) to a fixed pair of strings and lets the root bounce onto a bass string below — so a descending line slides down the same two strings. "E & A Bass" keeps the guides on the D & G strings (root on the 6th or 5th); "A & D Bass" keeps them on the G & B strings (root on the 5th or 4th).',
-      ] },
-      { h: 'Chart Marks (like real sheet music)', b: [
-        'Repeat signs (𝄆 𝄇) to loop a section.',
-        '1st/2nd endings — a bar played only the last time through a repeat, versus the times before.',
-        'Letters (A, B…) to label sections.',
-      ] },
-      { h: 'Playback (bottom dock)', b: [
-        'Set the tempo, the rhythm feel (Straight, Swing, Bossa, Two-Step, Reggae), and toggle bass and metronome.',
-        [I('options-outline'), ' Mix sets their volumes.'],
-        [I('repeat'), ' Loop replays the whole progression until you stop.'],
-        ['Press ', I('play'), ' for a count-in, then the song plays in that feel.'],
-        'While it plays, tap a measure ahead to jump straight there at the next bar.',
+      { h: 'Bottom Dock', b: [
+        'Set the tempo, the feel (Straight, Swing, Bossa, Two-Step, Reggae), and toggle bass and metronome.',
+        [I('options-outline'), ' Mix sets volumes.'],
+        [I('repeat'), ' Loop replays until you stop.'],
+        ['Press ', I('play'), ' for a count-in, then the song plays.'],
+        'Tap a bar ahead while playing to jump there.',
       ] },
       { h: 'Saving', b: [
-        [I('save-outline'), ' Save stores the song (with its tempo and feel) under a name.'],
-        [I('library-outline'), ' Library opens your saved songs; sort them into folders.'],
-        'Back up or restore your whole library from Data Management in Settings.',
+        [I('save-outline'), ' Save stores the song with its tempo and feel.'],
+        [I('library-outline'), ' Library opens your saved songs; sort into folders.'],
+        'Back up or restore from Settings → Data Management.',
       ] },
     ],
   },
   {
     key: 'quiz', icon: 'puzzle-outline', lib: 'mci', title: 'Quiz Screen',
     paras: [
-      { t: 'Test how well you recognize chords by sight and by ear.' },
+      { t: 'Test how well you know chords by sight and ear.' },
       { h: 'Visual or Audio', b: [
-        ['Use the ', I('eye'), ' / ', I('ear'), ' toggle in the top bar.'],
-        'Visual shows a chord diagram for you to name.',
-        'Audio plays a chord for you to name.',
+        ['Toggle ', I('eye'), ' / ', I('ear'), ' in the top bar.'],
+        'Visual — name a chord from its diagram.',
+        'Audio — name a chord you hear.',
       ] },
       { h: 'Choose What to Practice', b: [
-        [I('layers'), ' Open the setup sheet to narrow the quiz to what you\'re working on.'],
-        'Its Chords and Voicings tabs pick which chord types, inversions (which note sits in the bass), and voicing families can come up.',
-        'Depending on the family, you might identify a chord, scale, arpeggio, interval, or shape.',
+        [I('layers'), ' Open the setup sheet to focus the quiz.'],
+        'The Chords and Voicings tabs set which chord types, inversions, and voicing families appear.',
+        'You might name a chord, scale, arpeggio, interval, or shape.',
         'Set the instrument in the top bar.',
       ] },
       { h: 'Answering', b: [
-        ['Tap your answer, then ', I('arrow-forward'), ' Next for the next one.'],
-        'Correct turns green, wrong turns red — and the chord plays so you hear it.',
-        'Not sure? Reveal shows the answer (it counts as a miss).',
-        ['Your score, streak, and accuracy track at the top; ', I('refresh'), ' resets them.'],
+        ['Tap an answer, then ', I('arrow-forward'), ' Next.'],
+        'Green = right, red = wrong, and the chord plays.',
+        'Not sure? Reveal shows the answer (counts as a miss).',
+        ['Score, streak, and accuracy track up top; ', I('refresh'), ' resets them.'],
       ] },
       { h: 'While You Listen (Audio)', b: [
-        'In Audio mode the chord hides behind a big ? while it plays.',
-        [I('headset-outline'), ' Animated bars pulse with the sound, so you can feel its shape while you listen.'],
+        'The chord hides behind a big ? while it plays.',
+        [I('headset-outline'), ' Bars pulse with the sound so you feel its shape.'],
       ] },
       { h: 'The Reveal (Audio)', b: [
-        'When you answer, the bars become a chord-anatomy strip: one colored dot per note, its degree below (R, 3, 5…), and the interval between notes above.',
-        'Tap any dot to replay just that note.',
+        'Answering turns the bars into an anatomy strip: one dot per note, its degree below (R, 3, 5…), the interval above.',
+        'Tap a dot to replay that note.',
       ] },
     ],
   },
   {
     key: 'tuner', icon: 'guitar-pick-outline', lib: 'mci', title: 'Tuner Screen',
     paras: [
-      { t: 'Tune your instrument by microphone or by ear.' },
+      { t: 'Tune by microphone or by ear.' },
       { h: 'Listen', b: [
-        [I('mic'), ' On Android, the tuner can use your mic to show the note you\'re playing and whether you\'re sharp or flat.'],
-        'Sharp/flat is measured in cents (hundredths of a step), so 0 is perfectly in tune.',
-        'On other devices, use Play below to tune by ear instead.',
+        [I('mic'), ' On Android, the mic shows the note you play and whether you\'re sharp or flat.'],
+        'Measured in cents (hundredths of a step); 0 is in tune.',
+        'On other devices, use Play to tune by ear.',
       ] },
       { h: 'Play', b: [
-        [I('volume-high'), ' Tap a string to sound its reference pitch and tune your instrument to match.'],
-        'Tap again to silence it.',
+        [I('volume-high'), ' Tap a string to sound its pitch; tap again to stop.'],
       ] },
       { h: 'Setup', b: [
-        [I('options'), ' Choose a tuning: Standard, Drop D, ½ Step Down, Open G, or DADGAD.'],
-        'The reference pitch (A=432/440/512) lives in Settings → Audio; 440 is the modern standard.',
+        [I('options'), ' Tunings: Standard, Drop D, ½ Step Down, Open G, DADGAD.'],
+        'Reference pitch (A=432/440/512) is in Settings → Audio; 440 is standard.',
       ] },
     ],
   },
   {
     key: 'reading', icon: 'color-palette-outline', title: 'Reading the Diagrams',
     paras: [
-      { t: 'How to read the chord, scale, and voicing diagrams used throughout the app.' },
+      { t: 'How to read the diagrams throughout the app.' },
       { h: 'Note Shapes', b: [
-        'The root note is a square; every other note is a circle — so you can spot the root at a glance.',
+        'Root = square, every other note = circle — spot the root at a glance.',
       ] },
       { h: 'Colors (Note Color in Settings → Display)', legend: true, b: [
-        'Roles colors each note by its role in the chord — see the legend below.',
-        'Theme paints them all one color.',
-        'Selective spotlights only the chord tones you choose.',
+        'Roles — one color per role (see legend below).',
+        'Theme — all one color.',
+        'Selective — only the chord tones you choose.',
       ] },
       { h: 'Labels', b: [
-        'Set the dots to show note names, scale degrees (1, ♭3, 5…), or nothing in Settings → Display.',
+        'Show note names, degrees (1, ♭3, 5…), or nothing — Settings → Display.',
       ] },
       { h: 'Position & Box Shapes', b: [
-        'A number to the left of a guitar diagram is the fret it starts on — so the shape sits up the neck, not at the nut.',
-        'Names like "Box 1 (E Shape)" are CAGED positions: the five places a scale or arpeggio shape lives along the neck.',
+        'A number left of a guitar diagram is its starting fret.',
+        '"Box 1 (E Shape)" names a CAGED position — one of the five places a shape lives along the neck.',
       ] },
       { h: 'The Mini-Map', b: [
-        'Beside the big Explore diagram, a slim strip shows the whole neck (or keyboard) in miniature — a box marks the part you\'re viewing and dots mark every chord note.',
+        'Beside the Explore diagram, a strip shows the whole neck or keyboard; a box marks your view, dots mark the notes.',
       ] },
       { h: 'Voicing Types', b: [
-        'Triads are basic 3-note chords.',
-        'Shells keep only the defining notes (root, 3rd, 7th).',
-        'Drop 2 / Drop 3 / Drop 2 & 4 take a tight chord and drop one or two of the top notes down an octave, spreading it into wider, guitar-friendly shapes.',
-        'A string set is which group of adjacent guitar strings a shape uses.',
+        'Triads — basic 3-note chords.',
+        'Shells — just root, 3rd, 7th.',
+        'Drop 2 / 3 / 2 & 4 — drop the top one or two notes an octave for wider, guitar-friendly shapes.',
+        'String set — which adjacent guitar strings a shape uses.',
       ] },
       { h: 'Chord Symbols', b: [
         'maj7 = major 7th, m7 = minor 7th, 7 = dominant 7th.',
         'ø7 = half-diminished, °7 = diminished.',
-        'Added numbers like 9, 11, and 13 are extensions — extra color notes stacked on top.',
+        '9, 11, 13 = extensions — color notes stacked on top.',
       ] },
     ],
   },
   {
     key: 'settings', icon: 'options-outline', title: 'Settings',
     paras: [
-      { t: ['Open Settings from the ', I('settings-outline'), ' gear in the top bar. Changes apply everywhere, instantly.'] },
+      { t: ['Open Settings from the ', I('settings-outline'), ' gear. Changes apply everywhere, instantly.'] },
       { h: 'Look & Feel', b: [
-        [I('color-palette-outline'), ' App Theme switches between light and dark.'],
-        'Font changes the typeface used on labels and diagrams.',
+        [I('color-palette-outline'), ' App Theme — light or dark.'],
+        'Font — the typeface on labels and diagrams.',
       ] },
       { h: 'Display', b: [
-        'Accidentals — spell notes with flats (♭) or sharps (♯).',
-        'Labels — show note names, scale degrees (1, ♭3, 5…), or nothing on the dots.',
-        'Octave numbers — show C4 instead of just C.',
-        'Note Color — Roles (a color per degree), Theme (one color), or Selective (spotlight only the degrees you choose).',
+        'Accidentals — flats (♭) or sharps (♯).',
+        'Labels — note names, degrees (1, ♭3, 5…), or nothing.',
+        'Octave numbers — C4 instead of C.',
+        'Note Color — Roles (per degree), Theme (one color), or Selective (only the degrees you pick).',
       ] },
       { h: 'Audio', b: [
-        'Instrument — Piano or Guitar; sets which diagrams and tabs you see.',
-        'Octave — how high or low notes sound and display.',
-        'Tuning (A=) — reference pitch 432, 440 (standard), or 512 Hz.',
+        'Instrument — Piano or Guitar.',
+        'Octave — how high or low notes sound.',
+        'Tuning (A=) — 432, 440 (standard), or 512 Hz.',
       ] },
       { h: 'Your Data', b: [
-        [I('save-outline'), ' Data Management backs up or restores all your saved songs.'],
-        'Clear Stored Progress wipes quiz scores and the working progression (your saved songs stay).',
-        'Restore Default Settings resets preferences (your songs and scores stay).',
+        [I('share-outline'), ' Export Progressions Backup bundles all your saved songs into a JSON backup file and opens the share sheet — save it to Files or send it to yourself.'],
+        'That file is your only copy of your songs outside the app, so keep it somewhere safe on your device — if you delete the app or switch phones, it\'s how you get your songs back.',
+        [I('download-outline'), ' Import Progressions Backup loads them back: open your saved backup file, copy its text, paste it in, and tap Import — all your songs reappear.'],
+        'Clear Stored Progress — wipes quiz scores and the working progression (saved songs stay).',
+        'Restore Default Settings — resets preferences (songs and scores stay).',
+      ] },
+    ],
+  },
+  {
+    key: 'pro', icon: 'crown', lib: 'mci', title: 'Kordal Pro',
+    paras: [
+      { t: 'Kordal is free to learn on. One unlock (no subscription) adds the deeper tools — pay once, keep forever; Restore Purchase recovers it on a new device.' },
+      { h: 'Free, always', b: [
+        ['Explore on ', I('piano', 'mci'), ' piano and ', I('guitar-acoustic', 'mci'), ' guitar — Block, Open, Barre, Triads, Scales.'],
+        'Essential chords — every triad, 6th, and the five core 7ths (maj7, min7, dom7, m7♭5, dim7).',
+        'Build and play progressions — metronome, loop, and the free preset songs.',
+        [I('puzzle-outline', 'mci'), ' Chord quiz (root position) in ', I('eye'), ' Visual and ', I('ear'), ' Listen modes, and the ', I('guitar-pick-outline', 'mci'), ' tuner in standard tuning.'],
+        'Light and Dark themes, all fonts, the mixer.',
+      ] },
+      { h: 'What Pro unlocks', b: [
+        [I('book-outline'), ' Dictionary mode — every chord, scale, arpeggio, and interval by root.'],
+        'Extended & altered chords — 9ths, 11ths, 13ths, altered dominants, add9s, exotic 7ths.',
+        'Scale overlay and List/Voicing order in Explore.',
+        ['Advanced voicings — Drop 2, Drop 3, Drop 2 & 4, Shells, Arpeggios, Intervals, Shapes (', I('lock-closed'), ' tabs).'],
+        'Progression power tools — transpose, key change, neck/piano zones, swing & bossa feels, Pro preset songs.',
+        [I('ear'), ' All quiz categories — the Voicings quiz (scales, arpeggios, intervals, shapes) and inversions. Chord & Listen are free.'],
+        'Tuner — alternate tunings and a custom reference pitch (432/512 Hz).',
+        'Save your own songs (unlimited) and every theme.',
+      ] },
+      { h: 'How to unlock', b: [
+        ['Tap any ', I('lock-closed'), ', or ', I('settings-outline'), ' Settings → Kordal Pro → Unlock.'],
+        'Already bought it? Use Restore Purchase in the Kordal Pro card.',
       ] },
     ],
   },
@@ -290,21 +343,27 @@ const ROLE_LEGEND: { label: string; color: string }[] = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { theme, setTheme, factoryReset, isSettingsOpen, setIsSettingsOpen, fontFamily } = useSettingsStore();
+  const { theme, setTheme, factoryReset, isSettingsOpen, setIsSettingsOpen, fontFamily, isPro, openPaywall } = useSettingsStore();
   const { clearProgression } = useProgressionStore();
   const { resetQuiz } = useQuizStore();
 
   const t = THEMES[theme];
   const slideAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
 
-  // Render a help body (plain text and/or inline icons) as children of a <Text>.
+  // Render a help body (plain text and/or inline icons) as children of a <Text>. Time-signature
+  // segments can't live inside a <Text> (see the bullet row path); fall back to "n/d" text if one
+  // ever reaches here.
   const renderBody = (body: HelpBody) =>
     (typeof body === 'string' ? [body] : body).map((seg, si) =>
       typeof seg === 'string'
         ? seg
-        : seg.lib === 'mci'
-          ? <MaterialCommunityIcons key={si} name={seg.ic as any} size={15} color={t.txt1} style={INLINE_ICON_STYLE} />
-          : <Ionicons key={si} name={seg.ic as any} size={15} color={t.txt1} style={INLINE_ICON_STYLE} />
+        : 'ts' in seg
+          ? `${seg.ts[0]}/${seg.ts[1]}`
+          : 'bars' in seg
+            ? `${seg.bars}`
+            : seg.lib === 'mci'
+              ? <MaterialCommunityIcons key={si} name={seg.ic as any} size={15} color={t.txt1} style={INLINE_ICON_STYLE} />
+              : <Ionicons key={si} name={seg.ic as any} size={15} color={t.txt1} style={INLINE_ICON_STYLE} />
     );
 
   // Calculate the exact height of your TabNavigator tab bar
@@ -390,12 +449,54 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        
+
+        {/* Pro status / unlock */}
+        <View style={[styles.card, { backgroundColor: t.bg2, borderColor: t.border }]}>
+          <Text style={[styles.sectionLabel, { color: t.accent }]}>KORDAL PRO</Text>
+          {isPro ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
+              <MaterialCommunityIcons name="crown" size={22} color={t.accent} />
+              <Text style={{ flex: 1, color: t.txt1, fontSize: 15, fontWeight: '700' }}>Pro unlocked — thank you!</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={{ color: t.txt2, fontSize: 13, marginBottom: 12, lineHeight: 18 }}>
+                One unlock for the Dictionary, advanced voicings, progression power tools, all quiz categories, alternate tunings, unlimited songs and every theme.
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={{ height: 46, borderRadius: 14, backgroundColor: t.accent, alignItems: 'center', justifyContent: 'center' }}
+                onPress={() => openPaywall('generic')}>
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 }}>Unlock Kordal Pro</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ marginTop: 10, alignItems: 'center', paddingVertical: 4 }}
+                onPress={async () => {
+                  const res = await restorePro();
+                  Alert.alert(res.success ? 'Restored' : 'Nothing to restore', res.success ? 'Your Kordal Pro unlock has been restored.' : (res.error ?? 'No previous purchase was found.'));
+                }}>
+                <Text style={{ color: t.txt2, fontSize: 13, fontWeight: '600' }}>Restore purchase</Text>
+              </TouchableOpacity>
+            </>
+          )}
+          {/* DEV-ONLY toggle: exercise Pro before RevenueCat is wired. Remove (or hide
+              behind __DEV__) when the real purchase flow ships. */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={{ marginTop: 12, alignItems: 'center', paddingVertical: 6, borderTopWidth: 1, borderTopColor: t.border }}
+              onPress={() => devSetPro(!isPro)}>
+              <Text style={{ color: t.txt3, fontSize: 12, fontWeight: '600' }}>{isPro ? '(dev) Lock Pro' : '(dev) Unlock Pro for testing'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* App Theme Picker */}
         <View style={[styles.card, { backgroundColor: t.bg2, borderColor: t.border }]}>
           <Text style={[styles.sectionLabel, { color: t.accent }]}>APP THEME</Text>
           <View style={styles.themeRow}>
-            {Object.entries(THEMES).map(([key, th]) => (
+            {Object.entries(THEMES).map(([key, th]) => {
+              const locked = !FREE_THEMES.has(key) && !isPro;
+              return (
               <TouchableOpacity
                 key={key}
                 activeOpacity={0.7}
@@ -403,12 +504,18 @@ export default function SettingsScreen() {
                   styles.themeCircle,
                   { borderColor: theme === key ? t.txt1 : 'transparent' }
                 ]}
-                onPress={() => setTheme(key)}>
-                <View style={[styles.themeCircleInner, { backgroundColor: th.bg }]}>
+                onPress={() => locked ? openPaywall('themes') : setTheme(key)}>
+                <View style={[styles.themeCircleInner, { backgroundColor: th.bg, opacity: locked ? 0.5 : 1 }]}>
                   <View style={[styles.themeCircleHalf, { backgroundColor: th.accent }]} />
+                  {locked && (
+                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="lock-closed" size={12} color={th.txt1} />
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </View>
         </View>
 
@@ -439,8 +546,8 @@ export default function SettingsScreen() {
                   // Split lead paragraphs (no heading) from headed topics. Leads stay flush
                   // under the section header; the headed topics are grouped into one indented,
                   // recessed "well" so they read clearly as children rather than peers.
-                  const leads = sec.paras.map((p, idx) => ({ p, idx })).filter(x => !x.p.h);
-                  const topics = sec.paras.map((p, idx) => ({ p, idx })).filter(x => x.p.h);
+                  const leads = sec.paras.map((p, idx) => ({ p, idx })).filter(x => !x.p.h && !x.p.sub);
+                  const topics = sec.paras.map((p, idx) => ({ p, idx })).filter(x => x.p.h || x.p.sub);
                   return (
                     <View style={{ paddingBottom: 12 }}>
                       {leads.map(({ p, idx }) => (
@@ -452,21 +559,63 @@ export default function SettingsScreen() {
                         <View style={[styles.helpWell, { backgroundColor: t.bg3 }]}>
                           {topics.map(({ p, idx }, ti) => {
                             const topicKey = `${sec.key}:${idx}`;
+                            const prevSub = ti > 0 && !!topics[ti - 1].p.sub;
+                            // A sub-group header ("Chord" / "Dictionary") splits the topic list into
+                            // labelled lists within the same section.
+                            if (p.sub) {
+                              return (
+                                <View key={topicKey} style={ti > 0 ? { borderTopWidth: 1, borderTopColor: t.border } : undefined}>
+                                  <Text style={{ ...TYPE.caption, color: t.accent, letterSpacing: 1.5, textTransform: 'uppercase', paddingTop: ti > 0 ? 12 : 8, paddingBottom: 4 }}>{p.sub}</Text>
+                                </View>
+                              );
+                            }
                             const tOpen = openTopics.has(topicKey);
                             return (
-                              <View key={topicKey} style={ti > 0 ? { borderTopWidth: 1, borderTopColor: t.border } : undefined}>
+                              <View key={topicKey} style={(ti > 0 && !prevSub) ? { borderTopWidth: 1, borderTopColor: t.border } : undefined}>
                                 <TouchableOpacity style={styles.helpTopicHeader} activeOpacity={0.7} onPress={() => toggleTopic(topicKey)}>
                                   <Text style={[styles.helpSubLabel, { color: t.txt2, flex: 1 }]}>{p.h}</Text>
                                   <Ionicons name={tOpen ? 'chevron-up' : 'chevron-down'} size={14} color={t.txt3} />
                                 </TouchableOpacity>
                                 {tOpen && (
                                   <View style={{ gap: 5, paddingBottom: 10 }}>
-                                    {p.b ? p.b.map((bl, bi) => (
-                                      <View key={bi} style={{ flexDirection: 'row', paddingLeft: 2 }}>
-                                        <Text style={{ fontSize: 14, lineHeight: 19, color: t.txt3, marginRight: 7 }}>•</Text>
-                                        <Text style={{ flex: 1, fontSize: 14, lineHeight: 19, color: t.txt2 }}>{renderBody(bl)}</Text>
-                                      </View>
-                                    )) : null}
+                                    {p.b ? p.b.map((bl, bi) => {
+                                      const segs = typeof bl === 'string' ? [bl] : bl;
+                                      // Stacked time sigs / bar glyphs can't sit inside a single <Text> (RN won't lay a
+                                      // View inline). Render those bullets as a word-wrapped flex row so the glyph flows
+                                      // mid-sentence next to the bullet, instead of getting shoved onto its own line.
+                                      const hasGlyph = segs.some(s => typeof s === 'object' && s !== null && ('ts' in s || 'bars' in s));
+                                      if (hasGlyph) {
+                                        const items: React.ReactNode[] = [];
+                                        segs.forEach((s, si) => {
+                                          if (typeof s === 'string') {
+                                            s.split(/(\s+)/).forEach((w, wi) => {
+                                              if (w === '') return;
+                                              items.push(<Text key={`${si}-${wi}`} style={{ fontSize: 14, lineHeight: 19, color: t.txt2 }}>{w}</Text>);
+                                            });
+                                          } else if ('ts' in s) {
+                                            items.push(<TimeSig key={si} n={s.ts[0]} d={s.ts[1]} color={t.txt2} />);
+                                          } else if ('bars' in s) {
+                                            items.push(<Bars key={si} n={s.bars} color={t.txt2} />);
+                                          } else {
+                                            items.push(s.lib === 'mci'
+                                              ? <MaterialCommunityIcons key={si} name={s.ic as any} size={15} color={t.txt1} />
+                                              : <Ionicons key={si} name={s.ic as any} size={15} color={t.txt1} />);
+                                          }
+                                        });
+                                        return (
+                                          <View key={bi} style={{ flexDirection: 'row', paddingLeft: 2 }}>
+                                            <Text style={{ fontSize: 14, lineHeight: 19, color: t.txt3, marginRight: 7 }}>•</Text>
+                                            <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' }}>{items}</View>
+                                          </View>
+                                        );
+                                      }
+                                      return (
+                                        <View key={bi} style={{ flexDirection: 'row', paddingLeft: 2 }}>
+                                          <Text style={{ fontSize: 14, lineHeight: 19, color: t.txt3, marginRight: 7 }}>•</Text>
+                                          <Text style={{ flex: 1, fontSize: 14, lineHeight: 19, color: t.txt2 }}>{renderBody(bl)}</Text>
+                                        </View>
+                                      );
+                                    }) : null}
                                     {p.legend && (
                                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
                                         {ROLE_LEGEND.map(r => (
@@ -496,18 +645,18 @@ export default function SettingsScreen() {
         <View style={[styles.card, { backgroundColor: t.bg2, borderColor: '#63992240' }]}>
           <Text style={[styles.sectionLabel, { color: '#639922' }]}>DATA MANAGEMENT</Text>
 
-          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={handleExport}>
+          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => isPro ? handleExport() : openPaywall('saved-songs')}>
             <View style={styles.settingLeft}>
-              <Ionicons name="share-outline" size={18} color="#639922" />
+              <Ionicons name={isPro ? 'share-outline' : 'lock-closed'} size={18} color="#639922" />
               <Text style={[styles.label, { color: t.txt1 }]}>Export Progressions Backup</Text>
             </View>
           </TouchableOpacity>
 
           <View style={[styles.divider, { backgroundColor: t.border }]} />
 
-          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => setIsImportModalVisible(true)}>
+          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => isPro ? setIsImportModalVisible(true) : openPaywall('saved-songs')}>
             <View style={styles.settingLeft}>
-              <Ionicons name="download-outline" size={18} color="#639922" />
+              <Ionicons name={isPro ? 'download-outline' : 'lock-closed'} size={18} color="#639922" />
               <Text style={[styles.label, { color: t.txt1 }]}>Import Progressions Backup</Text>
             </View>
           </TouchableOpacity>

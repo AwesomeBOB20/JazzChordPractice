@@ -68,7 +68,7 @@ function findClosestString(midi: number, cents: number, strings: { name: string;
 export default function TunerScreen() {
   const insets = useSafeAreaInsets();
   const { playTone, stopAudio } = useAudio();
-  const { theme, referenceFrequency, fontFamily } = useSettingsStore();
+  const { theme, referenceFrequency, fontFamily, isPro, openPaywall } = useSettingsStore();
   const svgFont = familyForWeight(fontFamily, '700');
   const t = THEMES[theme];
 
@@ -291,14 +291,16 @@ export default function TunerScreen() {
             {TUNING_KEYS.map((key, index) => {
               const selected = tuningKey === key;
               const tu = TUNINGS[key];
+              // Only Standard is free; every alternate tuning is Pro.
+              const locked = key !== 'standard' && !isPro;
               return (
                 <TouchableOpacity key={key} style={[ styles.tuningOverlayItem, selected && { backgroundColor: t.accent + '18' }, index !== TUNING_KEYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.border } ]}
-                  onPress={() => { setTuningKey(key); setShowTunings(false); setPlayingStringIdx(null); stopAudio(); }}>
+                  onPress={() => { if (locked) { setShowTunings(false); openPaywall('tuner'); return; } setTuningKey(key); setShowTunings(false); setPlayingStringIdx(null); stopAudio(); }}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.tuningOverlayLabel, { color: selected ? t.accent : t.txt1 }]}>{tu.label}</Text>
                     <Text style={[styles.tuningOverlayNotes, { color: t.txt3 }]}>{tu.strings.map(s => s.name.replace(/[0-9]/g, '')).join(' · ')}</Text>
                   </View>
-                  {selected && <Ionicons name="checkmark" size={20} color={t.accent} />}
+                  {locked ? <Ionicons name="lock-closed" size={16} color={t.txt3} /> : (selected && <Ionicons name="checkmark" size={20} color={t.accent} />)}
                 </TouchableOpacity>
               );
             })}

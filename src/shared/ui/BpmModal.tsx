@@ -137,15 +137,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700'
   },
-  textInput: { 
-    height: 52, 
-    flex: 1, 
-    minWidth: 60, 
-    borderRadius: 16, 
-    borderWidth: 1, 
+  textInput: {
+    height: 52,
+    flex: 1,
+    minWidth: 60,
+    borderRadius: 16,
+    borderWidth: 1,
     fontSize: 24,
     fontWeight: '700',
-    paddingHorizontal: 8 
+    paddingHorizontal: 8,
+    textAlign: 'center',
   },
   tapBtn: { 
     paddingVertical: 20, 

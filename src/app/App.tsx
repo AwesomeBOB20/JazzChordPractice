@@ -26,6 +26,8 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { ErrorBoundary } from '@shared/ui/ErrorBoundary';
 import BpmModal from '@shared/ui/BpmModal';
 import SlidingToggle from '@shared/ui/SlidingToggle';
+import PaywallModal from '@features/pro/PaywallModal';
+import { initPurchases } from '@features/pro/purchases';
 
 // Patch React Native's <Text> once so the app-wide font chosen in Settings applies
 // everywhere, mapping each style's fontWeight to the matching weighted family. A Text
@@ -310,6 +312,7 @@ function RootLayout() {
       {/* Floating Global Overlays */}
       <SettingsScreen />
       <BpmModal visible={showBpm} onClose={() => setShowBpm(false)} />
+      <PaywallModal />
     </View>
   );
 }
@@ -327,6 +330,8 @@ export default function App() {
       allowsRecordingIOS: false,
       staysActiveInBackground: false,
     });
+    // Configure the purchase layer once at startup (no-op until RevenueCat is wired).
+    initPurchases();
   }, []);
 
   if (!fontsLoaded) {

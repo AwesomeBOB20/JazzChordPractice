@@ -3,7 +3,7 @@ import { View, Text, Animated, Easing, TouchableOpacity, Dimensions } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Line, Text as SvgText } from 'react-native-svg';
 import { getNoteColor } from '@shared/ui/themes';
-import { NOTE_SHARP, NOTE_FLAT, spellInterval, ROLE_SHORT } from '@shared/theory/musicTheory';
+import { NOTE_SHARP, NOTE_FLAT, spellInterval, ROLE_SHORT, formulaSemitones } from '@shared/theory/musicTheory';
 import { familyForWeight } from '@shared/fonts/fonts';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
@@ -158,10 +158,13 @@ function ChordAnatomy({ notes, roles, formulas, namingMode, theme, onNotePress }
     Animated.timing(reveal, { toValue: 1, duration: 340, delay: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, []);
 
-  // Basic anatomy: ONE note per scale/chord degree (no octave doublings, no actual-voicing
-  // spread), ordered ascending from the root within a single octave → R 2 3 4 5 6 7. Caps
-  // the count at ≤7 so a 7-note scale never blows out into overlapping rows.
+  // Basic anatomy: ONE note per scale/chord degree (no octave doublings), rebuilt as a clean
+  // ASCENDING STACK from the root using each degree's TRUE interval — so a 9/11/13 sits above
+  // the octave (the stack can span two octaves) instead of folding back in. This is deliberately
+  // INDEPENDENT of how the question was actually voiced (an inversion / drop on playback), so the
+  // dots always read — and play, on tap — low → high.
   const NOTE = namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP;
+  const effForm = (raw: string) => ROLE_SHORT[raw] || raw || '1';
   const byDeg = new Map<string, { deg: string; m: number; role: string; formula: string }>();
   notes.forEach((m, i) => {
     if (m == null || isNaN(m)) return;
@@ -170,13 +173,17 @@ function ChordAnatomy({ notes, roles, formulas, namingMode, theme, onNotePress }
     byDeg.set(deg, { deg, m, role: roles[i] || '', formula: formulas[i] || '' });
   });
   const items = [...byDeg.values()];
-  const rootItem = items.find((x) => x.deg === 'R') || items[0];
-  const rootPc = rootItem ? (((rootItem.m % 12) + 12) % 12) : 0;
+  // Recover the chord root's pitch class from any note minus its own interval (robust even when
+  // the voicing is rootless), then stack every degree ascending from a comfortable middle octave.
+  const baseRaw = items[0] ? (items[0].formula || items[0].role || '') : '';
+  const rootPc = items[0] ? ((((items[0].m % 12) - formulaSemitones(effForm(baseRaw))) % 12) + 12) % 12 : 0;
+  const baseMidi = 60 + rootPc;
   const withOff = items.map((it) => {
-    const raw = it.formula || it.role || '';
-    const effFormula = ROLE_SHORT[raw] || raw || '1';
-    const name = spellInterval(rootPc, effFormula, namingMode === 'flat') || NOTE[((it.m % 12) + 12) % 12];
-    return { ...it, name, off: (((((it.m % 12) + 12) % 12) - rootPc + 12) % 12) };
+    const f = effForm(it.formula || it.role || '');
+    const off = formulaSemitones(f);
+    const name = spellInterval(rootPc, f, namingMode === 'flat') || NOTE[((baseMidi + off) % 12 + 12) % 12];
+    // Override the played pitch (m) with the ascending stacked note so taps go low → high.
+    return { ...it, name, off, m: baseMidi + off };
   });
   withOff.sort((a, b) => a.off - b.off);
   const N = withOff.length;

@@ -212,8 +212,9 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
   const TOTAL_FRETS = 24;
   const MAP_W = 320;
   const MAP_H = 44;
-  // The open-string "fret" (the zone left of the nut) is the same width as every other
-  // fret: divide the map into TOTAL_FRETS + 1 equal columns, with the nut after the first.
+  // The map is divided into TOTAL_FRETS+1 equal columns: one open-string zone (x=0 to NUT_X)
+  // followed by 24 fret cells (NUT_X to MAP_W). The nut sits at NUT_X; the 24th fret divider
+  // lands exactly at MAP_W so the content fills edge-to-edge with no left or right gap.
   const fretW = MAP_W / (TOTAL_FRETS + 1);
   const NUT_X = fretW;
 
@@ -227,26 +228,28 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
   const padY = 6;
   const usableH = MAP_H - padY * 2;
   const yForString = (s: number) => padY + (STR_COUNT - 1 - s) * (usableH / (STR_COUNT - 1)); // high E (5) on top
+  // Open strings sit at the centre of the open-string column (left of nut); fretted notes centre in their fret cell.
   const xForFret = (f: number) => f === 0 ? NUT_X * 0.5 : NUT_X + (f - 0.5) * fretW;
   // Vertical lines (nut + fret dividers) terminate AT the outer E strings rather than the map edges,
   // so they don't overhang past the 1st/6th strings and read as extra (phantom) string slots.
   const neckTopY = yForString(STR_COUNT - 1); // high-E string
   const neckBotY = yForString(0);             // low-E string
 
-  // Highlight window covers the windowed fret range (open zone included for open shapes).
-  const boxLeft = startF === 0 ? 0 : NUT_X + startF * fretW;
+  // Highlight window covers the windowed fret range. If the voicing uses any open
+  // string, the highlight runs all the way to the far-left edge so the open-string
+  // column is included — even when the lowest FRETTED note sits higher up the neck
+  // (startF > 0), which would otherwise leave the open column outside the box.
+  const hasOpenNote = notes.some((n: any) => n && n.fret === 0);
+  const boxLeft = (startF === 0 || hasOpenNote) ? 0 : NUT_X + startF * fretW;
   const boxRightX = Math.min(MAP_W, NUT_X + (startF + numF) * fretW);
   const boxWidth = Math.max(1, boxRightX - boxLeft);
 
-  const isLeftEdge = boxLeft <= 1;
-  const isRightEdge = boxRightX >= MAP_W - 1;
-  const R = 8;
-  const rtl = isLeftEdge ? R : 0;
-  const rtr = isRightEdge ? R : 0;
-  const rbr = isRightEdge ? R : 0;
-  const rbl = isLeftEdge ? R : 0;
-
-  const fillPath = buildMiniMapRoundedRect(boxLeft, 0, boxWidth, MAP_H, rtl, rtr, rbr, rbl);
+  // Plain rectangle — no per-corner rounding. The container already clips with
+  // overflow:hidden + borderRadius, so it rounds the visible corners at the map edges
+  // for us. Giving the highlight its OWN corner radius pulled the fill ~8px inward at an
+  // edge, making an edge-touching highlight (e.g. an open shape) look like it stopped
+  // short of the diagram's left edge. Square corners fill flush; the container does the rounding.
+  const fillPath = buildMiniMapRoundedRect(boxLeft, 0, boxWidth, MAP_H, 0, 0, 0, 0);
 
   // In dark themes the hardcoded #1c1c1e lines are invisible on the dark bg3 background.
   // Flip to white (#FFFFFF) — matches the piano white-key colour used in MiniPianoDiagram.
@@ -265,15 +268,21 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
 
   return (
     <View style={{ alignSelf: 'center', width: MAP_W, height: MAP_H, backgroundColor: theme.bg3, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, overflow: 'hidden', marginTop: 12, marginBottom: 12 }}>
-      <Svg width={MAP_W} height={MAP_H}>
+      {/* preserveAspectRatio="none": the parent container is height 44 WITH a 1px border, so the
+          SVG's real viewport is only ~42px tall. The default "xMidYMid meet" therefore scales the
+          whole 320×44 viewBox down to fit that height and centres it horizontally, leaving ~7px
+          empty gaps on the LEFT and RIGHT inside the map. "none" stretches the viewBox to fill the
+          viewport on each axis independently, so the nut sits flush at the left edge and fret 24 at
+          the right edge — no horizontal gaps. The tiny vertical squish (44→42) is imperceptible. */}
+      <Svg width={MAP_W} height={MAP_H} viewBox={`0 0 ${MAP_W} ${MAP_H}`} preserveAspectRatio="none">
         {/* Six string lines */}
         {Array.from({ length: STR_COUNT }).map((_, s) => (
           <Line key={`ms-${s}`} x1={0} y1={yForString(s)} x2={MAP_W} y2={yForString(s)} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={0.5} opacity={isDark ? 0.4 : 0.5} />
         ))}
 
-        {/* Nut — thick line. Fret dividers + inlay markers match the nut colour. */}
+        {/* Nut — thick line, flush at the left edge. Fret dividers + inlay markers match its colour. */}
         <Line x1={NUT_X} y1={neckTopY} x2={NUT_X} y2={neckBotY} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={2} opacity={isDark ? 0.75 : 1} />
-        {Array.from({ length: TOTAL_FRETS - 1 }).map((_, i) => (
+        {Array.from({ length: TOTAL_FRETS }).map((_, i) => (
           <Line key={`mf-${i}`} x1={NUT_X + (i + 1) * fretW} y1={neckTopY} x2={NUT_X + (i + 1) * fretW} y2={neckBotY} stroke={isDark ? neckWhite : '#1c1c1e'} strokeWidth={1} opacity={isDark ? 0.35 : 0.5} />
         ))}
 
@@ -1168,6 +1177,8 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       .replace(/ \[.*?Str\]/g, '') // Remove developer tags like [A Str]
       .replace(/\s*\[\d(?:-\d)+\]/g, '') // Remove injected string sets like [5-4-3-2]
       .replace(/\s*\([A-G]\s*(Pos|Shape)\)/gi, '') // Remove redundant shape/pos labels
+      .replace(/\s*\(Barre at \d+\)/gi, '') // "E Shape (Barre at 8)" → "E Shape"; the fret is obvious from the diagram
+      .replace(/\s*\(Open\)/gi, '') // "E Shape (Open)" → "E Shape"; likewise obvious from the diagram
       .replace(/(?:from|on)\s+(?:b|#|♭|♯)?\w+\s*\((.*?)\)/gi, '$1')
       .replace(/Root Pattern\s*\((.*?)\)/gi, '$1')
       .replace(/(?:from|on)\s+(?:b|#|♭|♯)?\w+/gi, '')

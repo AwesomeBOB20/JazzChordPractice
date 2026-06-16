@@ -15,6 +15,7 @@ import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATE
 import { useAudio } from '@shared/audio/AudioContext';
 import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
 import { calculateOptimalVoiceLeading, STRING_SETS_BY_TYPE, buildScaleVoicings, buildArpVoicings } from '@shared/guitar';
+import { isChordTypeFree } from '@features/pro/proConstants';
 
 // NOTICE: ProgressionSettings has been completely removed from this import list!
 import { ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
@@ -25,6 +26,10 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11];
+
+// Voicing families gated behind Pro (mirrors the Explore screen's free set:
+// block/open/barre/triads). Shells + drop voicings require the Pro unlock.
+const PRO_VOICING_TYPES = ['shells', 'drop2', 'drop3'];
 
 // Hybrid voicing for extension chords: root + guide tones (3rd/7th) + extensions, drop the
 // perfect 5th. Built from the ascending getChordNotes stack so upper extensions sit an octave+
@@ -262,8 +267,8 @@ export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
   // Narrow selector: re-render this complex screen only when one of these fields changes, not on
   // every settings mutation (mixer volumes, colorMode, labelMode, etc. don't touch this screen).
-  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro } = useSettingsStore(
-    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro }))
+  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro, openPaywall } = useSettingsStore(
+    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro, openPaywall: s.openPaywall }))
   );
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
   const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory, activeSongId } = useProgressionStore();
@@ -280,32 +285,58 @@ export default function ProgressionScreen() {
   const [selectedCell, setSelectedCell] = useState<number | null>(0);
   const [viewMode, setViewMode] = useState<'text' | 'diagram'>('text');
   const [arpView, setArpView] = useState(false);
+  // Free users can't open the Pro arpeggio diagrams. The ARPS cycle stop still exists, but it
+  // shows the plain NAME grid; this flag drives the toggle's "ARPS" label + lock without ever
+  // entering arp render mode (arpView stays false), so no paywall interrupts the cycle.
+  const [arpLabelOnly, setArpLabelOnly] = useState(false);
   const lastTap = useRef<{ idx: number, time: number }>({ idx: -1, time: 0 });
 
   // View cycles: NAME (text) → CHORDS (block voicing diagrams) → ARPS (same voicing,
   // numbered + played note-by-note) → NAME.
   const cycleViewMode = () => {
-    if (viewMode === 'text') {
+    if (viewMode === 'text' && !arpLabelOnly) {
+      // NAME → CHORDS
       setViewMode('diagram');
       setArpView(false);
-    } else if (!arpView) {
-      setArpView(true);
+    } else if (viewMode === 'diagram' && !arpView) {
+      // CHORDS → ARPS. Pro shows the arpeggio diagrams; free shows the NAME grid with a
+      // locked "ARPS" label (no paywall — the lock is the only signal).
+      if (isPro) {
+        setArpView(true);
+      } else {
+        setViewMode('text');
+        setArpLabelOnly(true);
+      }
     } else {
+      // ARPS → NAME
       setViewMode('text');
       setArpView(false);
+      setArpLabelOnly(false);
     }
   };
+
+  // Free tier only has open / barre / triads. The cycle still lets a free user land on the
+  // locked AUTO / shells / drops (with a lock badge), but they all RENDER as the freemium
+  // auto (open → barre → triads) — no drop or shell voicing is ever shown to a free user.
+  const effectiveVoicingType = !isPro
+    ? (['open', 'barre', 'triads'].includes(songVoicingType) ? songVoicingType : 'autoFree')
+    : songVoicingType;
+  // True when the currently-selected voicing family is Pro-locked for this user (drives the
+  // lock badge on the VOICING control).
+  const voicingLocked = !isPro && PRO_VOICING_TYPES.includes(songVoicingType);
 
   // Triads / Shells / Drop chords always lock to a concrete string set (no "Any"); resolve any legacy
   // null or stale key (e.g. a persisted song from before this) to that type's first set. auto / open /
   // barre have no string-set lock, so they pass through unchanged (null).
   const effectiveStringSet = (() => {
-    const sets = STRING_SETS_BY_TYPE[songVoicingType];
+    // Freemium auto has no string-set lock — never let a stale key from another family filter it.
+    if (effectiveVoicingType === 'autoFree') return null;
+    const sets = STRING_SETS_BY_TYPE[effectiveVoicingType];
     if (!sets) return songStringSet;
     return (songStringSet && sets.some(s => s.key === songStringSet)) ? songStringSet : sets[0].key;
   })();
 
-  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, effectiveStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, songVoicingType, effectiveStringSet, voiceLeadDir]);
+  const diagramVoicings = React.useMemo(() => calculateOptimalVoiceLeading(progression, voiceLeading, fretCap, guitarNeckZone, effectiveVoicingType, effectiveStringSet, voiceLeadDir), [progression, voiceLeading, fretCap, guitarNeckZone, effectiveVoicingType, effectiveStringSet, voiceLeadDir]);
 
   const pianoVoicings = React.useMemo(() => {
     const result: any[] = [];
@@ -739,7 +770,7 @@ export default function ProgressionScreen() {
     return () => clearTimeout(timer);
   }, [isDrawerVisible, brushRoot, brushType, drawerRootHeight, drawerQualHeight]);
 
-  const showProAlert = () => Alert.alert('Pro Feature', 'Upgrade to Pro to unlock key changes and zone control.', [{ text: 'OK' }]);
+  const showProAlert = () => openPaywall('progression-tools');
 
   const openDrawer = () => setIsDrawerVisible(true);
   const closeDrawer = () => {
@@ -960,10 +991,11 @@ export default function ProgressionScreen() {
         {(
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 44 }} style={{ height: 44 }}>
             <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]} onPress={cycleViewMode}>
-              {viewMode === 'text'
+              {(viewMode === 'text' && !arpLabelOnly)
                 ? <MaterialCommunityIcons name="lead-pencil" size={18} color={t.txt2} />
-                : <Ionicons name={arpView ? 'musical-notes' : 'grid-outline'} size={18} color={t.accent} />}
-              <Text style={{ fontSize: 10, fontWeight: '800', color: viewMode === 'text' ? t.txt2 : t.accent }}>{viewMode === 'text' ? 'NAME' : arpView ? 'ARPS' : 'CHORDS'}</Text>
+                : <Ionicons name={(arpView || arpLabelOnly) ? 'musical-notes' : 'grid-outline'} size={18} color={t.accent} />}
+              <Text style={{ fontSize: 10, fontWeight: '800', color: (viewMode === 'text' && !arpLabelOnly) ? t.txt2 : t.accent }}>{(arpView || arpLabelOnly) ? 'ARPS' : viewMode === 'text' ? 'NAME' : 'CHORDS'}</Text>
+              {arpLabelOnly && <Ionicons name="lock-closed" size={11} color={t.accent} />}
             </TouchableOpacity>
             
             {/* Neck zone is hidden for Up/Down, which deliberately walk the whole neck and
@@ -1010,23 +1042,28 @@ export default function ProgressionScreen() {
             {instrument === 'guitar' && (
               <TouchableOpacity
                 onPress={() => {
+                  // Free users still cycle through every family (locked ones show a lock + render
+                  // as the freemium auto) — no paywall interrupts the cycle.
                   const order = ['auto', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3'] as const;
                   setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
                 }}
                 style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
               >
                 <Text style={{ fontSize: 8, fontWeight: '800', color: songVoicingType === 'auto' ? t.txt3 : t.accent }}>VOICING</Text>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: songVoicingType === 'auto' ? t.txt1 : t.accent }}>
-                  {({ auto: 'AUTO', open: 'OPEN', barre: 'BARRE', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: songVoicingType === 'auto' ? t.txt1 : t.accent }}>
+                    {({ auto: 'AUTO', open: 'OPEN', barre: 'BARRE', triads: 'TRIADS', drop2: 'DROP 2', drop3: 'DROP 3', shells: 'SHELLS' } as Record<string, string>)[songVoicingType]}
+                  </Text>
+                  {voicingLocked && <Ionicons name="lock-closed" size={10} color={t.accent} />}
+                </View>
               </TouchableOpacity>
             )}
 
             {/* Strict string-set lock — only for types with a fixed set of string sets
                 (Triads / Drop 2 / Drop 3). Cycles Any → each set, locking the whole song. */}
-            {instrument === 'guitar' && STRING_SETS_BY_TYPE[songVoicingType] && (() => {
+            {instrument === 'guitar' && STRING_SETS_BY_TYPE[effectiveVoicingType] && (() => {
               // Triads / Shells / Drop chords always lock to one of their concrete sets — no "Any".
-              const sets = STRING_SETS_BY_TYPE[songVoicingType];
+              const sets = STRING_SETS_BY_TYPE[effectiveVoicingType];
               const keys = sets.map(s => s.key);
               const curKey = effectiveStringSet ?? keys[0];
               const curLabel = sets.find(s => s.key === curKey)?.label ?? curKey;
@@ -1459,7 +1496,11 @@ export default function ProgressionScreen() {
       <ProgressionPlayerDock
         playingIdx={playingIdx} isPlayingSystem={isPlayingSystem} isLooping={isLooping} toggleLooping={toggleLooping}
         handlePlayProgression={() => { setSelectedCell(null); handlePlayProgression(); }} stopPlayback={() => stopPlayback()}
-        onOpenSave={() => setIsSaveModalVisible(true)} onOpenLib={() => setIsLibModalVisible(true)}
+        onOpenSave={() => {
+          // Saving progressions is a Pro feature.
+          if (!isPro) { openPaywall('saved-songs'); return; }
+          setIsSaveModalVisible(true);
+        }} onOpenLib={() => setIsLibModalVisible(true)}
         onClear={() => { stopPlayback(); clearProgression(); setSelectedCell(0); }}
       />
 
@@ -1551,10 +1592,15 @@ export default function ProgressionScreen() {
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} onLayout={(e) => drawerQualRowY.current[cat.label] = e.nativeEvent.layout.y}>
                           {cat.keys.map(key => {
                             if (!CH[key]) return null;
-                            const isActive = brushType === key;
+                            const locked = !isPro && !isChordTypeFree(key);
+                            // Locked chords can't be brushed into the progression (and never paint
+                            // accent), so a free user can't add one — which is also what kept them
+                            // leaking into the Explore screen via the cell→chordStore sync.
+                            const showActive = brushType === key && !locked;
                             return (
-                              <TouchableOpacity key={key} activeOpacity={0.7} onLayout={(e) => drawerQualItemY.current[key] = e.nativeEvent.layout.y} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: isActive ? t.accent : t.bg3 }} onPress={() => handleTypePick(key)}>
-                                <Text style={{ fontWeight: '700', fontSize: 14, color: isActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
+                              <TouchableOpacity key={key} activeOpacity={0.7} onLayout={(e) => drawerQualItemY.current[key] = e.nativeEvent.layout.y} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24, backgroundColor: showActive ? t.accent : t.bg3, opacity: locked ? 0.55 : 1 }} onPress={() => locked ? openPaywall('chords') : handleTypePick(key)}>
+                                {locked && <Ionicons name="lock-closed" size={11} color={t.txt2} />}
+                                <Text style={{ fontWeight: '700', fontSize: 14, color: showActive ? '#fff' : t.txt2 }}>{CH[key].l.toLowerCase() === CH[key].s.toLowerCase() ? CH[key].l : `${CH[key].l} (${CH[key].s})`}</Text>
                               </TouchableOpacity>
                             );
                           })}
@@ -1614,7 +1660,14 @@ export default function ProgressionScreen() {
               // the store's saved order.
               const visibleSongs = savedSongs
                 .filter((s: any) => (s.category || 'Standards') === selectedLibCategory)
-                .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+                .sort((a: any, b: any) => {
+                  // Available songs float to the top; Pro-locked ones sink (dimmed) below.
+                  // Alphabetical within each group.
+                  const aLocked = (!isPro && a.pro) ? 1 : 0;
+                  const bLocked = (!isPro && b.pro) ? 1 : 0;
+                  if (aLocked !== bLocked) return aLocked - bLocked;
+                  return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+                });
               if (visibleSongs.length === 0) {
                 return (
                   <View style={styles.emptyState}>
@@ -1626,9 +1679,10 @@ export default function ProgressionScreen() {
               }
               return visibleSongs.map((song: any) => {
                 const isActive = song.id === activeSongId;
+                const songLocked = !isPro && song.pro;
                 return (
-                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: isActive ? t.bg3 : t.bg2, borderColor: isActive ? t.accent : t.border, borderWidth: isActive ? 2 : 1 }]} onPress={() => { stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
-                  <View style={[styles.songCardIcon, { backgroundColor: isActive ? t.accent : t.bg3, borderColor: t.border }]}><Ionicons name="play" size={20} color={isActive ? '#fff' : t.accent} /></View>
+                <TouchableOpacity key={song.id} style={[styles.songCard, { backgroundColor: isActive ? t.bg3 : t.bg2, borderColor: isActive ? t.accent : t.border, borderWidth: isActive ? 2 : 1, opacity: songLocked ? 0.5 : 1 }]} onPress={() => { if (songLocked) { openPaywall('saved-songs'); return; } stopPlayback(); loadSong(song.id); setIsLibModalVisible(false); setSelectedCell(0); }} onLongPress={() => setMoveSongId(song.id)} delayLongPress={300} activeOpacity={0.7}>
+                  <View style={[styles.songCardIcon, { backgroundColor: isActive ? t.accent : t.bg3, borderColor: t.border }]}><Ionicons name={songLocked ? "lock-closed" : "play"} size={20} color={isActive ? '#fff' : t.accent} /></View>
                   <View style={{ flex: 1, paddingHorizontal: 12 }}>
                     <Text style={{ color: t.txt1, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{song.name}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Ionicons name="timer-outline" size={12} color={t.txt3} /><Text style={{ color: t.txt3, fontSize: 12, fontWeight: '600' }}>{song.bpm} BPM</Text></View>
