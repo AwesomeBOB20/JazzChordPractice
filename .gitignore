@@ -50,3 +50,6 @@ yarn-error.*
 # Module build artifacts
 modules/**/android/build/
 modules/**/ios/build/
+
+# Claude Code local tooling
+.claude/

@@ -1308,27 +1308,31 @@ function VoicingExplorer({
   const sGroupNext       = useStableCallback(() => { if (pianoGroups.length === 0) return; const idx = pianoGroups.findIndex((g: { startIdx: number; count: number }) => pianoVoicingIdx >= g.startIdx && pianoVoicingIdx < g.startIdx + g.count); const safeIdx = idx === -1 ? 0 : idx; const nextIdx = (safeIdx + 1) % pianoGroups.length; setPianoVoicingIdx(pianoGroups[nextIdx].startIdx); handleManualNavigate(); });
   const sTargetApplied   = useStableCallback((...args: any[]) => (onTargetVoicingApplied as any)?.(...args));
 
+  // The ChordCard is now the LEFT column of the instrument view's top band, passed in as a slot.
+  // Memoized like combinedHeader so the memoized PianoView/FretboardView keep their memo.
+  const chordCardSlot = React.useMemo(() => (
+    <ChordCard
+      rootSemi={rootSemi} chordType={chordType} namingMode={namingMode} subLabelRoot={subRoot} subLabelType={subType} overrideType={formattedMainType}
+      onPress={sCardPress}
+      onSwipeLeft={sSwipeDown}
+      onSwipeRight={sSwipeUp}
+      onLeftChevronPress={sSwipeDown}
+      onRightChevronPress={sSwipeUp}
+      onTopChevronPress={sTypeNext}
+      onBottomChevronPress={sTypePrev}
+      onNotePress={sCardNotePress}
+      octave={octave} theme={t} activeIvs={displayIvs} activeRoles={displayRoles} activeFormula={displayFormula}
+    />
+  ), [rootSemi, chordType, namingMode, subRoot, subType, formattedMainType, octave, t, displayIvs, displayRoles, displayFormula, sCardPress, sSwipeDown, sSwipeUp, sTypeNext, sTypePrev, sCardNotePress]);
+
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
 
-        <ChordCard
-          rootSemi={rootSemi} chordType={chordType} namingMode={namingMode} subLabelRoot={subRoot} subLabelType={subType} overrideType={formattedMainType}
-          onPress={sCardPress}
-          onSwipeLeft={sSwipeDown}
-          onSwipeRight={sSwipeUp}
-          onLeftChevronPress={sSwipeDown}
-          onRightChevronPress={sSwipeUp}
-          onTopChevronPress={sTypeNext}
-          onBottomChevronPress={sTypePrev}
-          onNotePress={sCardNotePress}
-          octave={octave} theme={t} activeIvs={displayIvs} activeRoles={displayRoles} activeFormula={displayFormula}
-        />
-
         <View style={{ justifyContent: 'center' }}>
           {instrument === 'piano' ? (
             <PianoView
-              ref={pianoRef} showAllLabels={true} header={combinedHeader} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
+              ref={pianoRef} leftSlot={chordCardSlot} showAllLabels={true} header={combinedHeader} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
               groupLabel="CHORD" voicingLabel={voicingTab === 'arps' || voicingTab === 'intervals' ? 'SUBSET' : 'VOICING'}
               voicingName={(voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.label : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.label : (pianoVoicings[pianoVoicingIdx]?.chordLabel || displayChordName)) + pianoSlashSuffix}
               voicingSubName={voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.subLabel : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.subLabel : pianoVoicings[pianoVoicingIdx]?.name}
@@ -1347,7 +1351,7 @@ function VoicingExplorer({
             />
           ) : (
             <FretboardView
-              ref={fretboardRef} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={0}
+              ref={fretboardRef} leftSlot={chordCardSlot} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={0}
               onNotePress={sGuitarNotePress} onNavigate={sFretNavigate}
               onPlayVoicing={sFretPlayVoicing}
               rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
