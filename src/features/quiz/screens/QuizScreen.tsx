@@ -16,6 +16,9 @@ import { TYPE, FONT_WEIGHT } from '@shared/ui/typography';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, preferredAccidentalForRoot, SCALES, CHORD_SCALE_MAP } from '@shared/theory/musicTheory';
 import { PianoView, type PianoViewRef, FretboardView, type FretboardViewRef, CommandSheet } from '@shared/ui';
 import { isChordTypeFree, FREE_VOICING_TABS } from '@features/pro/proConstants';
+import { AdBanner } from '@features/ads/AdBanner';
+import { useInterstitial } from '@features/ads/useInterstitial';
+import { INTERSTITIAL_QUIZ_ROUNDS } from '@features/ads/adConfig';
 import { useAudio } from '@shared/audio/AudioContext';
 import { 
   buildTriadVoicings, 
@@ -353,6 +356,7 @@ export default function QuizScreen() {
   // (memoized for stable identity) so every generation site below uses the gated list.
   const activeInversions = useMemo(() => (isPro ? rawInversions : ['root']), [isPro, rawInversions]);
 
+  const { recordAction: recordQuizRound } = useInterstitial({ everyN: INTERSTITIAL_QUIZ_ROUNDS });
   const t = THEMES[theme];
   const isFocused = useIsFocused();
 
@@ -700,6 +704,7 @@ export default function QuizScreen() {
 
   // ── Generate a new question ─────────────────────────────────
   const nextQuestion = useCallback(() => {
+    recordQuizRound();
     try {
       stopSeqFlash();
       onStop();
@@ -1811,6 +1816,7 @@ export default function QuizScreen() {
         )}
       </ScrollView>
 
+      <AdBanner />
       <View style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border }]}>
         <View style={styles.actionRow}>
           <TouchableOpacity

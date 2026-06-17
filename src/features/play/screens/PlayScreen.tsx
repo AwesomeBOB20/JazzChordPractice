@@ -11,6 +11,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import { FREE_VOICING_TABS, isChordTypeFree, type ProFeature } from '@features/pro/proConstants';
+import { AdBanner } from '@features/ads/AdBanner';
+import { useInterstitial } from '@features/ads/useInterstitial';
+import { INTERSTITIAL_RANDOMIZES } from '@features/ads/adConfig';
 import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
@@ -273,6 +276,7 @@ function VoicingExplorer({
   // The scale overlay is Pro-only. Gate every consumer by isPro so a stale scaleOverlay=true (left over
   // from a Pro session) NEVER renders the overlay or shows the Scale button active in freemium.
   const overlayActive = isPro && scaleOverlay;
+  const { recordAction: recordRandomize } = useInterstitial({ everyN: INTERSTITIAL_RANDOMIZES });
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastRandomTimeRef = useRef(0);
@@ -1539,6 +1543,7 @@ function VoicingExplorer({
   stopSeqFlash();
   if (playDebounceRef.current) { clearTimeout(playDebounceRef.current); playDebounceRef.current = null; }
   onStop?.();
+  recordRandomize();
   requestAnimationFrame(() => {
     handleRandomNext();
     // Trailing release: hold the lock ~140ms PAST the work so the burst of touch events that
@@ -1626,6 +1631,7 @@ export default function PlayScreen() {
         playRef={livePlayRef}
         targetVoicing={targetVoicing} onTargetVoicingApplied={() => setTargetVoicing(null)}
       />
+      <AdBanner />
       <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
     </View>
   );

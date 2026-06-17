@@ -16,6 +16,7 @@ import { useAudio } from '@shared/audio/AudioContext';
 import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
 import { calculateOptimalVoiceLeading, STRING_SETS_BY_TYPE, buildScaleVoicings, buildArpVoicings } from '@shared/guitar';
 import { isChordTypeFree } from '@features/pro/proConstants';
+import { AdBanner } from '@features/ads/AdBanner';
 
 // NOTICE: ProgressionSettings has been completely removed from this import list!
 import { ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
@@ -1495,6 +1496,7 @@ export default function ProgressionScreen() {
 
       </ScrollView>
 
+      <AdBanner />
       <ProgressionPlayerDock
         playingIdx={playingIdx} isPlayingSystem={isPlayingSystem} isLooping={isLooping} toggleLooping={toggleLooping}
         handlePlayProgression={() => { setSelectedCell(null); handlePlayProgression(); }} stopPlayback={() => stopPlayback()}
