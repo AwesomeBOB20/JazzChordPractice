@@ -17,7 +17,7 @@
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#0f0f1e"
       },
-      "package": "com.awesomebob20.jazzchordpractice",
+      "package": "com.awesomebob20.kordal",
       "versionCode": 1,
       "minSdkVersion": 26,
       "abiFilters": [
@@ -26,7 +26,7 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "com.awesomebob20.jazzchordpractice",
+      "bundleIdentifier": "com.awesomebob20.kordal",
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
