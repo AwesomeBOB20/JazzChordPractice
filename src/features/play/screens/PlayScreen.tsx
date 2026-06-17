@@ -10,7 +10,7 @@ import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
-import { FREE_VOICING_TABS, type ProFeature } from '@features/pro/proConstants';
+import { FREE_VOICING_TABS, isChordTypeFree, type ProFeature } from '@features/pro/proConstants';
 import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
@@ -1526,7 +1526,7 @@ function VoicingExplorer({
             <>
               <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => setSheetVisible(true)}>
                 <Ionicons name="layers" size={24} color={t.txt2} />
-                <View style={[styles.badge, { backgroundColor: t.accent }]}><Text style={styles.badgeText}>{useChordStore.getState().activeTypes.length}</Text></View>
+                <View style={[styles.badge, { backgroundColor: t.accent }]}><Text style={styles.badgeText}>{(isPro ? activeTypes : activeTypes.filter(isChordTypeFree)).length}</Text></View>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.wideLoopBtn, { backgroundColor: t.bg2, borderColor: t.border }]} onPress={() => {
   // onPress (fires on release, no auto-repeat) instead of onPressIn: a held / spam press can no

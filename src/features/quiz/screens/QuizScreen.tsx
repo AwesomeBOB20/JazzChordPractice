@@ -1818,7 +1818,7 @@ export default function QuizScreen() {
             onPress={() => setSheetVisible(true)}>
             <Ionicons name="layers" size={24} color={t.txt2} />
             <View style={[styles.badge, { backgroundColor: t.accent }]}>
-              <Text style={styles.badgeText}>{activeTypes.length}</Text>
+              <Text style={styles.badgeText}>{(isPro ? activeTypes : activeTypes.filter(isChordTypeFree)).length}</Text>
             </View>
           </TouchableOpacity>
 
