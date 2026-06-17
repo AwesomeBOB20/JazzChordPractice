@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, View } from 'react-native';
-import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { AD_UNIT_IDS } from './adConfig';
 

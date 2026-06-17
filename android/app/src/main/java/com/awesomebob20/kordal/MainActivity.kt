@@ -1,4 +1,4 @@
-package com.awesomebob20.jazzchordpractice
+package com.awesomebob20.kordal
 
 import android.os.Build
 import android.os.Bundle

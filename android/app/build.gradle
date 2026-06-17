@@ -86,9 +86,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.awesomebob20.jazzchordpractice'
+    namespace 'com.awesomebob20.kordal'
     defaultConfig {
-        applicationId 'com.awesomebob20.jazzchordpractice'
+        applicationId 'com.awesomebob20.kordal'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
