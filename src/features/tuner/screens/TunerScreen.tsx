@@ -14,6 +14,9 @@ import { useAudio } from '@shared/audio/AudioContext';
 import { startListening, stopListening, addPitchListener } from '../../../../modules/native-tuner';
 import { Audio } from 'expo-av';
 import { PopUpModal } from '@shared/ui/SharedModals';
+import { AdBanner } from '@features/ads/AdBanner';
+import { useInterstitial } from '@features/ads/useInterstitial';
+import { INTERSTITIAL_TUNER_LISTEN_MS } from '@features/ads/adConfig';
 
 const TUNINGS: Record<string, { label: string; strings: { name: string; midi: number; hz: number }[] }> = {
   standard: { label: 'Standard', strings: [ { name: 'E2', midi: 40, hz: 82.41 }, { name: 'A2', midi: 45, hz: 110.0 }, { name: 'D3', midi: 50, hz: 146.83 }, { name: 'G3', midi: 55, hz: 196.0 }, { name: 'B3', midi: 59, hz: 246.94 }, { name: 'E4', midi: 64, hz: 329.63 } ] },
@@ -84,6 +87,15 @@ export default function TunerScreen() {
   const tuningStrings = tuning.strings.map(s => ({ ...s, hz: referenceFrequency * Math.pow(2, (s.midi - 69) / 12) }));
 
   const [isRecording, setIsRecording] = useState(false);
+
+  // Time-based interstitial: while actively listening, fire one every few minutes (everyN:1
+  // means each recordAction shows the loaded ad). The timer resets when listening stops/starts.
+  const { recordAction: recordListenTime } = useInterstitial({ everyN: 1 });
+  useEffect(() => {
+    if (mode !== 'listen' || !isRecording) return;
+    const id = setInterval(() => { recordListenTime(); }, INTERSTITIAL_TUNER_LISTEN_MS);
+    return () => clearInterval(id);
+  }, [mode, isRecording, recordListenTime]);
   const [playingStringIdx, setPlayingStringIdx] = useState<number | null>(null);
   const [flexHeight, setFlexHeight] = useState<number>(300);
 
@@ -311,6 +323,7 @@ export default function TunerScreen() {
         </View>
       </PopUpModal>
 
+      <AdBanner />
       <ScrollView style={{ flex: 1 }} scrollEnabled={false} showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
         <View style={styles.container}>
         {mode === 'listen' && (

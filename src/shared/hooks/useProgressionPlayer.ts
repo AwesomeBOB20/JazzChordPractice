@@ -6,7 +6,7 @@ import { useAudio } from '@shared/audio/AudioContext';
 import { getChordNotes, getChordIntervals, getBassLineMidi, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { ProgressionMeasure } from '@shared/audio/SoundfontPlayer';
 
-export function useProgressionPlayer(selectedCell: number | null, diagramVoicings: any[] = [], forceArp: boolean = false) {
+export function useProgressionPlayer(selectedCell: number | null, diagramVoicings: any[] = [], forceArp: boolean = false, onPlaythroughComplete?: () => void) {
   const { playChord: onPlay, stopAudio: onStop, playProgression, stopProgression, setProgressionLooping, queueProgressionJump, updateProgressionNotes } = useAudio();
   // Reactive progression so chord edits during playback can patch the running sequence live.
   const liveProgression = useProgressionStore((s: any) => s.progression);
@@ -24,6 +24,13 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
   const isPlayingRef  = useRef(false);
   const prePlaybackChord = useRef<{ rootSemi: number; chordType: string } | null>(null);
   const playStartRef = useRef(0); // the start chord index the running sequence was built from
+
+  // Play-through detection (drives the song-screen interstitial). lastSeqIdx tracks the
+  // sequence position so a wrap (last position → 0) counts one completed loop play-through;
+  // natural (non-looping) completion is counted in the onComplete callback below.
+  const onPlaythroughCompleteRef = useRef(onPlaythroughComplete);
+  useEffect(() => { onPlaythroughCompleteRef.current = onPlaythroughComplete; });
+  const lastSeqIdxRef = useRef(-1);
 
   const diagramVoicingsRef = useRef(diagramVoicings);
   useEffect(() => { diagramVoicingsRef.current = diagramVoicings; }, [diagramVoicings]);
@@ -299,6 +306,7 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
 
     isPlayingRef.current = true;
     setIsPlayingSystem(true);
+    lastSeqIdxRef.current = -1;
 
     // Play the count-off measure. This also resets the audio clock baseline in
     // SoundfontPlayer (resetClock: true), so the scheduler's first tick lands
@@ -329,14 +337,19 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
       // the Web Audio clock drives everything.
       playProgression(
         sequence,
-        (_seqIdx, chordIdx) => {
+        (seqIdx, chordIdx) => {
           // This callback is fired by an audio-clock-synchronised setTimeout inside
           // SoundfontPlayer — accurate to within a few ms regardless of JS load.
+          // A wrap from the last sequence position back to 0 = one completed loop play-through.
+          if (seqIdx === 0 && lastSeqIdxRef.current === sequence.length - 1) {
+            onPlaythroughCompleteRef.current?.();
+          }
+          lastSeqIdxRef.current = seqIdx;
           setPlayingIdx(chordIdx);
           const chord = useProgressionStore.getState().progression[chordIdx];
           if (chord) useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
         },
-        () => stopPlayback(true),
+        () => { onPlaythroughCompleteRef.current?.(); stopPlayback(true); },
         isLoopingRef.current,
       );
     }, Math.max(0, countOffDurationMs - 100)));

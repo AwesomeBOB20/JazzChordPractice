@@ -13,7 +13,7 @@ import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import { FREE_VOICING_TABS, isChordTypeFree, type ProFeature } from '@features/pro/proConstants';
 import { AdBanner } from '@features/ads/AdBanner';
 import { useInterstitial } from '@features/ads/useInterstitial';
-import { INTERSTITIAL_RANDOMIZES } from '@features/ads/adConfig';
+import { INTERSTITIAL_CHORD_CHANGES } from '@features/ads/adConfig';
 import ChordDictionary from '@features/play/components/ChordDictionary';
 import { CH, NOTE_SHARP, NOTE_FLAT, getChordNotes, spellInterval, GUITAR_TUNING } from '@shared/theory/musicTheory';
 import { Theme, THEMES } from '@shared/ui/themes';
@@ -276,7 +276,15 @@ function VoicingExplorer({
   // The scale overlay is Pro-only. Gate every consumer by isPro so a stale scaleOverlay=true (left over
   // from a Pro session) NEVER renders the overlay or shows the Scale button active in freemium.
   const overlayActive = isPro && scaleOverlay;
-  const { recordAction: recordRandomize } = useInterstitial({ everyN: INTERSTITIAL_RANDOMIZES });
+  const { recordAction: recordChordChange } = useInterstitial({ everyN: INTERSTITIAL_CHORD_CHANGES });
+  // Count every chord change (randomize or manual root/quality nav) toward the Explore interstitial.
+  // Skip the initial mount so arriving on the screen doesn't count as a change.
+  const chordChangeMounted = useRef(false);
+  React.useEffect(() => {
+    if (!chordChangeMounted.current) { chordChangeMounted.current = true; return; }
+    recordChordChange();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootSemi, chordType]);
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastRandomTimeRef = useRef(0);
@@ -1543,7 +1551,6 @@ function VoicingExplorer({
   stopSeqFlash();
   if (playDebounceRef.current) { clearTimeout(playDebounceRef.current); playDebounceRef.current = null; }
   onStop?.();
-  recordRandomize();
   requestAnimationFrame(() => {
     handleRandomNext();
     // Trailing release: hold the lock ~140ms PAST the work so the burst of touch events that
@@ -1612,6 +1619,7 @@ export default function PlayScreen() {
   if (dict.mode === 'dictionary') {
     return (
       <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
+        <AdBanner />
         <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} openPaywall={openPaywall} t={t} />
         <ChordDictionary t={t} />
       </View>
@@ -1620,6 +1628,7 @@ export default function PlayScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
+      <AdBanner />
       <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} openPaywall={openPaywall} t={t} />
       <VoicingExplorer
         rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
@@ -1631,7 +1640,6 @@ export default function PlayScreen() {
         playRef={livePlayRef}
         targetVoicing={targetVoicing} onTargetVoicingApplied={() => setTargetVoicing(null)}
       />
-      <AdBanner />
       <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
     </View>
   );

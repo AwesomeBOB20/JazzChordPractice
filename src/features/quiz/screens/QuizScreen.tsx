@@ -1601,6 +1601,7 @@ export default function QuizScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
+      <AdBanner />
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0, flexGrow: quizMode === 'audio' ? 1 : undefined }}>
 
         {/* Compact Score Panel */}
@@ -1816,7 +1817,6 @@ export default function QuizScreen() {
         )}
       </ScrollView>
 
-      <AdBanner />
       <View style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border }]}>
         <View style={styles.actionRow}>
           <TouchableOpacity

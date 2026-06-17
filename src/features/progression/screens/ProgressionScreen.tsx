@@ -17,6 +17,8 @@ import { useProgressionPlayer } from '@shared/hooks/useProgressionPlayer';
 import { calculateOptimalVoiceLeading, STRING_SETS_BY_TYPE, buildScaleVoicings, buildArpVoicings } from '@shared/guitar';
 import { isChordTypeFree } from '@features/pro/proConstants';
 import { AdBanner } from '@features/ads/AdBanner';
+import { useInterstitial } from '@features/ads/useInterstitial';
+import { INTERSTITIAL_PROGRESSION_PLAYTHROUGHS } from '@features/ads/adConfig';
 
 // NOTICE: ProgressionSettings has been completely removed from this import list!
 import { ProgressionPlayerDock, PopUpModal, SlideUpModal, MiniChordDiagram, MiniPianoDiagram, BpmModal } from '@shared/ui';
@@ -529,7 +531,8 @@ export default function ProgressionScreen() {
       ? pianoArps.map((a, i) => a ?? pianoVoicings[i])
       : diagramArps.map((a, i) => a ?? diagramVoicings[i]);
   }, [arpView, instrument, pianoVoicings, diagramVoicings, pianoArps, diagramArps]);
-  const { playingIdx, isPlayingSystem, isLooping, queuedIdx, queueMeasure, toggleLooping, handlePlayProgression, stopPlayback } = useProgressionPlayer(selectedCell, audioVoicings, arpView);
+  const { recordAction: recordPlaythrough } = useInterstitial({ everyN: INTERSTITIAL_PROGRESSION_PLAYTHROUGHS });
+  const { playingIdx, isPlayingSystem, isLooping, queuedIdx, queueMeasure, toggleLooping, handlePlayProgression, stopPlayback } = useProgressionPlayer(selectedCell, audioVoicings, arpView, recordPlaythrough);
 
   const isFocused = useIsFocused();
   useEffect(() => {
@@ -980,6 +983,7 @@ export default function ProgressionScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg }]}>
+      <AdBanner />
       {!isPlayingSystem && <View style={[styles.card, {
         backgroundColor: t.bg2,
         justifyContent: 'center',
@@ -1496,7 +1500,6 @@ export default function ProgressionScreen() {
 
       </ScrollView>
 
-      <AdBanner />
       <ProgressionPlayerDock
         playingIdx={playingIdx} isPlayingSystem={isPlayingSystem} isLooping={isLooping} toggleLooping={toggleLooping}
         handlePlayProgression={() => { setSelectedCell(null); handlePlayProgression(); }} stopPlayback={() => stopPlayback()}

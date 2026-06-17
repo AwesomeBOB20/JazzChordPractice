@@ -14,6 +14,9 @@ export const AD_UNIT_IDS = {
   interstitial: Platform.OS === 'ios' ? TEST_IOS_INTERSTITIAL : TEST_ANDROID_INTERSTITIAL,
 };
 
-// Interstitial frequency caps — how many user actions between each interstitial.
-export const INTERSTITIAL_QUIZ_ROUNDS   = 5;  // show after every N completed quiz rounds
-export const INTERSTITIAL_RANDOMIZES    = 10; // show after every N randomize presses in Explore
+// Interstitial frequency caps — "Balanced" profile. Tune these freely; they're the
+// single source of truth for how often a full-screen ad appears on each screen.
+export const INTERSTITIAL_CHORD_CHANGES          = 12;     // Explore: every N chord changes (randomize or manual)
+export const INTERSTITIAL_QUIZ_ROUNDS            = 8;      // Quiz: every N questions
+export const INTERSTITIAL_PROGRESSION_PLAYTHROUGHS = 3;    // Song: every N completed play-throughs
+export const INTERSTITIAL_TUNER_LISTEN_MS        = 180000; // Tuner: every 3 min of active listening
