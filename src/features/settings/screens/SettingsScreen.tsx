@@ -25,7 +25,8 @@ const FREE_THEMES = new Set(['light', 'dark']);
 // Relative positioning DOES apply to inline elements (unlike transforms, which inline
 // text drops), so nudge the glyph down a couple px to sit on the 14px / 19px text line.
 // `verticalAlign: 'bottom'` is kept for native, where it is honored.
-const INLINE_ICON_STYLE = { verticalAlign: 'bottom', position: 'relative', top: 0 } as const;
+// Inline icons sit centered on the text line (was 'bottom', which rode high above the words).
+const INLINE_ICON_STYLE = { verticalAlign: 'middle' } as const;
 
 // ── Help & Tutorial content ───────────────────────────────────────────────────
 // Static guide text shown in the collapsible Help card. Kept module-level (no theme
@@ -102,16 +103,20 @@ const HELP_SECTIONS: HelpSection[] = [
       ] },
       { sub: 'Chord' },
       { h: 'Chord Card', b: [
-        'The top card is the current chord; the colored dots are the notes of whatever\'s on screen (chord, scale, arp, interval…).',
-        'Side arrows change the root (C, F…).',
-        'Up/down arrows change the quality (maj7, m7…).',
-        'Tap the chord to hear it.',
+        'The card (left of the top band) is the current chord; the colored dots are its notes (or the scale / arp / interval currently on screen).',
+        'The top ‹ › stepper changes the root (C, F…); the ‹ › stepper below it changes the quality (maj7, m7…). Swiping the card also changes the root.',
+        ['Use the ', I('play'), ' Play button to hear it; tap an individual dot to hear just that note.'],
       ] },
       { h: 'Voicing Tabs', b: [
         'Tabs under the chord switch voicing families.',
         'Triads (3-note), Shells (essential notes), Drop 2/3/2&4 (wider), Open and Barre (guitar shapes), plus Scales, Arpeggios, Intervals.',
-        'Each badge counts how many were found; arrows step through them.',
+        'Each badge counts how many were found.',
         'Available tabs depend on Piano vs Guitar.',
+      ] },
+      { h: 'Choosing a Voicing', b: [
+        'Beside the card, stacked navigators step through your options with ‹ ›.',
+        'CHORD picks which chord to voice — the plain 7th or the full extension (e.g. C7 vs C13♯9), or a triad inside the chord. POSITION / STRING SET sets where it sits on the neck; VOICING picks the exact shape.',
+        'Piano and guitar both work this way.',
       ] },
       { h: 'Hear Any Note', b: [
         'Tap any dot, piano key, or fret to play that note.',
@@ -119,8 +124,9 @@ const HELP_SECTIONS: HelpSection[] = [
       ] },
       { h: 'Display Options (below the diagram)', b: [
         [I('repeat'), ' Hold keeps the chord ringing.'],
+        [I('map'), ' Map (Pro) slides up a whole-neck / whole-keyboard view of where the current voicing sits.'],
         [I('filter'), ' Order re-sorts the voicings.'],
-        [I('eye-outline'), ' Scale overlays a fitting scale to solo with.'],
+        [I('eye-outline'), ' Scale overlays a fitting scale to solo with; long-press (or double-tap) it to pick which scale.'],
       ] },
       { h: 'Random or Manual (bottom row)', b: [
         [I('dice'), ' Random jumps to a chord from a pool you set with the ', I('layers'), ' pool button.'],
@@ -259,8 +265,9 @@ const HELP_SECTIONS: HelpSection[] = [
         'A number left of a guitar diagram is its starting fret.',
         '"Box 1 (E Shape)" names a CAGED position — one of the five places a shape lives along the neck.',
       ] },
-      { h: 'The Mini-Map', b: [
-        'Beside the Explore diagram, a strip shows the whole neck or keyboard; a box marks your view, dots mark the notes.',
+      { h: 'The Position Map', b: [
+        [I('map'), ' Map (next to Hold in the bottom bar) slides up a strip showing the whole neck or keyboard, with the current voicing’s notes lit so you can see where it sits.'],
+        ['A ', I('lock-closed'), ' Pro feature.'],
       ] },
       { h: 'Voicing Types', b: [
         'Triads — basic 3-note chords.',
@@ -318,6 +325,7 @@ const HELP_SECTIONS: HelpSection[] = [
         [I('book-outline'), ' Dictionary mode — every chord, scale, arpeggio, and interval by root.'],
         'Extended & altered chords — 9ths, 11ths, 13ths, altered dominants, add9s, exotic 7ths.',
         'Scale overlay and List/Voicing order in Explore.',
+        [I('map'), ' The position Map — pop up the whole neck or keyboard to see where the current voicing sits.'],
         ['Advanced voicings — Drop 2, Drop 3, Drop 2 & 4, Shells, Arpeggios, Intervals, Shapes (', I('lock-closed'), ' tabs).'],
         'Progression power tools — transpose, key change, neck/piano zones, swing & bossa feels, Pro preset songs.',
         [I('ear'), ' All quiz categories — the Voicings quiz (scales, arpeggios, intervals, shapes) and inversions. Chord & Listen are free.'],
@@ -460,7 +468,7 @@ export default function SettingsScreen() {
           </View>
           {isPro ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
-              <MaterialCommunityIcons name="crown" size={22} color={t.accent} />
+              <MaterialCommunityIcons name="check-circle" size={22} color={t.accent} />
               <Text style={{ flex: 1, color: t.txt1, fontSize: 15, fontWeight: '700' }}>Pro unlocked — thank you!</Text>
             </View>
           ) : (
@@ -585,11 +593,13 @@ export default function SettingsScreen() {
                                   <View style={{ gap: 5, paddingBottom: 10 }}>
                                     {p.b ? p.b.map((bl, bi) => {
                                       const segs = typeof bl === 'string' ? [bl] : bl;
-                                      // Stacked time sigs / bar glyphs can't sit inside a single <Text> (RN won't lay a
-                                      // View inline). Render those bullets as a word-wrapped flex row so the glyph flows
-                                      // mid-sentence next to the bullet, instead of getting shoved onto its own line.
-                                      const hasGlyph = segs.some(s => typeof s === 'object' && s !== null && ('ts' in s || 'bars' in s));
-                                      if (hasGlyph) {
+                                      // Bullets with inline tokens (time-sig / bar glyphs, OR icons) render as a
+                                      // word-wrapped flex row with alignItems:'center', so each token sits vertically
+                                      // CENTERED on the text line — reliable on every platform, unlike inline
+                                      // verticalAlign (which rode the icons high on Android). (Time sigs / bars also
+                                      // can't live inside a single <Text> at all.)
+                                      const hasInlineToken = segs.some(s => typeof s === 'object' && s !== null && ('ts' in s || 'bars' in s || 'ic' in s));
+                                      if (hasInlineToken) {
                                         const items: React.ReactNode[] = [];
                                         segs.forEach((s, si) => {
                                           if (typeof s === 'string') {

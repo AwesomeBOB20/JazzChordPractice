@@ -57,6 +57,9 @@ interface Props {
   onParentScaleChange?: (scaleId: string) => void;
   colorModeOverride?: 'theme' | 'roles' | 'selective';
   showMiniMap?: boolean;
+  // Lift hook (Chord screen): reports the whole-keyboard minimap as a ready-to-render node so it
+  // can live in the sticky player's slide-up "Map" panel instead of inline. null on unmount.
+  onMiniMap?: (node: React.ReactNode) => void;
 }
 
 const ALL_NOTE_NAMES_SHARP = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
@@ -173,7 +176,7 @@ const PianoMiniMap = React.memo(function PianoMiniMap({
   const whiteDivider = isDark ? 'rgba(0,0,0,0.22)' : theme.border;
 
   return (
-    <View style={{ alignSelf: 'center', width: MM_W, height: MM_H, backgroundColor: theme.bg3, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, marginTop: 28, marginBottom: 28, overflow: 'hidden' }}>
+    <View style={{ alignSelf: 'center', width: MM_W, height: MM_H, backgroundColor: theme.bg3, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, marginTop: 12, marginBottom: 12, overflow: 'hidden' }}>
       <Svg width={MM_W} height={MM_H}>
         {/* White keys — white in dark themes (matching the guitar neck minimap), neutral bg3
             in light themes; thin dividers keep adjacent keys readable. */}
@@ -238,7 +241,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   midiNotes, theme, noteNames = [], roles = [], formulas = [], formulaByPC = {}, onNotePress,
   octave = 4, labelMode = 'degrees', accentColor, rootSemi = 0, namingMode, header, leftSlot,
   showAllLabels = false, scaleOverlay = false, overlayNotes = [], overlayRoles = [], overlayFormulas = [], showNavigation = false, groupLabel, voicingLabel, voicingName, voicingSubName, voicingIdx = 0, totalVoicings = 0, onPrevVoicing, onNextVoicing, groups = [], onGroupPrev, onGroupNext,
-  parentScales = [], activeParentScale, onParentScaleChange, colorModeOverride, showMiniMap = true,
+  parentScales = [], activeParentScale, onParentScaleChange, colorModeOverride, showMiniMap = true, onMiniMap,
 }, ref) {
   const scrollRef = useRef<ScrollView>(null);
   const flashAnims = useRef<Record<number, Animated.Value>>({});
@@ -626,15 +629,40 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   const isPianoChordLike = /(?:^|\s)[A-G][b♭#♯]?(?:\s|$|m|M|maj|min|dim|aug|sus|alt|\d)/.test(specificPianoName);
   
   const topPianoLabel = isPianoChordLike ? specificPianoName : basePianoName;
-  const botPianoLabelPrefix = isPianoChordLike && specificPianoName !== basePianoName 
-    ? `${formatChordSymbol(basePianoName)} • ` 
+  const botPianoLabelPrefix = isPianoChordLike && specificPianoName !== basePianoName
+    ? `${formatChordSymbol(basePianoName)} • `
     : (!isPianoChordLike && specificPianoName && specificPianoName !== basePianoName ? `${specificPianoName} • ` : '');
+
+  // Lift the whole-keyboard minimap up to the Chord screen's slide-up when asked (else it renders
+  // inline below — see showMiniMap). scrollSV/contentWidth/viewW are passed through so the viewport
+  // box still tracks the live keyboard scroll even while shown in the slide-up. null clears it.
+  React.useEffect(() => {
+    if (!onMiniMap) return;
+    onMiniMap(
+      <PianoMiniMap
+        midiNotes={midiNotes}
+        theme={theme}
+        rootSemi={rootSemi}
+        roles={roles}
+        formulas={formulas}
+        colorMode={colorMode}
+        accentColor={accentColor}
+        selectiveRoles={selectiveRoles}
+        contentWidth={miniContentWidth}
+        viewW={viewW}
+        scrollSV={scrollSV}
+      />
+    );
+    return () => onMiniMap(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onMiniMap, midiKey, colorMode, theme, accentColor, rootSemi, miniContentWidth, viewW]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
-      {header}
-      {/* Top band: ChordCard (left column) + stacked navigators (right column). */}
-      <View style={[styles.band, { borderBottomColor: theme.border }]}>
+      {/* Top band: ChordCard (left column) + stacked navigators (right column). Skipped entirely when
+          empty (Quiz: no card + no navigation) so there's no fixed-height gap above the keyboard. */}
+      {(leftSlot || showNavigation || parentScales.length > 0) && (
+      <View style={[styles.band, leftSlot ? { height: 210 } : null, { borderBottomColor: theme.border }]}>
         {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
         {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
         <View style={styles.bandNav}>
@@ -702,6 +730,9 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
       )}
         </View>
       </View>
+      )}
+      {/* Voicing-tab selector — now BELOW the card + navigator band (previously the view header). */}
+      {header}
       {showMiniMap && (
         <PianoMiniMap
           midiNotes={midiNotes}
@@ -778,10 +809,16 @@ export default PianoView;
 
 const styles = StyleSheet.create({
   container: { overflow: 'hidden', position: 'relative', paddingTop: 0 },
+  // Fixed height (applied INLINE only when leftSlot is present — the Chord screen) so the band never
+  // resizes as content changes (1 vs 2 nav rows, 1 vs 2 pill rows, sub-label present/absent). Sized to
+  // the tallest case (scales: sub-label + 2 pill rows ≈ 208); shorter content centers within it. The
+  // Quiz (no leftSlot, no navigation) skips the band entirely — no fixed height, no empty gap.
   band: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1 },
-  bandLeft: { width: '46%', justifyContent: 'center' },
+  bandLeft: { flex: 1, justifyContent: 'center' },
   bandDivider: { width: 1, alignSelf: 'stretch' },
   bandNav: { flex: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  // paddingHorizontal 8 matches the LEFT column's chevron inset (ChordCard paddingHorizontal 8) so the
+  // navigator chevrons hug the borders the same way — leaving the center label its full width.
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8 },
   navContainer: {
   flexDirection: 'row', 
@@ -791,7 +828,7 @@ const styles = StyleSheet.create({
   height: ROW_HEIGHT,
   borderBottomWidth: 1, // Added line
 },
-  navBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  navBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   navArrow: { fontSize: 24, fontWeight: '700', lineHeight: 28, marginTop: -2 },
   navLabelWrap: { flex: 1, alignItems: 'center' },
   navLabelTag: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 },

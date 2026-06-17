@@ -66,6 +66,14 @@ interface Props {
   // navigator appears and the STRING SET / VOICING rows below it are filtered to the
   // selected sub-chord. No-op when the chord yields a single label.
   chordAxisEnabled?: boolean;
+  // Whether the whole-neck minimap renders inline above the diagram (default true, e.g. Quiz).
+  // The Chord screen sets this false and instead lifts the minimap out via onMiniMap so it can
+  // live in the sticky player's slide-up "Map" panel.
+  showMiniMap?: boolean;
+  // Lift hook: reports the current-position minimap as a ready-to-render node (or null when there
+  // is none / on unmount). Only the mounted instrument view reports, so this always reflects the
+  // voicing the user is actually looking at.
+  onMiniMap?: (node: React.ReactNode) => void;
 }
 
 const STRUCTURAL_RANK: Record<string, number> = {
@@ -319,7 +327,7 @@ const FretboardMiniMap = React.memo(function FretboardMiniMap({ minFret, maxFret
   );
 });
 
-const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, rootSemi, namingMode, onNotePress, labelMode = 'degrees', imperativeFlashRef, scaleOverlay, overlayNotes = [], colorModeOverride }: any) {
+const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, rootSemi, namingMode, onNotePress, labelMode = 'degrees', imperativeFlashRef, scaleOverlay, overlayNotes = [], colorModeOverride, showMiniMap = true, onMiniMap }: any) {
   const { notes, minFret, maxFret } = scaleVoicing;
   // Honor colorModeOverride (like FretboardDiagram) so the Quiz can show theme
   // color while unanswered and role colors on reveal for scales/arps/intervals/shapes.
@@ -403,9 +411,22 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
   const SVG_W = MARGIN_LEFT + STR_SPACING * (numDisplayStrings - 1) + MARGIN_LEFT;
   const SVG_H = MARGIN_TOP + FRET_SPACING * NUM_FRETS + MARGIN_BOTTOM;
 
+  // Lift the whole-neck minimap up to the Chord screen's slide-up when asked, otherwise render it
+  // inline (Quiz). notesSig keeps the report effect from re-firing on identical re-renders.
+  const miniMapMinFret = isOpenPosition ? 1 : minFret;
+  const notesSig = React.useMemo(() => JSON.stringify(notes), [notes]);
+  React.useEffect(() => {
+    if (!onMiniMap) return;
+    onMiniMap(
+      <FretboardMiniMap minFret={miniMapMinFret} maxFret={maxFret} theme={theme} notes={notes} colorMode={colorMode} selectiveRoles={useSettingsStore.getState().selectiveRoles} />
+    );
+    return () => onMiniMap(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onMiniMap, miniMapMinFret, maxFret, colorMode, theme, notesSig]);
+
   return (
     <View style={{ alignItems: 'center' }}>
-      <FretboardMiniMap minFret={isOpenPosition ? 1 : minFret} maxFret={maxFret} theme={theme} notes={notes} colorMode={colorMode} selectiveRoles={useSettingsStore.getState().selectiveRoles} />
+      {showMiniMap && <FretboardMiniMap minFret={miniMapMinFret} maxFret={maxFret} theme={theme} notes={notes} colorMode={colorMode} selectiveRoles={useSettingsStore.getState().selectiveRoles} />}
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
           {isOpenPosition && ( <Rect x={MARGIN_LEFT - 1.25} y={MARGIN_TOP - 5} width={STR_SPACING * (numDisplayStrings - 1) + 1.75} height={5} fill={theme.txt1} /> )}
@@ -584,7 +605,7 @@ const ScaleDiagram = React.memo(function ScaleDiagram({ scaleVoicing, theme, roo
   );
 });
 
-const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, rootSemi, onNotePress, triggerFlash, labelMode = 'degrees', formulaByPC = {}, imperativeFlashRef, namingMode, overlayNotes = [], colorModeOverride }: any) {
+const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, rootSemi, onNotePress, triggerFlash, labelMode = 'degrees', formulaByPC = {}, imperativeFlashRef, namingMode, overlayNotes = [], colorModeOverride, showMiniMap = true, onMiniMap }: any) {
   const storeColorMode = useSettingsStore((s: any) => s.colorMode);
   const storeFontFamily = useSettingsStore((s: any) => s.fontFamily);
   const svgFont = familyForWeight(storeFontFamily, '700');
@@ -622,6 +643,30 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
         if (hit && flashDotRef.current) { flashDotRef.current(hit.dotKey); onNotePressRef.current?.(hit.midi); }
       }
     }), []);
+
+  // Lift the whole-neck minimap up to the Chord screen's slide-up when asked (else it renders
+  // inline below — see showMiniMap). Recomputed from `voicing` inside the effect because the
+  // shared minFret/maxFret/miniNotes consts live below the early return, past the hooks zone.
+  React.useEffect(() => {
+    if (!onMiniMap) return;
+    if (!voicing || !voicing.frets) { onMiniMap(null); return; }
+    const aFrets = voicing.frets.filter((f: any) => (f.fret ?? 0) > 0).map((f: any) => f.fret as number);
+    if (voicing.capo && voicing.capo > 0) aFrets.push(voicing.capo);
+    const mMin = (voicing.type === 'open' || aFrets.length === 0) ? 1 : Math.min(...aFrets);
+    const mMax = aFrets.length ? Math.max(...aFrets) : 5;
+    const hasOpen = voicing.frets.some((f: any) => f.fret === 0);
+    const openPos = mMin <= 1 || (hasOpen && mMin <= 5);
+    const mNotes = voicing.frets
+      .map((f: any, i: number) => (f && f.fret !== null && f.fret >= 0)
+        ? { stringIdx: i, fret: f.fret, role: f.role, formula: formulaByPC[(GS_MIDI[i] + f.fret) % 12] }
+        : null)
+      .filter(Boolean);
+    onMiniMap(
+      <FretboardMiniMap minFret={openPos ? 1 : mMin} maxFret={mMax} theme={theme} notes={mNotes} colorMode={colorMode} selectiveRoles={useSettingsStore.getState().selectiveRoles} />
+    );
+    return () => onMiniMap(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onMiniMap, voicing, colorMode, theme, formulaByPC]);
 
   if (!voicing || !voicing.frets) return null;
 
@@ -686,7 +731,7 @@ const FretboardDiagram = React.memo(function FretboardDiagram({ voicing, theme, 
 
   return (
     <View style={{ alignItems: 'center' }}>
-      <FretboardMiniMap minFret={isOpenPosition ? 1 : minFret} maxFret={maxFret} theme={theme} notes={miniNotes} colorMode={colorMode} selectiveRoles={useSettingsStore.getState().selectiveRoles} />
+      {showMiniMap && <FretboardMiniMap minFret={isOpenPosition ? 1 : minFret} maxFret={maxFret} theme={theme} notes={miniNotes} colorMode={colorMode} selectiveRoles={useSettingsStore.getState().selectiveRoles} />}
       <View style={[styles.diagramWrap, { width: SVG_W, height: SVG_H }]}>
         <Svg width={SVG_W} height={SVG_H} style={{ position: 'absolute', top: 0, left: 0 }}>
           {displayStrings.map((strIdx, displayPos) => {
@@ -933,7 +978,7 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       selectedBoxName, selectedScaleId, onBoxChange, onScaleChange, scaleOverlay = false, overlayNotes = [],
       parentScales = [], activeParentScale, onParentScaleChange, hideNavigators = false, colorModeOverride,
       targetVoicing, onTargetVoicingApplied,
-      chordAxisEnabled = false
+      chordAxisEnabled = false, showMiniMap = true, onMiniMap
     }, fretboardRef) {
   const chordFlashRef = React.useRef<((midi: number) => void) | null>(null);
   
@@ -1358,12 +1403,11 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
-      {header}
-
       {/* Top band: ChordCard (left column) + navigators (right column). The navigators that
           used to be full-width rows are stacked vertically here so they fit the half-width
           column, freeing the space the old standalone nav row took up below the diagram. */}
-      <View style={[styles.band, { borderBottomColor: theme.border }]}>
+      {(leftSlot || !hideNavigators) && (
+      <View style={[styles.band, leftSlot ? { height: 210 } : null, { borderBottomColor: theme.border }]}>
         {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
         {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
         <View style={styles.bandNav}>
@@ -1517,6 +1561,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       )}
         </View>
       </View>
+      )}
+
+      {/* Voicing-tab selector — now BELOW the card + navigator band (previously the view header). */}
+      {header}
 
       {false && !hideNavigators && (
       <View style={[styles.navContainer, { borderBottomColor: theme.border }]}>
@@ -1578,10 +1626,10 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
 
       {currentVoicing || currentScaleVoicing || currentArpVoicing || currentShapeVoicing ? (
         <View style={{ paddingTop: 6, paddingBottom: 0 }}>
-          {shapesMode ? ( <ScaleDiagram scaleVoicing={currentShapeVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> ) :
-           scaleMode ? ( <ScaleDiagram scaleVoicing={currentScaleVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} colorModeOverride={colorModeOverride} /> ) : 
-           arpMode ? ( <ScaleDiagram scaleVoicing={currentArpVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> ) : 
-           ( <FretboardDiagram voicing={currentVoicing} theme={theme} rootSemi={rootSemi} onNotePress={onNotePress} triggerFlash={triggerFlash} labelMode={labelMode} formulaByPC={formulaByPC} imperativeFlashRef={chordFlashRef} namingMode={namingMode} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} /> )}
+          {shapesMode ? ( <ScaleDiagram scaleVoicing={currentShapeVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} showMiniMap={showMiniMap} onMiniMap={onMiniMap} /> ) :
+           scaleMode ? ( <ScaleDiagram scaleVoicing={currentScaleVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} colorModeOverride={colorModeOverride} showMiniMap={showMiniMap} onMiniMap={onMiniMap} /> ) :
+           arpMode ? ( <ScaleDiagram scaleVoicing={currentArpVoicing} theme={theme} rootSemi={rootSemi} namingMode={namingMode} onNotePress={onNotePress} labelMode={labelMode} imperativeFlashRef={chordFlashRef} scaleOverlay={scaleOverlay} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} showMiniMap={showMiniMap} onMiniMap={onMiniMap} /> ) :
+           ( <FretboardDiagram voicing={currentVoicing} theme={theme} rootSemi={rootSemi} onNotePress={onNotePress} triggerFlash={triggerFlash} labelMode={labelMode} formulaByPC={formulaByPC} imperativeFlashRef={chordFlashRef} namingMode={namingMode} overlayNotes={shiftedOverlayNotes} colorModeOverride={colorModeOverride} showMiniMap={showMiniMap} onMiniMap={onMiniMap} /> )}
         </View>
       ) : (
         <View style={{ padding: 40, alignItems: 'center', justifyContent: 'center' }}>
@@ -1599,10 +1647,16 @@ const styles = StyleSheet.create({
   container: { overflow: 'hidden', paddingTop: 0 },
   // Top band: card (left) + stacked navigators (right), separated by a vertical divider, with a
   // single full-width bottom border above the diagram.
+  // Fixed height (applied INLINE only when leftSlot is present — the Chord screen) so the band never
+  // resizes as content changes (1 vs 2 nav rows, 1 vs 2 pill rows, sub-label present/absent). Sized to
+  // the tallest case (scales: sub-label + 2 pill rows + 2 nav rows ≈ 208); shorter content centers
+  // within it. The Quiz (no leftSlot, navigators hidden) skips the band entirely — no fixed height.
   band: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1 },
-  bandLeft: { width: '46%', justifyContent: 'center' },
+  bandLeft: { flex: 1, justifyContent: 'center' },
   bandDivider: { width: 1, alignSelf: 'stretch' },
   bandNav: { flex: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  // paddingHorizontal 8 matches the LEFT column's chevron inset (ChordCard paddingHorizontal 8) so the
+  // navigator chevrons hug the borders the same way — leaving the center label its full width.
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8 },
   navContainer: {
   flexDirection: 'row',

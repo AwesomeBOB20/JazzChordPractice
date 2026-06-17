@@ -1,6 +1,6 @@
 import React, { useRef, useState, useLayoutEffect, startTransition } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, Animated, Platform
+  ScrollView, Animated, Platform, useWindowDimensions, Easing
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -88,9 +88,42 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, isPro, openPaywal
   );
 }
 
+// ─── BOTTOM SLIDE-UP SHEET ──────────────────────────────────────────────────
+// A floating panel anchored just above the sticky dock (bottom: dockH) that slides up from behind it
+// and back down on close — same one-shot opacity+translateY animation as the Dictionary root picker.
+// It STAYS MOUNTED (the `open` prop drives the slide), so its content is already laid out and there's
+// no Android mount-time empty-background flash. translateY uses the measured height so it slides its
+// full height from below.
+function BottomSlideSheet({ open, dockH, t, children }: { open: boolean; dockH: number; t: Theme; children: React.ReactNode }) {
+  const slide = useRef(new Animated.Value(0)).current;
+  const [h, setH] = useState(0);
+  React.useEffect(() => {
+    Animated.timing(slide, {
+      toValue: open ? 1 : 0,
+      duration: open ? 220 : 170,
+      easing: open ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [open, slide]);
+  return (
+    <Animated.View
+      pointerEvents={open ? 'auto' : 'none'}
+      onLayout={(e) => setH(e.nativeEvent.layout.height)}
+      style={[styles.slideSheet, { bottom: dockH, backgroundColor: t.bg, borderTopColor: t.border, opacity: slide, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [h || 240, 0] }) }] }]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 // ─── INLINE VISUAL SETTINGS ─────────────
-function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMode, activeScaleName, t }: any) {
+function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMode, activeScaleName, onOpenScaleMenu, t }: any) {
   const { sortMode, setSortMode, scaleOverlay, setScaleOverlay, isPro, openPaywall } = useSettingsStore();
+  const lastScaleTapRef = useRef(0);
+  // Effective overlay: a locked (freemium) Scale button must NEVER read as active, even if a stale
+  // scaleOverlay=true is left over from a Pro session. The actual setting is also reset below.
+  const overlayOn = isPro && scaleOverlay;
+  React.useEffect(() => { if (!isPro && scaleOverlay) setScaleOverlay(false); }, [isPro, scaleOverlay, setScaleOverlay]);
   // Block hides the sort toggle: every block entry is an inversion of the SAME chord (one
   // chord label, bottom note lifted an octave each step), so List Order (by bass scale-degree)
   // and Voicing Order (by lowest pitch) climb in lockstep and yield the identical ascending
@@ -127,16 +160,28 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
       {!hideOverlay && (
         <TouchableOpacity
           activeOpacity={0.7}
+          delayLongPress={250}
+          // Tap toggles the overlay; long-press OR double-tap opens the scale chooser. The double-tap
+          // toggles back so the overlay state is left unchanged — the gesture just opens the menu.
+          onLongPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            if (!isPro) { openPaywall('voicings'); return; }
+            onOpenScaleMenu?.();
+          }}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             if (!isPro) { openPaywall('voicings'); return; }
+            const now = Date.now();
+            const isDouble = now - lastScaleTapRef.current < 280;
+            lastScaleTapRef.current = now;
             setScaleOverlay(!scaleOverlay);
+            if (isDouble) onOpenScaleMenu?.();
           }}
-          style={[styles.enginePill, { backgroundColor: scaleOverlay ? t.accent : t.bg2, borderColor: scaleOverlay ? t.accent : t.border, opacity: isPro ? 1 : 0.55 }]}
+          style={[styles.enginePill, { backgroundColor: overlayOn ? t.accent : t.bg2, borderColor: overlayOn ? t.accent : t.border, opacity: isPro ? 1 : 0.55 }]}
         >
-          <Ionicons name={!isPro ? 'lock-closed' : (scaleOverlay ? 'eye' : 'eye-outline')} size={16} color={scaleOverlay ? '#fff' : t.txt2} />
-          <Text style={[styles.enginePillTxt, { color: scaleOverlay ? '#fff' : t.txt2 }]}>
-            {scaleOverlay && activeScaleName ? `Scale: ${activeScaleName}` : 'Scale'}
+          <Ionicons name={!isPro ? 'lock-closed' : (scaleOverlay ? 'eye' : 'eye-outline')} size={16} color={overlayOn ? '#fff' : t.txt2} />
+          <Text style={[styles.enginePillTxt, { color: overlayOn ? '#fff' : t.txt2 }]}>
+            {overlayOn && activeScaleName ? `Scale: ${activeScaleName}` : 'Scale'}
           </Text>
         </TouchableOpacity>
       )}
@@ -215,6 +260,7 @@ function VoicingExplorer({
   targetVoicing, onTargetVoicingApplied,
 }: VoicingExplorerProps) {
   const insets = useSafeAreaInsets();
+  const { width: winW } = useWindowDimensions();
   const { playChord: onPlay, playSingleNote: onNotePress, stopAudio: onStop, playArpLoop: onArpLoop, playHoldChord: onHoldChord } = useAudio();
   // Narrow selector (not a whole-store subscription): this heavy screen re-renders only when one
   // of THESE fields changes, so unrelated settings (volumes, colorMode, dictionary prefs, …) no
@@ -224,9 +270,41 @@ function VoicingExplorer({
   );
   const { inputMode, selectedScaleId, setSelectedScaleId, activeTypes } = useChordStore();
   const t = THEMES[theme];
+  // The scale overlay is Pro-only. Gate every consumer by isPro so a stale scaleOverlay=true (left over
+  // from a Pro session) NEVER renders the overlay or shows the Scale button active in freemium.
+  const overlayActive = isPro && scaleOverlay;
   const playAnim = useRef(new Animated.Value(1)).current;
   const seqFlashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastRandomTimeRef = useRef(0);
+
+  // Measured sticky-player height — the Map / Scale slide-ups float ABOVE the dock (absolute,
+  // bottom: dockH) and emerge from behind it, like the Dictionary root picker.
+  const [dockH, setDockH] = React.useState(150);
+
+  // ── Position "Map" slide-up (Pro) ─────────────────────────────────────────
+  // The whole-neck / whole-keyboard minimap is lifted out of the instrument views (showMiniMap off here)
+  // and shown in this Pro slide-up. onMiniMap reports the current-position node CONTINUOUSLY so the
+  // sheet's content is always rendered; the sheet (BottomSlideSheet) stays mounted and just slides — so
+  // on Android there's no mount-time empty-background flash, and it slides down cleanly on close.
+  const [mapOpen, setMapOpen] = React.useState(false);
+  const [mapNode, setMapNode] = React.useState<React.ReactNode>(null);
+  // Scale the lifted minimap up to nearly fill the slide-up width without touching the edges. Derived
+  // from the window width (known synchronously) so it's right on the FIRST frame — no measure-then-grow
+  // pop. Base map width = 320; capped so it stays a "little bigger". Quiz's inline maps keep the 320 base.
+  const mapScale = Math.min(1.2, Math.max(1, (winW - 24 - 8) / 320));
+  // Never leave a Pro panel open for a user who isn't (or stops being) Pro.
+  React.useEffect(() => { if (!isPro && mapOpen) setMapOpen(false); }, [isPro, mapOpen]);
+
+  // ── "Scales" slide-up (Pro): long-press / double-tap the Scale pill to pick WHICH scale to overlay,
+  // from all the scales that fit this chord. Mutually exclusive with the Map panel.
+  const [scaleMenuOpen, setScaleMenuOpen] = React.useState(false);
+  React.useEffect(() => { if (!isPro && scaleMenuOpen) setScaleMenuOpen(false); }, [isPro, scaleMenuOpen]);
+  // The Scale overlay (and its button) is hidden on the Scales tab, so close the menu there too.
+  React.useEffect(() => { if (voicingTab === 'scales') setScaleMenuOpen(false); }, [voicingTab]);
+  const chordScales = React.useMemo(
+    () => (CHORD_SCALE_MAP[chordType] || []).map((id: string) => ({ id, name: SCALES[id]?.name || id })),
+    [chordType]
+  );
   // Whether THIS (Explore/chord) screen is the focused tab, kept in a ref so lifecycle effects can
   // read the current value at the moment they run. The audio engine is GLOBAL: this screen's
   // "stop my preview" effects (instrument/octave/tab/sort changes, mount, unmount) call the shared
@@ -662,7 +740,7 @@ function VoicingExplorer({
   const scaleVoicings = React.useMemo(() => {
     if (!currentChordDef) return [];
     // Ensure parent scales are generated if we are on Arps or Intervals
-    const isNeeded = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || scaleOverlay;
+    const isNeeded = voicingTab === 'scales' || voicingTab === 'arps' || voicingTab === 'intervals' || overlayActive;
     if (!isNeeded) return [];
     const scaleIds = CHORD_SCALE_MAP[chordType] ?? [];
     return buildScaleVoicings(scaleIds, SCALES, rootSemi, currentChordDef.iv, namingMode);
@@ -681,7 +759,7 @@ function VoicingExplorer({
 
   // NEW: Mathematically compute the entire fretboard to ensure 100% overlay coverage (no gaps in open positions!)
   const guitarOverlayNotes = React.useMemo(() => {
-    if (!scaleOverlay || voicingTab === 'scales' || instrument === 'piano' || !currentChordDef) return [];
+    if (!overlayActive || voicingTab === 'scales' || instrument === 'piano' || !currentChordDef) return [];
     const allowedScales = CHORD_SCALE_MAP[chordType] || [];
     const activeScaleId = (selectedScaleId && allowedScales.includes(selectedScaleId)) ? selectedScaleId : allowedScales[0];
     const scale = activeScaleId ? SCALES[activeScaleId] : null;
@@ -775,7 +853,7 @@ function VoicingExplorer({
 
   const pianoOverlayMidiNotes = React.useMemo(() => {
     // Disable overlay if the user is literally on the scales tab
-    if (!scaleOverlay || voicingTab === 'scales' || instrument !== 'piano' || !currentChordDef) return { notes: [], roles: [], formulas: [] };
+    if (!overlayActive || voicingTab === 'scales' || instrument !== 'piano' || !currentChordDef) return { notes: [], roles: [], formulas: [] };
     const allowedScales = CHORD_SCALE_MAP[chordType] || [];
     const activeScaleId = (selectedScaleId && allowedScales.includes(selectedScaleId)) ? selectedScaleId : allowedScales[0];
     const scale = activeScaleId ? SCALES[activeScaleId] : null;
@@ -1332,7 +1410,7 @@ function VoicingExplorer({
         <View style={{ justifyContent: 'center' }}>
           {instrument === 'piano' ? (
             <PianoView
-              ref={pianoRef} leftSlot={chordCardSlot} showAllLabels={true} header={combinedHeader} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
+              ref={pianoRef} leftSlot={chordCardSlot} showAllLabels={true} header={combinedHeader} showMiniMap={false} onMiniMap={setMapNode} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
               groupLabel="CHORD" voicingLabel={voicingTab === 'arps' || voicingTab === 'intervals' ? 'SUBSET' : 'VOICING'}
               voicingName={(voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.label : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.label : (pianoVoicings[pianoVoicingIdx]?.chordLabel || displayChordName)) + pianoSlashSuffix}
               voicingSubName={voicingTab === 'arps' ? arpSubsets[safeArpSubsetIdx]?.subLabel : voicingTab === 'intervals' ? intervalSubsets[safeIntervalSubsetIdx]?.subLabel : pianoVoicings[pianoVoicingIdx]?.name}
@@ -1347,11 +1425,11 @@ function VoicingExplorer({
               noteNames={pianoNoteNames}
               roles={pianoVoicings[pianoVoicingIdx]?.roles || currentChordDef.r} formulas={pianoVoicings[pianoVoicingIdx]?.formulas || currentChordDef.f} formulaByPC={formulaByPC}
               onNotePress={sPianoNotePress}
-              octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
+              octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={overlayActive && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
             />
           ) : (
             <FretboardView
-              ref={fretboardRef} leftSlot={chordCardSlot} header={combinedHeader} groups={guitarGroups} theme={t} defaultGroupIdx={0}
+              ref={fretboardRef} leftSlot={chordCardSlot} header={combinedHeader} showMiniMap={false} onMiniMap={setMapNode} groups={guitarGroups} theme={t} defaultGroupIdx={0}
               onNotePress={sGuitarNotePress} onNavigate={sFretNavigate}
               onPlayVoicing={sFretPlayVoicing}
               rootSemi={rootSemi} chordName={displayChordName} chordType={chordType} labelMode={labelMode}
@@ -1360,7 +1438,7 @@ function VoicingExplorer({
               onArpSubsetChange={sArpSubsetChange}
               shapesMode={voicingTab === 'shapes'} shapeVoicings={shapeVoicings} formulaByPC={formulaByPC}
               chordAxisEnabled={voicingTab === 'triads' || voicingTab === 'shells' || voicingTab === 'drop2' || voicingTab === 'drop3' || voicingTab === 'drop2and4'}
-              namingMode={namingMode} scaleOverlay={scaleOverlay && voicingTab !== 'scales'} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
+              namingMode={namingMode} scaleOverlay={overlayActive && voicingTab !== 'scales'} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
               selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
               targetVoicing={targetVoicing} onTargetVoicingApplied={sTargetApplied}
             />
@@ -1369,8 +1447,51 @@ function VoicingExplorer({
 
       </ScrollView>
 
+      {/* ── Position Map slide-up (Pro) — floats above the dock, slides up/down like the root picker ── */}
+      <BottomSlideSheet open={mapOpen && isPro} dockH={dockH} t={t}>
+        <View style={styles.mapPanelHeader}>
+          <Text style={[styles.mapPanelTitle, { color: t.txt3 }]}>{instrument === 'piano' ? 'KEYBOARD MAP' : 'NECK MAP'}</Text>
+          <TouchableOpacity onPress={() => setMapOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="chevron-down" size={18} color={t.txt3} />
+          </TouchableOpacity>
+        </View>
+        <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: Math.round(68 * mapScale) }}>
+          <View style={{ transform: [{ scale: mapScale }] }}>{mapNode}</View>
+        </View>
+      </BottomSlideSheet>
+
+      {/* ── Scales slide-up (Pro): long-press / double-tap the Scale pill to pick the overlay scale ── */}
+      <BottomSlideSheet open={scaleMenuOpen && isPro && chordScales.length > 0} dockH={dockH} t={t}>
+        <View style={styles.mapPanelHeader}>
+          <Text style={[styles.mapPanelTitle, { color: t.txt3 }]}>SCALE TO OVERLAY</Text>
+          <TouchableOpacity onPress={() => setScaleMenuOpen(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="chevron-down" size={18} color={t.txt3} />
+          </TouchableOpacity>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scaleMenuScroll} contentContainerStyle={styles.scaleMenuRow}>
+          {chordScales.map((s: { id: string; name: string }) => {
+            const active = overlayActive && s.id === activeScaleIdForGuitar;
+            return (
+              <TouchableOpacity
+                key={s.id}
+                activeOpacity={0.7}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setSelectedScaleId(s.id);
+                  useSettingsStore.getState().setScaleOverlay(true);
+                  setScaleMenuOpen(false);
+                }}
+                style={[styles.scalePill, { backgroundColor: active ? t.accent : t.bg2, borderColor: active ? t.accent : t.border }]}
+              >
+                <Text style={[styles.scalePillTxt, { color: active ? '#fff' : t.txt2 }]}>{s.name}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </BottomSlideSheet>
+
       {/* ── Sticky Player Dock ───────────────────────────────────────────── */}
-      <View style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border }]}>
+      <View onLayout={(e) => setDockH(e.nativeEvent.layout.height)} style={[styles.stickyPlayer, { backgroundColor: t.bg, borderTopColor: t.border }]}>
         
         {/* INLINE ENGINE CONTROLS */}
         <View style={{ marginBottom: 12 }}>
@@ -1383,11 +1504,18 @@ function VoicingExplorer({
               </TouchableOpacity>
             )}
 
-            <VisualDisplaySettings voicingTab={voicingTab} shapeDisplayMode={shapeDisplayMode} setShapeDisplayMode={setShapeDisplayMode} activeScaleName={SCALES[activeScaleIdForGuitar]?.name} t={t} />
+            <VisualDisplaySettings voicingTab={voicingTab} shapeDisplayMode={shapeDisplayMode} setShapeDisplayMode={setShapeDisplayMode} activeScaleName={SCALES[activeScaleIdForGuitar]?.name} onOpenScaleMenu={() => { setMapOpen(false); setScaleMenuOpen(true); }} t={t} />
 
             <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPlayMode(playMode === 'once' ? 'hold' : 'once'); }} style={[styles.enginePill, { backgroundColor: playMode === 'hold' ? t.accent : t.bg2, borderColor: playMode === 'hold' ? t.accent : t.border }]}>
               <Ionicons name="repeat" size={16} color={playMode === 'hold' ? '#fff' : t.txt2} />
               <Text style={[styles.enginePillTxt, { color: playMode === 'hold' ? '#fff' : t.txt2 }]}>Hold</Text>
+            </TouchableOpacity>
+
+            {/* Map: Pro-locked slide-up of the whole-neck / whole-keyboard minimap for the current
+                position. Locked state matches the Scale pill: icon → lock, whole button dims to 0.55. */}
+            <TouchableOpacity activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); if (!isPro) { openPaywall('map'); return; } setScaleMenuOpen(false); setMapOpen(o => !o); }} style={[styles.enginePill, { backgroundColor: mapOpen ? t.accent : t.bg2, borderColor: mapOpen ? t.accent : t.border, opacity: isPro ? 1 : 0.55 }]}>
+              <Ionicons name={!isPro ? 'lock-closed' : 'map'} size={16} color={mapOpen ? '#fff' : t.txt2} />
+              <Text style={[styles.enginePillTxt, { color: mapOpen ? '#fff' : t.txt2 }]}>Map</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -1511,13 +1639,24 @@ const styles = StyleSheet.create({
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 10 },
   modeBtnText: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   
-  tabBarOuter: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
-  tabBtn: { height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  tabBarOuter: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1 },
+  tabBtn: { height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 
   visualSettingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
   miniPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   miniPillTxt: { ...TYPE.label, fontWeight: FONT_WEIGHT.bold },
 
+  // Floating bottom sheet (Map / Scale pickers): absolute, anchored just above the dock, slides up/down.
+  slideSheet: { position: 'absolute', left: 0, right: 0, borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10 },
+  mapPanelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, paddingHorizontal: 4 },
+  mapPanelTitle: { ...TYPE.label, fontWeight: FONT_WEIGHT.bold, letterSpacing: 1 },
+  // Horizontal scroller (like the Dictionary root picker): pills in one row, slide left/right.
+  // The negative margin cancels the sheet's paddingHorizontal (12) so the row runs edge-to-edge and a
+  // partly-scrolled pill is cut off AT the screen edge; the content keeps a 12px start/end inset.
+  scaleMenuScroll: { marginHorizontal: -12 },
+  scaleMenuRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 4 },
+  scalePill: { paddingHorizontal: 12, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  scalePillTxt: { ...TYPE.label, fontWeight: FONT_WEIGHT.bold },
   stickyPlayer: { paddingVertical: 12, borderTopWidth: 1, paddingBottom: 12 },
   enginePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, height: 40, borderRadius: 20, borderWidth: 1 },
   enginePillTxt: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },

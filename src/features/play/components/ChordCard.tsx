@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, PanResponder, Animated } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { CH, NOTE_SHARP, NOTE_FLAT, spellInterval, formatDegree, ROLE_SHORT, getGlobalLabel } from '@shared/theory/musicTheory';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 import { Theme, ROLE_COLORS_GLOBAL } from '@shared/ui/themes';
@@ -86,6 +85,10 @@ export default function ChordCard({
   const txt2 = theme?.txt2 ?? '#aaaacc';
   const txt3 = theme?.txt3 ?? '#6666aa';
   const accent = theme?.accent ?? '#D85A30';
+  // Match the right-side navigator chevrons (FretboardView/PianoView navBtn): a bordered circle
+  // filled with theme.bg, sitting on the card's bg2.
+  const border = theme?.border ?? '#333';
+  const cellBg = theme?.bg ?? bg;
 
   // Force a pleasant middle register (Octave 4) for the UI note pills,
   // ignoring the global instrument octave which might be tuned down for the fretboard.
@@ -170,31 +173,28 @@ export default function ChordCard({
 
   return (
     <View style={[styles.card, { backgroundColor: bg }]} {...panResponder.panHandlers}>
-      {/* Background Play Button */}
-      <TouchableOpacity
-        style={StyleSheet.absoluteFill}
-        activeOpacity={0.7}
-        onPress={onPress}
-      />
+      {/* Tap-to-play on the card was removed — playback is the Play button's job. The steppers, note
+          pills (tap a dot to hear that one note), and swipe gestures remain. */}
 
-      {/* Stacked steppers — root on top, quality below. Sized to read as a matched pair. */}
-      <View style={{ width: '100%', gap: 2 }} pointerEvents="box-none">
+      {/* Stacked steppers — root on top, quality below. Sized to read as a matched pair. The row gap
+          matches the right-side navigators' bandNav gap (8) so the two stacked chevron pairs aren't cramped. */}
+      <View style={{ width: '100%', gap: 8 }} pointerEvents="box-none">
         <View style={styles.stepRow}>
-          <TouchableOpacity onPress={onLeftChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
-            <Ionicons name="chevron-back" size={18} color={txt3} />
+          <TouchableOpacity onPress={onLeftChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={[styles.stepBtn, { borderColor: border, backgroundColor: cellBg }]}>
+            <Text style={[styles.chev, { color: txt1 }]}>‹</Text>
           </TouchableOpacity>
           <Text style={[styles.root, { color: txt1, flex: 1, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>{rootName}</Text>
-          <TouchableOpacity onPress={onRightChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
-            <Ionicons name="chevron-forward" size={18} color={txt3} />
+          <TouchableOpacity onPress={onRightChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={[styles.stepBtn, { borderColor: border, backgroundColor: cellBg }]}>
+            <Text style={[styles.chev, { color: txt1 }]}>›</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.stepRow}>
-          <TouchableOpacity onPress={onBottomChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
-            <Ionicons name="chevron-back" size={18} color={txt3} />
+          <TouchableOpacity onPress={onBottomChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={[styles.stepBtn, { borderColor: border, backgroundColor: cellBg }]}>
+            <Text style={[styles.chev, { color: txt1 }]}>‹</Text>
           </TouchableOpacity>
           <Text style={[styles.type, { color: accent, flex: 1, textAlign: 'center', marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit>{formatChordSymbol(mainSuffix)}</Text>
-          <TouchableOpacity onPress={onTopChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={styles.stepBtn}>
-            <Ionicons name="chevron-forward" size={18} color={txt3} />
+          <TouchableOpacity onPress={onTopChevronPress} hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }} style={[styles.stepBtn, { borderColor: border, backgroundColor: cellBg }]}>
+            <Text style={[styles.chev, { color: txt1 }]}>›</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -229,11 +229,8 @@ export default function ChordCard({
         </View>
       ) : null}
 
-      <Text style={[styles.formula, { color: txt3 }]}>
-        {formulaToUse.map(formatDegree).join(' · ')}
-      </Text>
-
-      {/* Note pills — moved into the card's (left) column, stacked under the formula. */}
+      {/* Note pills — each already shows its scale degree as a sub-label, so the standalone formula
+          row (R · 3 · 5) it used to sit under was pure duplication and was removed. */}
       <View style={styles.pillStack} pointerEvents="box-none">
         <View style={styles.pillRow}>
           {topRow.map((p, i) => renderPill(p, i))}
@@ -251,19 +248,22 @@ const styles = StyleSheet.create({
   // The card is now a single (left) column: steppers → sub-label → formula → note pills,
   // all stacked. The POSITION/VOICING navigators sit beside it (provided by the instrument
   // view as the right column of the band), so the card no longer owns a divider/right split.
-  card: { paddingVertical: 12, paddingHorizontal: 10, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  card: { paddingVertical: 12, paddingHorizontal: 8, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
 
-  pillStack: { alignItems: 'center', gap: 6, marginTop: 6 },
+  pillStack: { alignItems: 'center', gap: 6, marginTop: 14 },
   pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
 
+  // No extra horizontal padding here: the chevrons sit at the card's edge inset (paddingHorizontal 8)
+  // so they hug the borders and leave the center label as much width as possible.
   stepRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' },
-  stepBtn: { paddingHorizontal: 4, paddingVertical: 2 },
+  stepBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  // The chevron glyph rendered IDENTICALLY to the navigators' navArrow (‹ ›) so left + right match.
+  chev: { fontSize: 24, fontWeight: '700', lineHeight: 28, marginTop: -2 },
   // Root + quality are sized as a matched pair (title over subtitle) so the two steppers read
   // together. lineHeight gives the cap/ascenders headroom so the glyphs aren't clipped.
   root: { ...TYPE.title, lineHeight: 30, textAlign: 'center' },
   type: { ...TYPE.subtitle, fontWeight: FONT_WEIGHT.semibold, textAlign: 'center', lineHeight: 26 },
   subLabel: { ...TYPE.label, textAlign: 'center', marginBottom: 2 },
-  formula: { ...TYPE.caption, letterSpacing: 1, textAlign: 'center', marginTop: 4 },
 
   pillContainer: { alignItems: 'center', gap: 0 },
   pill: {

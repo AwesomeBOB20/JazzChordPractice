@@ -37,6 +37,18 @@ function buildPianoVoicingsUncached(rootSemi: number, chordType: string, octave:
   const rootNoteName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[rootSemi];
   const defaultChordLabel = formatChordSymbol(ch.l ? `${rootNoteName} ${ch.l}` : rootNoteName);
 
+  // For extended chords (>4 tones), the rooted Pass-1 drops below voice only R-3-5-7 — the core 7th
+  // (or 6th) chord. Label them as that core (e.g. C13#9 → "C7") so they form their OWN "CHORD" group,
+  // separate from the rootless Pass-2 drops that carry the color tones. This gives piano the same
+  // CHORD → VOICING drill-down the guitar has (pick the chord, then the voicing under it), and mirrors
+  // how the piano's superimposed triads already group.
+  let coreLabel = defaultChordLabel;
+  if (ch.iv.length > 4) {
+    const base4 = ch.iv.slice(0, 4).join(',');
+    const coreType = Object.keys(CH).find((k) => CH[k].iv.length === 4 && CH[k].iv.join(',') === base4);
+    if (coreType) coreLabel = formatChordSymbol(`${rootNoteName} ${CH[coreType].l}`);
+  }
+
   const triads: UnifiedVoicing[] = [];
   const shells: UnifiedVoicing[] = [];
   const drop2: UnifiedVoicing[] = [];
@@ -124,15 +136,15 @@ function buildPianoVoicingsUncached(rootSemi: number, chordType: string, octave:
     for (let i = 0; i < 4; i++) {
       const d2 = [dInv[2] - 12, dInv[0], dInv[1], dInv[3]];
       const d2Sorted = d2.sort((a,b) => a - b);
-      drop2.push(createVoicing(getFormulaStack(d2Sorted), d2Sorted));
-      
+      drop2.push(createVoicing(getFormulaStack(d2Sorted), d2Sorted, coreLabel));
+
       const d3 = [dInv[1] - 12, dInv[0], dInv[2], dInv[3]];
       const d3Sorted = d3.sort((a,b) => a - b);
-      drop3.push(createVoicing(getFormulaStack(d3Sorted), d3Sorted));
+      drop3.push(createVoicing(getFormulaStack(d3Sorted), d3Sorted, coreLabel));
 
       const d24 = [dInv[0] - 12, dInv[2] - 12, dInv[1], dInv[3]];
       const d24Sorted = d24.sort((a,b) => a - b);
-      drop2and4.push(createVoicing(getFormulaStack(d24Sorted), d24Sorted));
+      drop2and4.push(createVoicing(getFormulaStack(d24Sorted), d24Sorted, coreLabel));
 
       dInv = [...dInv];
       dInv[0] += 12;
@@ -158,43 +170,24 @@ function buildPianoVoicingsUncached(rootSemi: number, chordType: string, octave:
     d2base = [dHas3, dHas5, dHas6, dHas9 % 12].sort((a,b)=>a-b);
   }
 
-  const ROOTLESS_SUB_MAP: Record<string, { type: string, rootFormula: string }> = {
-    'maj9': { type: 'min7', rootFormula: '3' },
-    'maj11': { type: 'min7', rootFormula: '3' },
-    'maj13': { type: 'min7', rootFormula: '3' },
-    'maj69': { type: 'dom7sus4', rootFormula: '6' },
-    'min9': { type: 'maj7', rootFormula: 'b3' },
-    'min11': { type: 'maj7', rootFormula: 'b3' },
-    'min13': { type: 'maj7', rootFormula: 'b3' },
-    'dom9': { type: 'hdim7', rootFormula: '3' },
-    'dom11': { type: 'hdim7', rootFormula: '3' },
-    'dom13': { type: 'hdim7', rootFormula: '3' },
-    'dom7b9': { type: 'fdim7', rootFormula: '3' },
-    // Removed min69 and dom13b9 - engine falls back to explicit drop2 shapes
-  };
-
-  let subChordLabel: string | undefined = undefined;
-  const subDef = ROOTLESS_SUB_MAP[chordType];
-  if (subDef) {
-    const subRootName = spellInterval(rootSemi, subDef.rootFormula, namingMode === 'flat');
-    subChordLabel = formatChordSymbol(`${subRootName}${subDef.type}`);
-  }
-
+  // The Pass-2 rootless drops carry the chord's defining color tones (9 / #9 / b9 / 11 / 13), so they
+  // ARE the full extended chord — label them as such (e.g. "C13#9"). Together with the Pass-1 core
+  // ("C7") this yields exactly two CHORD groups for an extended chord: the plain 7th and the full color.
   if (d2base && d2base.length >= 4) {
     let dInv = d2base.map(iv => rhRootMidi + iv);
     dInv.sort((a, b) => a - b);
     for (let i = 0; i < 4; i++) {
       const d2 = [dInv[2] - 12, dInv[0], dInv[1], dInv[3]];
       const d2Sorted = d2.sort((a,b) => a - b);
-      drop2.push(createVoicing(getFormulaStack(d2Sorted), d2Sorted, subChordLabel));
-      
+      drop2.push(createVoicing(getFormulaStack(d2Sorted), d2Sorted, defaultChordLabel));
+
       const d3 = [dInv[1] - 12, dInv[0], dInv[2], dInv[3]];
       const d3Sorted = d3.sort((a,b) => a - b);
-      drop3.push(createVoicing(getFormulaStack(d3Sorted), d3Sorted, subChordLabel));
+      drop3.push(createVoicing(getFormulaStack(d3Sorted), d3Sorted, defaultChordLabel));
 
       const d24 = [dInv[0] - 12, dInv[2] - 12, dInv[1], dInv[3]];
       const d24Sorted = d24.sort((a,b) => a - b);
-      drop2and4.push(createVoicing(getFormulaStack(d24Sorted), d24Sorted, subChordLabel));
+      drop2and4.push(createVoicing(getFormulaStack(d24Sorted), d24Sorted, defaultChordLabel));
 
       dInv = [...dInv];
       dInv[0] += 12;

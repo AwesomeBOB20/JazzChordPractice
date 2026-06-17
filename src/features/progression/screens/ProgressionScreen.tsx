@@ -290,9 +290,6 @@ export default function ProgressionScreen() {
   // entering arp render mode (arpView stays false), so no paywall interrupts the cycle.
   const [arpLabelOnly, setArpLabelOnly] = useState(false);
   const lastTap = useRef<{ idx: number, time: number }>({ idx: -1, time: 0 });
-  // Double-tap timestamps for the locked toggle buttons (a hold OR double-tap opens the paywall).
-  const lastVoicingTapRef = useRef(0);
-  const lastViewTapRef = useRef(0);
 
   // View cycles: NAME (text) → CHORDS (block voicing diagrams) → ARPS (same voicing,
   // numbered + played note-by-note) → NAME.
@@ -994,15 +991,7 @@ export default function ProgressionScreen() {
         {(
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 44 }} style={{ height: 44 }}>
             <TouchableOpacity style={[styles.measureBtn, { borderColor: t.border, backgroundColor: t.bg2, width: 'auto', paddingHorizontal: 10, flexDirection: 'row', gap: 4 }]}
-              onPress={() => {
-                // Single tap cycles. A double-tap (or hold) on the locked ARPS view opens the paywall.
-                const now = Date.now();
-                if (arpLabelOnly && now - lastViewTapRef.current < 300) { lastViewTapRef.current = 0; openPaywall('voicings'); return; }
-                lastViewTapRef.current = now;
-                cycleViewMode();
-              }}
-              onLongPress={() => { if (arpLabelOnly) openPaywall('voicings'); }}
-              delayLongPress={300}
+              onPress={cycleViewMode}
             >
               {(viewMode === 'text' && !arpLabelOnly)
                 ? <MaterialCommunityIcons name="lead-pencil" size={18} color={t.txt2} />
@@ -1055,17 +1044,11 @@ export default function ProgressionScreen() {
             {instrument === 'guitar' && (
               <TouchableOpacity
                 onPress={() => {
-                  // Single tap cycles through every family (locked ones show a lock + render as the
-                  // freemium auto) — no paywall interrupts the cycle. A hold or double-tap on a
-                  // locked family DOES open the paywall.
-                  const now = Date.now();
-                  if (voicingLocked && now - lastVoicingTapRef.current < 300) { lastVoicingTapRef.current = 0; openPaywall('voicings'); return; }
-                  lastVoicingTapRef.current = now;
+                  // Just cycles through every family. Locked ones show a lock badge + render as the
+                  // freemium auto — no paywall on this cycle-through button.
                   const order = ['auto', 'open', 'barre', 'triads', 'shells', 'drop2', 'drop3'] as const;
                   setSongVoicingType(order[(order.indexOf(songVoicingType) + 1) % order.length]);
                 }}
-                onLongPress={() => { if (voicingLocked) openPaywall('voicings'); }}
-                delayLongPress={300}
                 style={{ height: 40, minWidth: 56, paddingHorizontal: 12, borderRadius: 20, justifyContent: 'center', alignItems: 'center', backgroundColor: t.bg2, borderWidth: 1, borderColor: t.border }}
               >
                 <Text style={{ fontSize: 8, fontWeight: '800', color: songVoicingType === 'auto' ? t.txt3 : t.accent }}>VOICING</Text>

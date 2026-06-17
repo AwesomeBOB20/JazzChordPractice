@@ -12,6 +12,7 @@ export type ProFeature =
   | 'saved-songs'
   | 'themes'
   | 'chords'
+  | 'map'
   | 'generic';
 
 // Short label shown in the paywall header ("Unlock <label>") when a specific
@@ -25,6 +26,7 @@ export const PRO_FEATURE_LABELS: Record<ProFeature, string> = {
   'saved-songs': 'unlimited saved songs',
   themes: 'all themes',
   chords: 'extended & altered chords',
+  map: 'the position map',
   generic: 'Kordal Pro',
 };
 
@@ -34,6 +36,7 @@ export const PRO_BENEFITS: { icon: string; iconLib?: 'mci' | 'ion'; title: strin
   { icon: 'book-outline',     iconLib: 'ion', title: 'Dictionary mode', detail: 'Browse every chord, scale, arpeggio and interval shape by root.' },
   { icon: 'music-circle', title: 'Extended & altered chords', detail: '9ths, 11ths, 13ths, altered dominants and more — beyond the free essentials.' },
   { icon: 'guitar-electric',  title: 'Advanced voicings', detail: 'Drop 2, Drop 3, Drop 2&4, Shells, Arpeggios, Intervals & Shapes.' },
+  { icon: 'map-outline',      iconLib: 'ion', title: 'Position map', detail: 'Pop up a whole-neck / whole-keyboard map showing where the current voicing sits.' },
   { icon: 'music-clef-treble', title: 'Progression power tools', detail: 'Transpose, change key, neck/piano zones, swing & bossa feels.' },
   { icon: 'ear',              iconLib: 'ion', title: 'All quiz categories', detail: 'Quiz on scales, arpeggios, intervals & shapes — chord & listen modes are free.' },
   { icon: 'tune',             title: 'Tuner unlocked', detail: 'Alternate tunings and a custom reference frequency.' },

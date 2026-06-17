@@ -1774,6 +1774,7 @@ export default function QuizScreen() {
                 namingMode={questionNaming}
                 onNotePress={(midi: number) => onNotePress?.(midi, 80, true)}
                 hideNavigators={true}
+                showMiniMap={false}
                 colorModeOverride={!revealed ? 'theme' : undefined}
                 scaleVoicings={scaleVoicings}
                 scaleMode={questionVoicingTab === 'scales'}
@@ -1792,6 +1793,7 @@ export default function QuizScreen() {
                 midiNotes={activeMidiNotes}
                 theme={t}
                 showAllLabels={true}
+                showMiniMap={false}
                 noteNames={noteNames}
                 roles={activeRoles}
                 formulas={activeFormulas}

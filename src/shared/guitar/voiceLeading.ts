@@ -26,6 +26,11 @@ const activeStringKey = (v: any): string =>
 // onto the muddy 6-5-4-3 set. Keys are activeStringKey() output (sorted active string indices).
 const AUTO_DROP2_SETS = new Set(['2,3,4,5', '1,2,3,4']);
 
+// AUTO comps triads on the two MIDDLE string sets only — 5-4-3 ([1,2,3]) and 4-3-2 ([2,3,4]). The
+// muddy 6-5-4 ([0,1,2]) and thin 3-2-1 ([3,4,5]) triad sets are dropped from AUTO's pool so they're
+// never picked first. They're NOT removed — if a chord can ONLY voice on those, the full set returns.
+const AUTO_AVOID_TRIAD_SETS = new Set(['0,1,2', '3,4,5']);
+
 // Shell string-set lock — GUIDE-TONE anchored. A lock pins the 3rd + 7th to one fixed pair of
 // strings (the top two voices) and lets the root ride whichever bass string sits below them, so
 // the line slides down the same two strings instead of hopping the neck:
@@ -140,6 +145,13 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
     const shellVoicings = shells.flatMap((g: any) => g.voicings || []);
     const triadVoicings = triads.flatMap((g: any) => g.voicings || []);
 
+    // Triads AUTO is allowed to comp with: prefer 5-4-3 / 4-3-2; drop 6-5-4 & 3-2-1. Falls back to
+    // every triad if a chord can't be voiced on the two middle sets at all (so no cell goes blank).
+    const autoTriadVoicings = (() => {
+      const f = triadVoicings.filter((v: any) => !AUTO_AVOID_TRIAD_SETS.has(activeStringKey(v)));
+      return f.length ? f : triadVoicings;
+    })();
+
     const allVoicings = [
       ...drop2Voicings,
       ...drop3Voicings,
@@ -148,6 +160,10 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       ...barreVoicings,
       ...triadVoicings
     ];
+
+    // AUTO's fallback pool when a chord has no Drop 2/3 (e.g. a plain triad): same as allVoicings but
+    // with the AUTO-preferred triads (no 654/321) in place of every triad set.
+    const autoFallbackPool = [...drop2Voicings, ...drop3Voicings, ...shellVoicings, ...openVoicings, ...barreVoicings, ...autoTriadVoicings];
 
     if (!allVoicings.length) return null;
 
@@ -167,12 +183,12 @@ export function calculateOptimalVoiceLeading(progression: (ProgressionChord | nu
       forcedType === 'shells' ? shellVoicings :
       // Free-tier AUTO: only the freemium voicing families (open / barre / triads), preferring
       // open → barre → triads per chord so a drop or shell never surfaces for a free user.
-      forcedType === 'autoFree' ? (openVoicings.length ? openVoicings : barreVoicings.length ? barreVoicings : triadVoicings) :
+      forcedType === 'autoFree' ? (openVoicings.length ? openVoicings : barreVoicings.length ? barreVoicings : autoTriadVoicings) :
       // Auto = Drop 2 (only on the 4-3-2-1 / 5-4-3-2 comping sets) + Drop 3 for the lower register —
       // no triads, no shells. Falls back to the full set below when a chord has neither (e.g. a plain
       // triad can't be a drop voicing), so no cell renders blank.
       forcedType === 'auto'   ? [...drop2Voicings.filter((v: any) => AUTO_DROP2_SETS.has(activeStringKey(v))), ...drop3Voicings] : null;
-    let pool = (forcedSubset && forcedSubset.length) ? forcedSubset : allVoicings;
+    let pool = (forcedSubset && forcedSubset.length) ? forcedSubset : ((forcedType === 'auto' || forcedType === 'autoFree') ? autoFallbackPool : allVoicings);
 
     // Strict string-set lock: keep every chord on the chosen set of strings so the
     // whole progression sits in one place on the neck. Only relax (fall back to the
