@@ -426,6 +426,23 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         const strumStepSecs = 0.004;
         const strumPrerollSecs = measure.guitar ? (measure.midiNotes.length - 1) * strumStepSecs : 0;
 
+        // ── Humanization (comp chord strikes only; bass + click stay locked to the grid) ──
+        // A gentle back-beat lift (2 & 4 a touch louder, off-beats lighter) plus small per-hit
+        // velocity/timing variance so a looping comp breathes instead of sounding machine-stamped.
+        // Amounts are deliberately conservative — feel, not chaos. Pass allowTimeJitter=false to
+        // keep a downbeat tight against the bar line. Returns the adjusted volume + time (seconds).
+        const humanizeStrike = (timeSecs: number, baseVol: number, allowTimeJitter = true) => {
+            const beatPos = beatSecs > 0 ? timeSecs / beatSecs : 0;
+            const frac = beatPos - Math.floor(beatPos);
+            const onBeat = frac < 0.12 || frac > 0.88;
+            const nearestBeat = Math.round(beatPos);
+            const accent = onBeat ? (nearestBeat % 2 === 1 ? 1.08 : 0.96) : 0.9; // 2&4 lift, off-beats lighter
+            const vel = accent * (1 + (Math.random() - 0.5) * 0.14);             // ±7% velocity
+            const vol = Math.max(0, Math.min(1.5, baseVol * vel));
+            const tj = allowTimeJitter ? (Math.random() - 0.5) * 0.020 : 0;      // ±10 ms
+            return { vol, t: Math.max(0, timeSecs + tj) };
+        };
+
         // Arpeggio mode fills the bar with eighth notes that cycle through the chord/
         // shape notes (a 5-note chord in 4/4 → notes 1 2 3 4 5 1 2 3). The eighth-note
         // count tracks the time signature (beats × 2): 8 per 4-beat bar, 6 per 3, 4 per
@@ -437,7 +454,8 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             const arpNotes = Array.from(new Set(measure.midiNotes.filter(n => n != null && !isNaN(n)))).sort((a, b) => a - b);
             const slots = measure.beats * 2;              // eighth notes per measure
             const arpReleaseMs = 140;                     // gentle crossfade tail
-            const useSwing = measure.arpSwing || measure.rhythm === 'swing' || measure.rhythm === 'reggae';
+            const SWING_FEELS = ['swing', 'swingfour', 'charleston', 'swingsparse', 'reggae'];
+            const useSwing = measure.arpSwing || SWING_FEELS.includes(measure.rhythm);
 
             // Pre-compute each slot's time offset so we can derive per-note hold duration.
             const slotOffsets: number[] = [];
@@ -464,25 +482,55 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                     // Split swing: each half-measure chord is handled by its own PLAY_SCHEDULE.
                     // Just play the current chord at beat 0, sustaining to end of its window.
                     const strikeDur = measureMs + 400;
+                    const h = humanizeStrike(0, vol, false);
                     measure.midiNotes.forEach((midi, i) => {
                         const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, guitarStaggerSecs), durationMs: strikeDur, releaseMs: 400 });
+                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: strikeDur, releaseMs: 400 });
                     });
                 } else {
                     // Non-split swing: play at 0 and 5/3 beats — both sustain to end of measure
                     const strike1Dur = measureMs + 400;
+                    const h1 = humanizeStrike(0, vol, false);
                     measure.midiNotes.forEach((midi, i) => {
                         const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, guitarStaggerSecs), durationMs: strike1Dur, releaseMs: 400 });
+                        events.push({ instrument, midi, volume: h1.vol, timeOffset: Math.max(0, h1.t + guitarStaggerSecs), durationMs: strike1Dur, releaseMs: 400 });
                     });
 
                     const strike2Offset = (5/3) * beatSecs;
                     const strike2Dur = (measureMs - strike2Offset * 1000) + 400;
+                    const h2 = humanizeStrike(strike2Offset, vol, true);
                     measure.midiNotes.forEach((midi, i) => {
                         const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: vol, timeOffset: strike2Offset + guitarStaggerSecs, durationMs: strike2Dur, releaseMs: 400 });
+                        events.push({ instrument, midi, volume: h2.vol, timeOffset: h2.t + guitarStaggerSecs, durationMs: strike2Dur, releaseMs: 400 });
                     });
                 }
+                break;
+            }
+            case 'swingfour': {
+                // Freddie Green 4-feel: a short swung "chunk" on every beat (2 & 4 lifted by the
+                // humanizer). Custom scheduling because these are staccato stabs, not ring-outs.
+                hasCustomScheduling = true;
+                const stabBeats = isSplit ? [0, 1] : [0, 1, 2, 3];
+                const stabDurMs = beatSecs * 1000 * 0.42; // short chunk, ~⅖ of a beat
+                stabBeats.forEach((b) => {
+                    const strikeTime = b * beatSecs;
+                    if (strikeTime >= beatSecs * measure.beats) return;
+                    const h = humanizeStrike(strikeTime, vol, b > 0);
+                    measure.midiNotes.forEach((midi, i) => {
+                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
+                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: stabDurMs, releaseMs: 120 });
+                    });
+                });
+                break;
+            }
+            case 'charleston': {
+                // Charleston: beat 1 + the swung "and of 2". Sustained rings (generic loop).
+                chordStrikesSecs = isSplit ? [0] : [0, beatSecs * (1 + 2 / 3)];
+                break;
+            }
+            case 'swingsparse': {
+                // Sparse/open comp: beat 1 + the swung "and of 3" — lots of space, syncopated.
+                chordStrikesSecs = isSplit ? [0] : [0, beatSecs * (2 + 2 / 3)];
                 break;
             }
             case 'bossanova': {
@@ -566,9 +614,10 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                     strikeDurMs = (barEndSecs - strikeTime) * 1000 + 400;
                     strikeReleaseMs = 400;
                 }
+                const h = humanizeStrike(strikeTime, vol, si > 0); // keep the downbeat tight
                 measure.midiNotes.forEach((midi, i) => {
                     const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                    events.push({ instrument, midi, volume: vol, timeOffset: Math.max(0, strikeTime + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: strikeReleaseMs });
+                    events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: strikeReleaseMs });
                 });
             });
         }

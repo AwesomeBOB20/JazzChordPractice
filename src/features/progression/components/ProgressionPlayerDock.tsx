@@ -112,11 +112,14 @@ export default function ProgressionPlayerDock({
   // Each rhythm gets one of the app's scale-degree interval colors, so cycling the
   // pill walks through root → 2nd → 3rd → 4th → 5th of the note-role palette.
   const RHYTHMS = [
-    { key: 'straight',  label: 'Straight', color: ROLE_COLORS_GLOBAL['root'] }, // orange-red
-    { key: 'swing',     label: 'Swing',    color: ROLE_COLORS_GLOBAL['7'] },    // 7th degree — yellow-brown
-    { key: 'bossanova', label: 'Bossa',    color: ROLE_COLORS_GLOBAL['3'] },    // blue
-    { key: 'twostep',   label: 'Two-Step', color: ROLE_COLORS_GLOBAL['4'] },    // teal
-    { key: 'reggae',    label: 'Reggae',   color: ROLE_COLORS_GLOBAL['5'] },    // green
+    { key: 'straight',   label: 'Straight',   color: ROLE_COLORS_GLOBAL['root'] }, // orange-red
+    { key: 'swing',      label: 'Swing',      color: ROLE_COLORS_GLOBAL['7'] },    // 7th degree — yellow-brown
+    { key: 'swingfour',  label: 'Swing 4',    color: ROLE_COLORS_GLOBAL['6'] },    // Freddie Green 4-feel — pink
+    { key: 'charleston', label: 'Charleston', color: ROLE_COLORS_GLOBAL['9'] },    // Charleston — violet
+    { key: 'swingsparse',label: 'Sparse',     color: ROLE_COLORS_GLOBAL['b7'] },   // sparse swing comp — brown
+    { key: 'bossanova',  label: 'Bossa',      color: ROLE_COLORS_GLOBAL['3'] },    // blue
+    { key: 'twostep',    label: 'Two-Step',   color: ROLE_COLORS_GLOBAL['4'] },    // teal
+    { key: 'reggae',     label: 'Reggae',     color: ROLE_COLORS_GLOBAL['5'] },    // green
   ];
   const activeRhythm = RHYTHMS.find(r => r.key === rhythm) || RHYTHMS[0];
   const rhythmColor = activeRhythm.color;
