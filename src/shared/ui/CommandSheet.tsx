@@ -320,7 +320,7 @@ export default function CommandSheet({
                       <Ionicons name={POOL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
                       <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
                     </TouchableOpacity>
-                    <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: t.txt3 }}>{activeTypes.length} Selected</Text>
+                    <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: t.txt3 }}>{activeTypes.filter((k: string) => isPro || isChordTypeFree(k)).length} Selected</Text>
                   </View>
                   <View>
                     {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
@@ -582,7 +582,7 @@ export default function CommandSheet({
                     <Ionicons name={POOL_TYPES.every((k: string) => activeTypes.includes(k)) ? "checkmark-circle" : "ellipse-outline"} size={18} color={t.accent} />
                     <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, letterSpacing: 1, color: t.accent }}>ACTIVE CHORD POOL</Text>
                   </TouchableOpacity>
-                  <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: t.txt3 }}>{activeTypes.length} Selected</Text>
+                  <Text style={{ ...TYPE.label, fontWeight: FONT_WEIGHT.bold, color: t.txt3 }}>{activeTypes.filter((k: string) => isPro || isChordTypeFree(k)).length} Selected</Text>
                 </View>
                 <View>
                   {CHORD_CATEGORIES.map((cat: { label: string, keys: string[] }, catIdx: number) => {
