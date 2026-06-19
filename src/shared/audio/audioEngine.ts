@@ -262,10 +262,10 @@ export const getAudioEngineHtml = (assets: any) => `
           // the crossfade is perfectly synchronised with the new notes' attack regardless
           // of bridge latency. Per-note voice stealing is kept only for non-measure events.
           if (data.durationMs) {
-            const XFADE = 0.12; // 120ms legato crossfade — lets a late last-in-bar hit (e.g. two-step's
-                                // beat-3 chord) ring smoothly into the next chord instead of being cut
-                                // short/staccato at the boundary. Long enough to feel connected, short
-                                // enough that chord changes still read cleanly.
+            // Crossfade length for the previous chord. Default 120ms legato (smooth chord changes);
+            // cut-off feels (bossa/two-step/reggae) pass a short value so the old chord ends cleanly at
+            // the bar line instead of ringing into the next measure.
+            const XFADE = (data.xfadeMs != null ? data.xfadeMs : 120) / 1000;
             const now2 = audioCtx.currentTime;
             // Hold the previous chord until THIS measure's first chord strike, then crossfade.
             // For downbeat rhythms (straight) this is the bar line (delay 0); for backbeat rhythms

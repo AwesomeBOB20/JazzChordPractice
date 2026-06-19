@@ -97,7 +97,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
     }
   };
 
-  const sendSchedule = (events: any[], durationMs?: number, downbeat?: { seqIdx: number; chordIdx: number }, xfadeDelayMs?: number) => {
+  const sendSchedule = (events: any[], durationMs?: number, downbeat?: { seqIdx: number; chordIdx: number }, xfadeDelayMs?: number, xfadeMs?: number) => {
     if (!isEngineReady || !webViewRef.current) {
         console.warn("Dropped audio: Engine not ready yet");
         return;
@@ -117,6 +117,9 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
       // two-step/reggae hit on the backbeat, not the downbeat). Without it the old chord is cut at
       // the bar line while the new chord hasn't sounded yet → an audible gap before the new hit.
       xfadeDelayMs: xfadeDelayMs,
+      // Optional override for the previous-chord crossfade length (ms). Short for cut-off feels
+      // (bossa/two-step/reggae) so chords don't ring over the bar line; default 120ms legato otherwise.
+      xfadeMs: xfadeMs,
     }));
   };
 
@@ -431,15 +434,15 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         // velocity/timing variance so a looping comp breathes instead of sounding machine-stamped.
         // Amounts are deliberately conservative — feel, not chaos. Pass allowTimeJitter=false to
         // keep a downbeat tight against the bar line. Returns the adjusted volume + time (seconds).
-        const humanizeStrike = (timeSecs: number, baseVol: number, allowTimeJitter = true, deepAccent = false) => {
+        // accentDepth: 0 = flat (most feels), 1 = mild (straight — non-accents slightly quieter),
+        // 2 = deep (swing / Green — pronounced back-beat dynamics).
+        const humanizeStrike = (timeSecs: number, baseVol: number, allowTimeJitter = true, accentDepth = 0) => {
             const beatPos = beatSecs > 0 ? timeSecs / beatSecs : 0;
             const frac = beatPos - Math.floor(beatPos);
             const onBeat = frac < 0.12 || frac > 0.88;
             const nearestBeat = Math.round(beatPos);
-            // deepAccent (swing / Green): pull the non-backbeat hits down further so the accented 2 & 4
-            // pop and the off-beats sit back — a more dynamic comp rather than a flat one.
-            const weak = deepAccent ? 0.86 : 0.96; // beats 1 & 3
-            const off = deepAccent ? 0.78 : 0.9;   // off-beats
+            const weak = accentDepth === 2 ? 0.86 : accentDepth === 1 ? 0.91 : 0.96; // beats 1 & 3
+            const off = accentDepth === 2 ? 0.78 : accentDepth === 1 ? 0.84 : 0.9;   // off-beats
             const accent = onBeat ? (nearestBeat % 2 === 1 ? 1.08 : weak) : off; // 2&4 lift, others lighter
             const vel = accent * (1 + (Math.random() - 0.5) * 0.14);             // ±7% velocity
             const vol = Math.max(0, Math.min(1.5, baseVol * vel));
@@ -493,16 +496,29 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         } else
         switch (measure.rhythm) {
             case 'swing': {
-                // Swing alternates per bar between the two downbeat-anchored comps the user kept:
-                // Charleston (x....x......) and the sparse one (x.......x...). Deterministic by bar so a
-                // split's two halves agree. Rings until the next hit / fades by the bar line below.
+                // Swing varies per bar between the two downbeat-anchored comps: Charleston
+                // (x....x......) and the sparse one (x.......x...). A short varied sequence (not strict
+                // ABAB) keeps it from sounding mechanical; deterministic by bar so a split's two halves
+                // agree. Rings open (long) / fades by the bar line below.
+                const SWING_SEQ = [0, 1, 1, 0, 1, 0, 0, 1]; // 0 = Charleston, 1 = sparse; balanced but mixed
                 const barIdx = Math.floor(cumulativeBeats / 4);
-                chordStrikesSecs = tripletStrikes(barIdx % 2 === 0 ? [0, 5] : [0, 8]);
+                chordStrikesSecs = tripletStrikes(SWING_SEQ[barIdx % SWING_SEQ.length] === 0 ? [0, 5] : [0, 8]);
                 break;
             }
             case 'charleston': {
-                // Charleston: the locked x....x...... pattern — beat 1 + the swung "and of 2".
-                chordStrikesSecs = tripletStrikes([0, 5]);
+                // Charleston: the locked x....x...... pattern, played STACCATO (short chunks like Green)
+                // — a tighter, punchier comp than Swing's long open charlestons. Custom-scheduled.
+                hasCustomScheduling = true;
+                const relC = Math.min(300, beatSecs * 1000 * 0.5);
+                const chunkC = beatSecs * 1000 * 0.22 + relC;
+                tripletStrikes([0, 5]).forEach((strikeTime) => {
+                    if (strikeTime >= beatSecs * measure.beats) return;
+                    const h = humanizeStrike(strikeTime, vol, strikeTime > 0.001, 0);
+                    measure.midiNotes.forEach((midi, i) => {
+                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
+                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: chunkC, releaseMs: relC });
+                    });
+                });
                 break;
             }
             case 'green': {
@@ -521,10 +537,13 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                     // The final beat rings FULL to the bar line (a satisfying landing) instead of decaying
                     // away early — that early decay is what made beat 4 sound muted/muffled. Others stay
                     // as short chunks. Release stays smooth either way.
+                    // The final beat RINGS OUT: it holds near-full for most of the last beat then a short
+                    // clean release, so it sustains a little longer than the others instead of fading away
+                    // early (the long decay is what made beat 4 sound muted). Others stay short chunks.
                     const isLastBeat = idx === beats.length - 1;
                     const durMs = isLastBeat ? Math.max(chunkMs, barEnd - strikeTime * 1000) : chunkMs;
-                    const thisRel = isLastBeat ? Math.min(300, durMs) : relMs;
-                    const h = humanizeStrike(strikeTime, vol, b > 0, true);
+                    const thisRel = isLastBeat ? 150 : relMs;
+                    const h = humanizeStrike(strikeTime, vol, b > 0, 2);
                     measure.midiNotes.forEach((midi, i) => {
                         const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
                         events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: durMs, releaseMs: thisRel });
@@ -597,9 +616,10 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             // Straight + the swing comps ring each strike only until the NEXT strike (+ short tail),
             // not to the bar end. This stops a re-struck chord from stacking ringing copies of the
             // same notes — the pile-up that caused the clicks/pops on Charleston & Swing.
-            const evenComp = (!measure.rhythm || ['straight', 'swing', 'charleston'].includes(measure.rhythm));
+            const evenComp = (!measure.rhythm || ['straight', 'swing'].includes(measure.rhythm));
             const barEndSecs = beatSecs * measure.beats;
             const swingComp = measure.rhythm === 'swing';
+            const accentDepth = swingComp ? 2 : (measure.rhythm === 'straight' || !measure.rhythm) ? 1 : 0;
             chordStrikesSecs.forEach((strikeTime, si) => {
                 const isLast = si === chordStrikesSecs.length - 1;
                 let strikeDurMs: number, strikeReleaseMs: number;
@@ -625,7 +645,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                     strikeDurMs = (barEndSecs - strikeTime) * 1000 + 400;
                     strikeReleaseMs = 400;
                 }
-                const h = humanizeStrike(strikeTime, vol, si > 0, swingComp); // deeper accent on swing; keep downbeat tight
+                const h = humanizeStrike(strikeTime, vol, si > 0, accentDepth); // swing=deep, straight=mild; keep downbeat tight
                 measure.midiNotes.forEach((midi, i) => {
                     const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
                     events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: strikeReleaseMs });
@@ -659,7 +679,14 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         // bass/metronome). 0 for straight (strikes on the downbeat) → crossfade at the bar line.
         const chordEvts = events.filter(e => e.instrument === instrument);
         const firstChordStrikeMs = chordEvts.length ? Math.max(0, Math.min(...chordEvts.map(e => e.timeOffset))) * 1000 : 0;
-        sendSchedule(events, currentMeasureMs, undefined, firstChordStrikeMs);
+        // Bossa / Two-Step / Reggae: cut the PREVIOUS chord cleanly at the bar line instead of holding it
+        // until this measure's (offset) first strike + a 120ms legato fade — so chords don't ring over
+        // into the next measure. xfadeDelay 0 = start the fade at the bar line; a short fade = quick,
+        // click-free cutoff. Other feels keep the legato crossfade (held until the first strike).
+        const cutoffFeel = ['bossanova', 'twostep', 'reggae'].includes(measure.rhythm);
+        const xfadeDelay = cutoffFeel ? 0 : firstChordStrikeMs;
+        const xfadeMs = cutoffFeel ? 28 : undefined;
+        sendSchedule(events, currentMeasureMs, undefined, xfadeDelay, xfadeMs);
         
         // Schedule the next check at absolute time: 250ms before next measure starts.
         // 100ms was too tight — the JS→WebView bridge can add 30–80ms of latency, and the
