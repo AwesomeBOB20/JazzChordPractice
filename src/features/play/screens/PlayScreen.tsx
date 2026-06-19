@@ -630,7 +630,10 @@ function VoicingExplorer({
       const bassB = b.voicings[0]?.frets.findIndex(f => f.fret !== null) ?? 99;
       const ty = a.voicings[0]?.type;
       const isDrop = ty === 'drop2' || ty === 'drop3' || ty === 'drop2and4';
-      return isDrop ? bassB - bassA : bassA - bassB;
+      // Triads order from the treble string set down to the bass: 3-2-1 (1/4) → 4-3-2 → 5-4-3 →
+      // 6-5-4 (4/4). That's descending bass-string index, same as drops (higher idx = thinner = first).
+      const isTriad = ty === 'triad';
+      return (isDrop || isTriad) ? bassB - bassA : bassA - bassB;
     });
 
     const ROLE_ORDER: Record<string, number> = { 'root': 0, 'R': 0, '1': 0, 'b2': 1, '2nd': 1, '2': 1, 'b3': 2, '3rd': 2, '3': 2, '4th': 3, '4': 3, '#4': 3, 'b5': 4, '5th': 4, '5': 4, '#5': 4, 'b6': 5, '6th': 5, '6': 5, 'bb7': 6, 'b7': 6, '7th': 6, '7': 6, 'b9': 7, '9th': 7, '9': 7, '#9': 7, '11th': 8, '11': 8, '#11': 8, 'b13': 9, '13th': 9, '13': 9, '#13': 9 };
