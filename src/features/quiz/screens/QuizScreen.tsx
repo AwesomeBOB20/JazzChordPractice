@@ -1602,31 +1602,32 @@ export default function QuizScreen() {
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
       <AdBanner />
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0, flexGrow: quizMode === 'audio' ? 1 : undefined }}>
 
-        {/* Compact Score Panel */}
-        <View style={[styles.compactScore, { backgroundColor: t.bg2, borderColor: t.border }]}>
-          <View style={styles.scoreItem}>
-            <Text style={[styles.scoreVal, { color: t.txt1 }]}>{quizScore}/{quizTotal}</Text>
-            <Text style={[styles.scoreLbl, { color: t.txt3 }]}>SCORE</Text>
-          </View>
-          <View style={[styles.scoreDivider, { backgroundColor: t.border }]} />
-          <View style={styles.scoreItem}>
-            <Text style={[styles.scoreVal, { color: t.txt1 }]}>{quizStreak} 🔥</Text>
-            <Text style={[styles.scoreLbl, { color: t.txt3 }]}>STREAK</Text>
-          </View>
-          <View style={[styles.scoreDivider, { backgroundColor: t.border }]} />
-          <View style={styles.scoreItem}>
-            <Text style={[styles.scoreVal, { color: t.txt1 }]}>{accuracy !== null ? `${accuracy}%` : '—'}</Text>
-            <Text style={[styles.scoreLbl, { color: t.txt3 }]}>ACCURACY</Text>
-          </View>
-          <View style={[styles.scoreDivider, { backgroundColor: t.border }]} />
-          <TouchableOpacity
-            style={styles.scoreResetBtn}
-            onPress={() => { resetQuiz(); autoPlayNext.current = true; nextQuestion(); }}>
-            <Ionicons name="refresh" size={18} color={t.txt2} />
-          </TouchableOpacity>
+      {/* Compact Score Panel — sticky under the ad banner (outside the ScrollView so it stays put) */}
+      <View style={[styles.compactScore, { backgroundColor: t.bg2, borderColor: t.border }]}>
+        <View style={styles.scoreItem}>
+          <Text style={[styles.scoreVal, { color: t.txt1 }]}>{quizScore}/{quizTotal}</Text>
+          <Text style={[styles.scoreLbl, { color: t.txt3 }]}>SCORE</Text>
         </View>
+        <View style={[styles.scoreDivider, { backgroundColor: t.border }]} />
+        <View style={styles.scoreItem}>
+          <Text style={[styles.scoreVal, { color: t.txt1 }]}>{quizStreak} 🔥</Text>
+          <Text style={[styles.scoreLbl, { color: t.txt3 }]}>STREAK</Text>
+        </View>
+        <View style={[styles.scoreDivider, { backgroundColor: t.border }]} />
+        <View style={styles.scoreItem}>
+          <Text style={[styles.scoreVal, { color: t.txt1 }]}>{accuracy !== null ? `${accuracy}%` : '—'}</Text>
+          <Text style={[styles.scoreLbl, { color: t.txt3 }]}>ACCURACY</Text>
+        </View>
+        <View style={[styles.scoreDivider, { backgroundColor: t.border }]} />
+        <TouchableOpacity
+          style={styles.scoreResetBtn}
+          onPress={() => { resetQuiz(); autoPlayNext.current = true; nextQuestion(); }}>
+          <Ionicons name="refresh" size={18} color={t.txt2} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0, flexGrow: quizMode === 'audio' ? 1 : undefined }}>
 
         <Animated.View style={[
           styles.card,
