@@ -112,9 +112,11 @@ export default function ProgressionPlayerDock({
   // Each rhythm gets one of the app's scale-degree interval colors, so cycling the
   // pill walks through root → 2nd → 3rd → 4th → 5th of the note-role palette.
   const RHYTHMS = [
-    // Each of the 7 rhythms gets one of the app's 7 distinct scale-degree colours.
+    // Distinct scale-degree colours per rhythm. Green shares Swing's brown (both are swing-family)
+    // since there are 8 rhythms and 7 base colours.
     { key: 'straight',   label: 'Straight',   color: ROLE_COLORS_GLOBAL['root'] }, // orange-red
     { key: 'swing',      label: 'Swing',      color: ROLE_COLORS_GLOBAL['7'] },    // orange-brown
+    { key: 'green',      label: 'Green',      color: ROLE_COLORS_GLOBAL['b7'] },   // Freddie Green — brown (swing-family)
     { key: 'charleston', label: 'Charleston', color: ROLE_COLORS_GLOBAL['9'] },    // violet
     { key: 'swingsparse',label: 'Sparse',     color: ROLE_COLORS_GLOBAL['6'] },    // pink
     { key: 'bossanova',  label: 'Bossa',      color: ROLE_COLORS_GLOBAL['3'] },    // blue

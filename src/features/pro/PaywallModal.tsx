@@ -34,17 +34,21 @@ export default function PaywallModal() {
     }
   }, [visible, price]);
 
-  // While the paywall is open, tint the Android nav-bar background with the SAME scrim the modal
-  // uses (rgba(0,0,0,0.6)) so the bottom system-button strip dims to match the rest of the screen
-  // instead of staying bright. Restore the themed bar colour + button style on close.
+  // While the paywall is open, dim the Android nav-bar to match how the in-app tab bar dims under
+  // the modal's 0.6 black scrim: KEEP the tab-bar colour but darken it (×0.4 = a 0.6 black overlay),
+  // rather than turning the strip solid black. Restore the full colour on close.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    if (visible) {
-      NavigationBar.setBackgroundColorAsync('rgba(0,0,0,0.6)');
-      NavigationBar.setButtonStyleAsync('light');
-    } else {
-      NavigationBar.setBackgroundColorAsync(t.tabBar);
-    }
+    const dim = (hex: string) => {
+      const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+      if (!m) return hex;
+      const n = parseInt(m[1], 16);
+      const r = Math.round(((n >> 16) & 255) * 0.4);
+      const g = Math.round(((n >> 8) & 255) * 0.4);
+      const b = Math.round((n & 255) * 0.4);
+      return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+    };
+    NavigationBar.setBackgroundColorAsync(visible ? dim(t.tabBar) : t.tabBar);
   }, [visible, t.tabBar]);
 
   const onUnlock = async () => {

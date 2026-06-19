@@ -511,6 +511,26 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                 chordStrikesSecs = tripletStrikes([0, 8]);
                 break;
             }
+            case 'green': {
+                // Freddie Green 4-feel: a quarter-note "chunk" on every beat. The trick to not sounding
+                // clipped is the envelope — a SHORT hold then a LONG, smooth release so each chunk decays
+                // like a damped guitar strum instead of being hard-gated off (the old version held the
+                // chord flat then chopped it). 2 & 4 are lifted by the humanizer.
+                hasCustomScheduling = true;
+                const beats = isSplit ? [0, 1] : [0, 1, 2, 3];
+                const relMs = Math.min(340, beatSecs * 1000 * 0.55); // smooth decay tail
+                const durMs = beatSecs * 1000 * 0.25 + relMs;        // brief hold + the tail
+                beats.forEach((b) => {
+                    const strikeTime = b * beatSecs;
+                    if (strikeTime >= beatSecs * measure.beats) return;
+                    const h = humanizeStrike(strikeTime, vol, b > 0);
+                    measure.midiNotes.forEach((midi, i) => {
+                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
+                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: durMs, releaseMs: relMs });
+                    });
+                });
+                break;
+            }
             case 'bossanova': {
                 const isEvenBossa = (Math.floor(cumulativeBeats / 4) % 2 === 0);
                 if (isSplit) {
