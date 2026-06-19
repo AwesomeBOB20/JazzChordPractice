@@ -1,16 +1,18 @@
 import React from 'react';
-import { Platform, View } from 'react-native';
-import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
+import { View } from 'react-native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { AD_UNIT_IDS } from './adConfig';
+import { Ads } from './adsModule';
 
-// Renders a full-width AdMob banner. Invisible for Pro users and on web.
-// Place at the bottom of free screens, above the safe-area inset.
+// Renders a full-width AdMob banner. Returns null for Pro users and anywhere the AdMob native
+// module isn't present (web, Expo Go, ads-less dev client) so those environments never crash.
+// Place at the top of free screens, just below the global header.
 export function AdBanner() {
   const isPro = useSettingsStore(s => s.isPro);
 
-  if (isPro || Platform.OS === 'web') return null;
+  if (isPro || !Ads) return null;
 
+  const { BannerAd, BannerAdSize } = Ads;
   return (
     <View style={{ alignItems: 'center', width: '100%' }}>
       <BannerAd
