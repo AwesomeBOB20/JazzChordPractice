@@ -195,7 +195,7 @@ function VisualDisplaySettings({ voicingTab, shapeDisplayMode, setShapeDisplayMo
 
 // ─── EXPLORE MODE TOGGLE (Chord | Dictionary) ───────────────────────────────
 // The single entry point to version 2. Version 1 ("Chord") is always the default.
-function ExploreModeToggle({ mode, setMode, isPro, openPaywall, t }: { mode: 'chord' | 'dictionary'; setMode: (m: 'chord' | 'dictionary') => void; isPro: boolean; openPaywall: (f: ProFeature) => void; t: Theme; }) {
+function ExploreModeToggle({ mode, setMode, isPro, onPreviewDictionary, t }: { mode: 'chord' | 'dictionary'; setMode: (m: 'chord' | 'dictionary') => void; isPro: boolean; onPreviewDictionary: () => void; t: Theme; }) {
   const SEGMENTS: { key: 'chord' | 'dictionary'; label: string; icon: keyof typeof Ionicons.glyphMap; pro?: boolean }[] = [
     { key: 'chord', label: 'Chord', icon: 'albums-outline' },
     { key: 'dictionary', label: 'Dictionary', icon: 'book-outline', pro: true },
@@ -212,7 +212,7 @@ function ExploreModeToggle({ mode, setMode, isPro, openPaywall, t }: { mode: 'ch
             key={seg.key}
             activeOpacity={0.7}
             onPress={() => {
-              if (locked) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); openPaywall('dictionary'); return; }
+              if (locked) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPreviewDictionary(); return; }
               if (mode !== seg.key) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setMode(seg.key); }
             }}
             style={[styles.modeTab, isActive && { backgroundColor: t.accent }]}
@@ -1522,10 +1522,27 @@ function VoicingExplorer({
 // to either chord mode (v1 — VoicingExplorer driven by chordStore) or the
 // dictionary (the self-contained mini-diagram grid).
 export default function PlayScreen() {
-  const { theme, instrument, setInstrument, isPro, openPaywall } = useSettingsStore();
+  const { theme, instrument, setInstrument, isPro, openPaywall, paywallFeature } = useSettingsStore();
   const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab, pendingVoicing, setPendingVoicing, setSelectedScaleId } = useChordStore();
   const dict = useDictionaryStore();
   const t = THEMES[theme];
+
+  // Free users tapping the locked Dictionary get a "cinematic reveal": the real Dictionary opens in a
+  // non-interactive auto-scroll (dictPreview) so they SEE how deep it is, then the paywall slides up.
+  const [dictPreview, setDictPreview] = React.useState(false);
+  const startDictionaryPreview = React.useCallback(() => { dict.setMode('dictionary'); setDictPreview(true); }, [dict]);
+  // When the preview's paywall is dismissed: back to Chord — unless they just bought Pro, in which
+  // case stay in the now-unlocked Dictionary.
+  const prevPaywallRef = React.useRef<ProFeature | null>(null);
+  React.useEffect(() => {
+    if (dictPreview && prevPaywallRef.current === 'dictionary' && paywallFeature == null) {
+      setDictPreview(false);
+      if (!isPro) dict.setMode('chord');
+    }
+    prevPaywallRef.current = paywallFeature;
+  }, [paywallFeature, dictPreview, isPro, dict]);
+  // Bailing out via the Chord tab during the reveal also ends the preview.
+  React.useEffect(() => { if (dict.mode !== 'dictionary' && dictPreview) setDictPreview(false); }, [dict.mode, dictPreview]);
 
   // Chord mode's voicing tab lives here (not in chordStore) so it survives
   // Chord⇄Dictionary toggles.
@@ -1555,8 +1572,10 @@ export default function PlayScreen() {
     return (
       <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
         <AdBanner />
-        <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} openPaywall={openPaywall} t={t} />
-        <ChordDictionary t={t} />
+        <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} onPreviewDictionary={startDictionaryPreview} t={t} />
+        <View style={{ flex: 1 }} pointerEvents={dictPreview ? 'none' : 'auto'}>
+          <ChordDictionary t={t} preview={dictPreview} onPreviewEnd={() => openPaywall('dictionary')} />
+        </View>
       </View>
     );
   }
@@ -1564,7 +1583,7 @@ export default function PlayScreen() {
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
       <AdBanner />
-      <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} openPaywall={openPaywall} t={t} />
+      <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} onPreviewDictionary={startDictionaryPreview} t={t} />
       <VoicingExplorer
         rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
         instrument={instrument} setInstrument={setInstrument}
