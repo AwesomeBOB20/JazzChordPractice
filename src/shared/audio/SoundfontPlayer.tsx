@@ -431,12 +431,16 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         // velocity/timing variance so a looping comp breathes instead of sounding machine-stamped.
         // Amounts are deliberately conservative — feel, not chaos. Pass allowTimeJitter=false to
         // keep a downbeat tight against the bar line. Returns the adjusted volume + time (seconds).
-        const humanizeStrike = (timeSecs: number, baseVol: number, allowTimeJitter = true) => {
+        const humanizeStrike = (timeSecs: number, baseVol: number, allowTimeJitter = true, deepAccent = false) => {
             const beatPos = beatSecs > 0 ? timeSecs / beatSecs : 0;
             const frac = beatPos - Math.floor(beatPos);
             const onBeat = frac < 0.12 || frac > 0.88;
             const nearestBeat = Math.round(beatPos);
-            const accent = onBeat ? (nearestBeat % 2 === 1 ? 1.08 : 0.96) : 0.9; // 2&4 lift, off-beats lighter
+            // deepAccent (swing / Green): pull the non-backbeat hits down further so the accented 2 & 4
+            // pop and the off-beats sit back — a more dynamic comp rather than a flat one.
+            const weak = deepAccent ? 0.86 : 0.96; // beats 1 & 3
+            const off = deepAccent ? 0.78 : 0.9;   // off-beats
+            const accent = onBeat ? (nearestBeat % 2 === 1 ? 1.08 : weak) : off; // 2&4 lift, others lighter
             const vel = accent * (1 + (Math.random() - 0.5) * 0.14);             // ±7% velocity
             const vol = Math.max(0, Math.min(1.5, baseVol * vel));
             const tj = allowTimeJitter ? (Math.random() - 0.5) * 0.020 : 0;      // ±10 ms
@@ -494,10 +498,13 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         switch (measure.rhythm) {
             case 'swing': {
                 // Swing rotates through the triplet comp patterns (one per bar, deterministic so a
-                // split's two halves agree) for variety. Strikes ring until the next hit (evenComp
-                // below) so re-hits don't pile up into clicks. Falls through to the generic loop.
+                // split's two halves agree) for variety. The rotation is WEIGHTED toward patterns that
+                // hit the downbeat (slot 0 — pattern indices 0 & 3 appear ~half the bars) so the bar's
+                // start lands firmly more often. Strikes ring until the next hit (evenComp below) so
+                // re-hits don't pile up into clicks. Falls through to the generic loop.
+                const SWING_PATTERN_ORDER = [0, 3, 1, 0, 4, 3, 2, 0, 5, 3, 7, 6]; // 0 & 3 = downbeat starters, weighted ×3
                 const barIdx = Math.floor(cumulativeBeats / 4);
-                const pat = SWING_TRIPLET_PATTERNS[(barIdx * 3) % SWING_TRIPLET_PATTERNS.length];
+                const pat = SWING_TRIPLET_PATTERNS[SWING_PATTERN_ORDER[barIdx % SWING_PATTERN_ORDER.length]];
                 chordStrikesSecs = tripletStrikes(pat);
                 break;
             }
@@ -523,7 +530,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                 beats.forEach((b) => {
                     const strikeTime = b * beatSecs;
                     if (strikeTime >= beatSecs * measure.beats) return;
-                    const h = humanizeStrike(strikeTime, vol, b > 0);
+                    const h = humanizeStrike(strikeTime, vol, b > 0, true);
                     measure.midiNotes.forEach((midi, i) => {
                         const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
                         events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: durMs, releaseMs: relMs });
@@ -598,6 +605,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             // same notes — the pile-up that caused the clicks/pops on Charleston & Swing.
             const evenComp = (!measure.rhythm || ['straight', 'swing', 'charleston', 'swingsparse'].includes(measure.rhythm));
             const barEndSecs = beatSecs * measure.beats;
+            const swingComp = measure.rhythm === 'swing';
             chordStrikesSecs.forEach((strikeTime, si) => {
                 const isLast = si === chordStrikesSecs.length - 1;
                 let strikeDurMs: number, strikeReleaseMs: number;
@@ -607,15 +615,23 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                     // that overlaps the next strike for a connected feel. The tail is capped at one
                     // beat so only CONSECUTIVE strikes overlap (~2 copies) instead of every strike
                     // ringing to the bar end and stacking 4-deep (which was the last-beat accent).
+                    // For swing, cap the tail so it can't ring past the bar line into the next chord.
                     const gapMs = (chordStrikesSecs[si + 1] - strikeTime) * 1000;
-                    const legatoTailMs = Math.min(400, gapMs);
+                    const maxTail = swingComp ? Math.max(0, (barEndSecs - chordStrikesSecs[si + 1]) * 1000) : 400;
+                    const legatoTailMs = Math.min(swingComp ? Math.min(400, maxTail) : 400, gapMs);
                     strikeDurMs = gapMs + legatoTailMs;
                     strikeReleaseMs = legatoTailMs;
+                } else if (swingComp) {
+                    // Swing's final strike fades out BY the bar line so nothing reverberates into the
+                    // next measure / next chord — a smooth release that completes right at the bar.
+                    const toBarEndMs = Math.max(0, (barEndSecs - strikeTime) * 1000);
+                    strikeReleaseMs = Math.min(220, toBarEndMs);
+                    strikeDurMs = toBarEndMs;
                 } else {
                     strikeDurMs = (barEndSecs - strikeTime) * 1000 + 400;
                     strikeReleaseMs = 400;
                 }
-                const h = humanizeStrike(strikeTime, vol, si > 0); // keep the downbeat tight
+                const h = humanizeStrike(strikeTime, vol, si > 0, swingComp); // deeper accent on swing; keep downbeat tight
                 measure.midiNotes.forEach((midi, i) => {
                     const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
                     events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: strikeDurMs, releaseMs: strikeReleaseMs });
