@@ -500,82 +500,6 @@ function VoicingExplorer({
     }
   };
 
-  const hasVoicingsForTabAndChord = (tab: VoicingTabKey, instr: string, r: number, ct: string): boolean => {
-    const ch = CH[ct];
-    if (!ch) return false;
-    const isPiano = instr === 'piano';
-
-    const countGuitar = (groups: VoicingGroup[]) => {
-      if (!groups) return 0;
-      let count = 0; const seen = new Set<string>();
-      groups.forEach(g => { g.voicings.forEach(v => { if (!seen.has(v.fingerprint)) { seen.add(v.fingerprint); count++; } }); });
-      return count;
-    };
-
-    if (isPiano) {
-      const pV = buildPianoVoicings(r, ct, octave, selectedScaleId, namingMode);
-      switch (tab) {
-        case 'block': return true;
-        case 'triads': return pV.triads.length > 0;
-        case 'shells': return pV.shells.length > 0;
-        case 'drop2': return !!(pV.drop2 && pV.drop2.length > 0);
-        case 'drop3': return !!(pV.drop3 && pV.drop3.length > 0);
-        case 'drop2and4': return !!(pV.drop2and4 && pV.drop2and4.length > 0);
-        case 'scales': return (CHORD_SCALE_MAP[ct] ?? []).length > 0;
-        case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
-        case 'intervals': return getIntervalSubsets(ch.iv, ch.r, ch.f || []).length > 0;
-        case 'shapes': return buildHardcodedShapeVoicings(ct, r, namingMode).length > 0;
-        default: return false;
-      }
-    } else {
-      const rootName = (namingMode === 'flat' ? NOTE_FLAT : NOTE_SHARP)[r];
-      const chordName = `${rootName} ${ch.l}`;
-      switch (tab) {
-        case 'open': return countGuitar(buildOpenVoicings(ct, r, rootName, chordName)) > 0;
-        case 'barre': return countGuitar(buildBarreVoicings(ct, r, rootName, chordName)) > 0;
-        case 'triads': return countGuitar(buildTriadVoicings(ch, r, rootName, namingMode)) > 0;
-        case 'shells': return countGuitar(buildShellVoicings(ct, ch, r, rootName, chordName, namingMode)) > 0;
-        case 'drop2':
-        case 'drop3':
-        case 'drop2and4': {
-          const allDrops = buildDropVoicings(ct, ch, r, rootName, chordName, namingMode);
-          const dropGroups = allDrops.filter(g => g.voicings[0]?.type === tab);
-          return countGuitar(dropGroups) > 0;
-        }
-        case 'scales': return (CHORD_SCALE_MAP[ct] ?? []).length > 0;
-        case 'arps': return getArpSubsets(ch.iv, ch.r, ch.f || []).length > 0;
-        case 'intervals': return getIntervalSubsets(ch.iv, ch.r, ch.f || []).length > 0;
-        case 'shapes': return buildHardcodedShapeVoicings(ct, r, namingMode).length > 0;
-        default: return false;
-      }
-    }
-  };
-
-  // Only the shuffle button (handleRandomNext) needs the eligible-pair list.
-  // Computing it as a useMemo forced a 12×N voicing sweep on EVERY tab switch —
-  // that was the cold first-visit lag, doing display-irrelevant work on the hot
-  // path. Now it's computed lazily on first shuffle and cached per
-  // (tab, instrument, types, octave, scale), so switching tabs never triggers it.
-  // namingMode intentionally excluded from the key: voicing *existence* is
-  // naming-independent (fingerprint/formula keyed), so flat/sharp flips reuse it.
-  const eligiblePairsCache = useRef(new Map<string, { r: number; ct: string }[]>());
-  const getEligiblePairs = (): { r: number; ct: string }[] => {
-    const cacheKey = `${voicingTab}|${instrument}|${activeTypes.join(',')}|${octave}|${selectedScaleId ?? ''}`;
-    const cache = eligiblePairsCache.current;
-    const cached = cache.get(cacheKey);
-    if (cached) return cached;
-    const pairs: { r: number; ct: string }[] = [];
-    for (let r = 0; r < 12; r++) {
-      for (const ct of activeTypes) {
-        if (hasVoicingsForTabAndChord(voicingTab, instrument, r, ct)) {
-          pairs.push({ r, ct });
-        }
-      }
-    }
-    cache.set(cacheKey, pairs);
-    return pairs;
-  };
-
   const getEligibleTypesForTab = (tab: VoicingTabKey, instr: string, types: string[]): string[] => {
     // Uses the shared voicingTabSupportsType predicate (single source of truth shared
     // with the quiz settings + quiz generation) so eligibility never drifts.
@@ -607,21 +531,29 @@ function VoicingExplorer({
       return;
     }
 
-    const eligiblePairs = getEligiblePairs();
-    const filteredPairs = eligiblePairs.filter(pair => !(pair.r === rootSemi && pair.ct === chordType));
-    const finalPairs = filteredPairs.length > 0 ? filteredPairs : eligiblePairs;
-
-    if (finalPairs.length > 0) {
-      const selected = finalPairs[Math.floor(Math.random() * finalPairs.length)];
-      userInteractedRef.current = true;
-      setChord(selected.r, selected.ct);
-    } else {
-      const eligibleTypes = getEligibleTypesForTab(voicingTab, instrument, activeTypes);
-      const r = Math.floor(Math.random() * 12);
-      const ct = eligibleTypes[Math.floor(Math.random() * eligibleTypes.length)];
-      userInteractedRef.current = true;
-      setChord(r, ct);
+    // Eligibility by the shared theory predicate (voicingTabSupportsType) — NO voicing builds.
+    // The old approach built every drop/shell grip for all 12 roots × every active type just to
+    // check non-emptiness, freezing the JS thread for 20-30s on heavy tabs (Drop 2). Movable
+    // voicings exist at every root, so a per-type check is enough and effectively instant.
+    let eligibleTypes = getEligibleTypesForTab(voicingTab, instrument, activeTypes);
+    // Free tier never lands on a locked quality (drop tabs are Pro anyway; this guards free tabs).
+    if (!isPro) {
+      const free = eligibleTypes.filter(isChordTypeFree);
+      if (free.length) eligibleTypes = free;
     }
+    if (eligibleTypes.length === 0) { userInteractedRef.current = true; randomChord(); return; }
+
+    // Pick a random (root, type) that isn't the current chord (cheap — just objects, no builds).
+    const pool: { r: number; ct: string }[] = [];
+    for (let r = 0; r < 12; r++) {
+      for (const ct of eligibleTypes) {
+        if (r === rootSemi && ct === chordType) continue;
+        pool.push({ r, ct });
+      }
+    }
+    const pick = pool.length ? pool[Math.floor(Math.random() * pool.length)] : { r: rootSemi, ct: chordType };
+    userInteractedRef.current = true;
+    setChord(pick.r, pick.ct);
   };
 
   const currentChordDef = CH[chordType];

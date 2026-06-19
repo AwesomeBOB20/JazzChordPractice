@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet, Dimensions, Platform } from 'react-native';
+import * as NavigationBar from 'expo-navigation-bar';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { THEMES } from '@shared/ui/themes';
@@ -32,6 +33,14 @@ export default function PaywallModal() {
       getProPrice().then(setPrice).catch(() => setPrice(null));
     }
   }, [visible, price]);
+
+  // While the paywall is open, clear the (opaque) Android nav-bar background so the modal's
+  // full-screen scrim dims the bottom system-button strip too — it sits under the absolute,
+  // edge-to-edge nav bar. Restore the themed bar colour on close.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    NavigationBar.setBackgroundColorAsync(visible ? '#00000000' : t.tabBar);
+  }, [visible, t.tabBar]);
 
   const onUnlock = async () => {
     if (busy) return;
