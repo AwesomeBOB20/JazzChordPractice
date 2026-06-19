@@ -447,12 +447,8 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             return { vol, t: Math.max(0, timeSecs + tj) };
         };
 
-        // Swing comp patterns over a 4-beat bar in TRIPLET slots (12 = 4 beats × 3). Each entry is the
-        // slots where the chord is struck (two-chord patterns + one busier three-hit). Swing rotates
-        // through these per bar for life; Charleston is locked to the first one.
-        const SWING_TRIPLET_PATTERNS = [
-            [0, 5], [2, 6], [2, 8], [0, 8], [3, 8], [5, 9], [3, 5, 8], [2, 5],
-        ];
+        // Swing comps over a 4-beat bar in TRIPLET slots (12 = 4 beats × 3): [0,5] is Charleston
+        // (x....x......), [0,8] is the sparse comp (x.......x...). Swing alternates the two per bar.
         // Convert a triplet pattern → strike times (seconds). For a split (2-beat half-bar) the engine
         // sees each half separately: the 1st half plays the pattern's first hit, the 2nd half its last
         // hit, each mapped into its own 0-2 beat window — so chord 1 lands on the 1st hit, chord 2 on
@@ -474,7 +470,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             const arpNotes = Array.from(new Set(measure.midiNotes.filter(n => n != null && !isNaN(n)))).sort((a, b) => a - b);
             const slots = measure.beats * 2;              // eighth notes per measure
             const arpReleaseMs = 140;                     // gentle crossfade tail
-            const SWING_FEELS = ['swing', 'charleston', 'swingsparse', 'reggae'];
+            const SWING_FEELS = ['swing', 'charleston', 'reggae'];
             const useSwing = measure.arpSwing || SWING_FEELS.includes(measure.rhythm);
 
             // Pre-compute each slot's time offset so we can derive per-note hold duration.
@@ -497,25 +493,16 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         } else
         switch (measure.rhythm) {
             case 'swing': {
-                // Swing rotates through the triplet comp patterns (one per bar, deterministic so a
-                // split's two halves agree) for variety. The rotation is WEIGHTED toward patterns that
-                // hit the downbeat (slot 0 — pattern indices 0 & 3 appear ~half the bars) so the bar's
-                // start lands firmly more often. Strikes ring until the next hit (evenComp below) so
-                // re-hits don't pile up into clicks. Falls through to the generic loop.
-                const SWING_PATTERN_ORDER = [0, 3, 1, 0, 4, 3, 2, 0, 5, 3, 7, 6]; // 0 & 3 = downbeat starters, weighted ×3
+                // Swing alternates per bar between the two downbeat-anchored comps the user kept:
+                // Charleston (x....x......) and the sparse one (x.......x...). Deterministic by bar so a
+                // split's two halves agree. Rings until the next hit / fades by the bar line below.
                 const barIdx = Math.floor(cumulativeBeats / 4);
-                const pat = SWING_TRIPLET_PATTERNS[SWING_PATTERN_ORDER[barIdx % SWING_PATTERN_ORDER.length]];
-                chordStrikesSecs = tripletStrikes(pat);
+                chordStrikesSecs = tripletStrikes(barIdx % 2 === 0 ? [0, 5] : [0, 8]);
                 break;
             }
             case 'charleston': {
                 // Charleston: the locked x....x...... pattern — beat 1 + the swung "and of 2".
                 chordStrikesSecs = tripletStrikes([0, 5]);
-                break;
-            }
-            case 'swingsparse': {
-                // Sparse/open comp: beat 1 + the swung "and of 3" — lots of space.
-                chordStrikesSecs = tripletStrikes([0, 8]);
                 break;
             }
             case 'green': {
@@ -526,14 +513,21 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
                 hasCustomScheduling = true;
                 const beats = isSplit ? [0, 1] : [0, 1, 2, 3];
                 const relMs = Math.min(340, beatSecs * 1000 * 0.55); // smooth decay tail
-                const durMs = beatSecs * 1000 * 0.25 + relMs;        // brief hold + the tail
-                beats.forEach((b) => {
+                const chunkMs = beatSecs * 1000 * 0.25 + relMs;      // brief hold + the tail
+                const barEnd = beatSecs * 1000 * measure.beats;
+                beats.forEach((b, idx) => {
                     const strikeTime = b * beatSecs;
                     if (strikeTime >= beatSecs * measure.beats) return;
+                    // The final beat rings FULL to the bar line (a satisfying landing) instead of decaying
+                    // away early — that early decay is what made beat 4 sound muted/muffled. Others stay
+                    // as short chunks. Release stays smooth either way.
+                    const isLastBeat = idx === beats.length - 1;
+                    const durMs = isLastBeat ? Math.max(chunkMs, barEnd - strikeTime * 1000) : chunkMs;
+                    const thisRel = isLastBeat ? Math.min(300, durMs) : relMs;
                     const h = humanizeStrike(strikeTime, vol, b > 0, true);
                     measure.midiNotes.forEach((midi, i) => {
                         const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: durMs, releaseMs: relMs });
+                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: durMs, releaseMs: thisRel });
                     });
                 });
                 break;
@@ -603,7 +597,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             // Straight + the swing comps ring each strike only until the NEXT strike (+ short tail),
             // not to the bar end. This stops a re-struck chord from stacking ringing copies of the
             // same notes — the pile-up that caused the clicks/pops on Charleston & Swing.
-            const evenComp = (!measure.rhythm || ['straight', 'swing', 'charleston', 'swingsparse'].includes(measure.rhythm));
+            const evenComp = (!measure.rhythm || ['straight', 'swing', 'charleston'].includes(measure.rhythm));
             const barEndSecs = beatSecs * measure.beats;
             const swingComp = measure.rhythm === 'swing';
             chordStrikesSecs.forEach((strikeTime, si) => {
@@ -640,8 +634,13 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         }
 
         if (measure.bassEnabled && measure.bassLine && measure.bassLine.length > 0) {
+            // Green wants a tighter walking-quarter "thump" under the chug — shorter, punchier bass
+            // notes than the longer sustained bass other feels use.
+            const greenBass = measure.rhythm === 'green';
             measure.bassLine.forEach((bassMidi, i) => {
-                events.push({ instrument: 'bass', midi: bassMidi, volume: Math.min(1.5, (measure.bassVolume / 100) * 1.5), timeOffset: i * beatSecs, durationMs: beatSecs * 1000 * 0.8 + 150, releaseMs: 120 });
+                const bDur = greenBass ? beatSecs * 1000 * 0.55 : beatSecs * 1000 * 0.8 + 150;
+                const bRel = greenBass ? 90 : 120;
+                events.push({ instrument: 'bass', midi: bassMidi, volume: Math.min(1.5, (measure.bassVolume / 100) * 1.5), timeOffset: i * beatSecs, durationMs: bDur, releaseMs: bRel });
             });
         } else if (measure.bassEnabled && measure.midiNotes.length > 0) {
              events.push({ instrument: 'bass', midi: measure.midiNotes[0], volume: Math.min(1.5, (measure.bassVolume / 100) * 1.5), timeOffset: 0, durationMs: measureMs * 0.8 + 150, releaseMs: 150 });
