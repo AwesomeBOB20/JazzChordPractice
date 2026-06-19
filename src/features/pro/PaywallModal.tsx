@@ -34,12 +34,17 @@ export default function PaywallModal() {
     }
   }, [visible, price]);
 
-  // While the paywall is open, clear the (opaque) Android nav-bar background so the modal's
-  // full-screen scrim dims the bottom system-button strip too — it sits under the absolute,
-  // edge-to-edge nav bar. Restore the themed bar colour on close.
+  // While the paywall is open, tint the Android nav-bar background with the SAME scrim the modal
+  // uses (rgba(0,0,0,0.6)) so the bottom system-button strip dims to match the rest of the screen
+  // instead of staying bright. Restore the themed bar colour + button style on close.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    NavigationBar.setBackgroundColorAsync(visible ? '#00000000' : t.tabBar);
+    if (visible) {
+      NavigationBar.setBackgroundColorAsync('rgba(0,0,0,0.6)');
+      NavigationBar.setButtonStyleAsync('light');
+    } else {
+      NavigationBar.setBackgroundColorAsync(t.tabBar);
+    }
   }, [visible, t.tabBar]);
 
   const onUnlock = async () => {

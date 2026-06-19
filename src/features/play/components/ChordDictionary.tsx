@@ -107,20 +107,10 @@ const DictSectionRow = React.memo(function DictSectionRow({
       : getDictionaryVoicings(category, instrument, rootSemi, itemKey, octave, selectedScaleId),
     [category, instrument, rootSemi, allRoots, itemKey, octave, selectedScaleId]
   );
-  // Progressive mount: the data is already warm (the count memos built it), so the open cost is purely
-  // mounting the react-native-svg diagrams. We render just the FIRST ROW on the opening frame — so the
-  // section shows content instantly with no blank flash and no heavy mount — then ramp the rest in over
-  // the next frames so a big section never lands a heavy mount on one frame. A reserved spacer keeps the
-  // section height stable while it fills.
-  const FIRST = Math.max(1, L.cols);          // one row paints immediately
-  const STEP = Math.max(2, L.cols * 2);        // then a couple of rows per frame
-  const [shown, setShown] = React.useState(() => Math.min(items.length, FIRST));
-  React.useEffect(() => { setShown(Math.min(items.length, FIRST)); }, [items, FIRST]);
-  React.useEffect(() => {
-    if (shown >= items.length) return;
-    const id = requestAnimationFrame(() => setShown(s => Math.min(items.length, s + STEP)));
-    return () => cancelAnimationFrame(id);
-  }, [shown, items.length, STEP]);
+  // Render the whole section's diagrams in one pass so they all appear together instead of streaming
+  // in row by row. The data is already warm (the count memos built it), so this is just the SVG mount,
+  // and it's bounded to the single expanded section, so the one-frame cost stays reasonable.
+  const shown = items.length;
   if (!items.length) {
     return <Text style={{ color: t.txt3, fontSize: 12, marginBottom: 16 }}>—</Text>;
   }
