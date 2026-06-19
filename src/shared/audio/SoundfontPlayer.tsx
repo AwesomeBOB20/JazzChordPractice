@@ -443,6 +443,22 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             return { vol, t: Math.max(0, timeSecs + tj) };
         };
 
+        // Swing comp patterns over a 4-beat bar in TRIPLET slots (12 = 4 beats × 3). Each entry is the
+        // slots where the chord is struck (two-chord patterns + one busier three-hit). Swing rotates
+        // through these per bar for life; Charleston is locked to the first one.
+        const SWING_TRIPLET_PATTERNS = [
+            [0, 5], [2, 6], [2, 8], [0, 8], [3, 8], [5, 9], [3, 5, 8], [2, 5],
+        ];
+        // Convert a triplet pattern → strike times (seconds). For a split (2-beat half-bar) the engine
+        // sees each half separately: the 1st half plays the pattern's first hit, the 2nd half its last
+        // hit, each mapped into its own 0-2 beat window — so chord 1 lands on the 1st hit, chord 2 on
+        // the 2nd, per the rule that a split's two hits voice its two chords.
+        const tripletStrikes = (pat: number[]): number[] => {
+            if (!isSplit) return pat.map(s => (s / 3) * beatSecs);
+            const slot = isSecondHalf ? Math.max(0, pat[pat.length - 1] - 6) : pat[0];
+            return [Math.min(5, slot) / 3 * beatSecs];
+        };
+
         // Arpeggio mode fills the bar with eighth notes that cycle through the chord/
         // shape notes (a 5-note chord in 4/4 → notes 1 2 3 4 5 1 2 3). The eighth-note
         // count tracks the time signature (beats × 2): 8 per 4-beat bar, 6 per 3, 4 per
@@ -454,7 +470,7 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             const arpNotes = Array.from(new Set(measure.midiNotes.filter(n => n != null && !isNaN(n)))).sort((a, b) => a - b);
             const slots = measure.beats * 2;              // eighth notes per measure
             const arpReleaseMs = 140;                     // gentle crossfade tail
-            const SWING_FEELS = ['swing', 'swingfour', 'charleston', 'swingsparse', 'reggae'];
+            const SWING_FEELS = ['swing', 'charleston', 'swingsparse', 'reggae'];
             const useSwing = measure.arpSwing || SWING_FEELS.includes(measure.rhythm);
 
             // Pre-compute each slot's time offset so we can derive per-note hold duration.
@@ -477,60 +493,22 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
         } else
         switch (measure.rhythm) {
             case 'swing': {
-                hasCustomScheduling = true;
-                if (isSplit) {
-                    // Split swing: each half-measure chord is handled by its own PLAY_SCHEDULE.
-                    // Just play the current chord at beat 0, sustaining to end of its window.
-                    const strikeDur = measureMs + 400;
-                    const h = humanizeStrike(0, vol, false);
-                    measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: strikeDur, releaseMs: 400 });
-                    });
-                } else {
-                    // Non-split swing: play at 0 and 5/3 beats — both sustain to end of measure
-                    const strike1Dur = measureMs + 400;
-                    const h1 = humanizeStrike(0, vol, false);
-                    measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: h1.vol, timeOffset: Math.max(0, h1.t + guitarStaggerSecs), durationMs: strike1Dur, releaseMs: 400 });
-                    });
-
-                    const strike2Offset = (5/3) * beatSecs;
-                    const strike2Dur = (measureMs - strike2Offset * 1000) + 400;
-                    const h2 = humanizeStrike(strike2Offset, vol, true);
-                    measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: h2.vol, timeOffset: h2.t + guitarStaggerSecs, durationMs: strike2Dur, releaseMs: 400 });
-                    });
-                }
-                break;
-            }
-            case 'swingfour': {
-                // Freddie Green 4-feel: a short swung "chunk" on every beat (2 & 4 lifted by the
-                // humanizer). Custom scheduling because these are staccato stabs, not ring-outs.
-                hasCustomScheduling = true;
-                const stabBeats = isSplit ? [0, 1] : [0, 1, 2, 3];
-                const stabDurMs = beatSecs * 1000 * 0.42; // short chunk, ~⅖ of a beat
-                stabBeats.forEach((b) => {
-                    const strikeTime = b * beatSecs;
-                    if (strikeTime >= beatSecs * measure.beats) return;
-                    const h = humanizeStrike(strikeTime, vol, b > 0);
-                    measure.midiNotes.forEach((midi, i) => {
-                        const guitarStaggerSecs = measure.guitar ? i * strumStepSecs - strumPrerollSecs : 0;
-                        events.push({ instrument, midi, volume: h.vol, timeOffset: Math.max(0, h.t + guitarStaggerSecs), durationMs: stabDurMs, releaseMs: 120 });
-                    });
-                });
+                // Swing rotates through the triplet comp patterns (one per bar, deterministic so a
+                // split's two halves agree) for variety. Strikes ring until the next hit (evenComp
+                // below) so re-hits don't pile up into clicks. Falls through to the generic loop.
+                const barIdx = Math.floor(cumulativeBeats / 4);
+                const pat = SWING_TRIPLET_PATTERNS[(barIdx * 3) % SWING_TRIPLET_PATTERNS.length];
+                chordStrikesSecs = tripletStrikes(pat);
                 break;
             }
             case 'charleston': {
-                // Charleston: beat 1 + the swung "and of 2". Sustained rings (generic loop).
-                chordStrikesSecs = isSplit ? [0] : [0, beatSecs * (1 + 2 / 3)];
+                // Charleston: the locked x....x...... pattern — beat 1 + the swung "and of 2".
+                chordStrikesSecs = tripletStrikes([0, 5]);
                 break;
             }
             case 'swingsparse': {
-                // Sparse/open comp: beat 1 + the swung "and of 3" — lots of space, syncopated.
-                chordStrikesSecs = isSplit ? [0] : [0, beatSecs * (2 + 2 / 3)];
+                // Sparse/open comp: beat 1 + the swung "and of 3" — lots of space.
+                chordStrikesSecs = tripletStrikes([0, 8]);
                 break;
             }
             case 'bossanova': {
@@ -595,7 +573,10 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
             // fading out right as it lands, so every beat hits at the same level. The FINAL strike
             // rings to the end of the bar for a natural tail into the boundary crossfade. Other
             // rhythms keep their sustained ring-out (unchanged).
-            const evenComp = (measure.rhythm === 'straight' || !measure.rhythm);
+            // Straight + the swing comps ring each strike only until the NEXT strike (+ short tail),
+            // not to the bar end. This stops a re-struck chord from stacking ringing copies of the
+            // same notes — the pile-up that caused the clicks/pops on Charleston & Swing.
+            const evenComp = (!measure.rhythm || ['straight', 'swing', 'charleston', 'swingsparse'].includes(measure.rhythm));
             const barEndSecs = beatSecs * measure.beats;
             chordStrikesSecs.forEach((strikeTime, si) => {
                 const isLast = si === chordStrikesSecs.length - 1;
