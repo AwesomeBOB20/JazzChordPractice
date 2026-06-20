@@ -280,9 +280,6 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
   const { playChord, stopAudio } = useAudio();
-  // Pro "cinematic reveal" preview: refs to drive a non-interactive auto-scroll (see effect below).
-  const vScrollRef = React.useRef<any>(null);
-  const contentHRef = React.useRef(0);
   const L = React.useMemo(() => layoutFor(cols), [cols]);
 
   // Grouped items per category (root-independent → keyed only on instrument).
@@ -410,28 +407,15 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   // Items shown for this root (empties hidden so header counts match what's rendered).
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
 
-  // ── Pro "cinematic reveal": a free user tapping the locked Dictionary lands here in PREVIEW mode.
-  // PlayScreen wraps this in pointerEvents:none (non-interactive); we expand a few sections so the
-  // grids are rich, then glide the scroll top→bottom over ~6s (easeInOut) so they SEE the depth.
-  // When the glide finishes, onPreviewEnd() raises the paywall. Programmatic scrollTo works through
-  // pointerEvents:none since it isn't a touch.
+  // ── Pro preview: a free user tapping the (normal-looking) Dictionary lands here in PREVIEW mode.
+  // PlayScreen wraps this in pointerEvents:none (non-interactive). We expand a couple of sections so
+  // the grids fill with diagrams — a glimpse of the real thing — then raise the paywall after a brief
+  // beat (no animation). They see it's locked behind the dimmed wall.
   React.useEffect(() => {
     if (!preview) return;
-    setExpanded(new Set(visibleItems.slice(0, 4).map(i => i.key)));
-    let raf = 0; let start = 0;
-    const DURATION = 6000;
-    const easeInOut = (x: number) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
-    const tick = (ts: number) => {
-      if (!start) start = ts;
-      const p = Math.min(1, (ts - start) / DURATION);
-      const max = Math.max(0, contentHRef.current - 360);
-      vScrollRef.current?.scrollTo({ y: max * easeInOut(p), animated: false });
-      if (p < 1) raf = requestAnimationFrame(tick);
-      else onPreviewEnd?.();
-    };
-    // Let the expanded sections render (diagrams mount) before the glide starts.
-    const startId = setTimeout(() => { raf = requestAnimationFrame(tick); }, 650);
-    return () => { clearTimeout(startId); if (raf) cancelAnimationFrame(raf); };
+    setExpanded(new Set(visibleItems.slice(0, 3).map(i => i.key)));
+    const id = setTimeout(() => onPreviewEnd?.(), 900);
+    return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview]);
   const toggleSection = React.useCallback((key: string) => {
@@ -612,12 +596,10 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
             position + measured layouts. Same behaviour on both platforms. ── */}
       <View style={{ flex: 1, overflow: 'hidden' }}>
         <Animated.ScrollView
-          ref={vScrollRef}
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 32 }}
           scrollEventThrottle={16}
-          onContentSizeChange={(_w: number, h: number) => { contentHRef.current = h; }}
           onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         >
           {visibleItems.length === 0 ? (

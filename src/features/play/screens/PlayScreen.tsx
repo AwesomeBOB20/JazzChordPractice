@@ -204,8 +204,8 @@ function ExploreModeToggle({ mode, setMode, isPro, onPreviewDictionary, t }: { m
     <View style={{ paddingTop: 8, paddingHorizontal: 12, paddingBottom: 8, backgroundColor: t.bg2, borderBottomWidth: 1, borderBottomColor: t.border, flexDirection: 'row', gap: 8 }}>
       {SEGMENTS.map(seg => {
         const isActive = mode === seg.key;
-        // Dictionary is Pro: when locked, tapping opens the paywall instead of switching,
-        // and a lock glyph replaces the chevron-free segment to signal it.
+        // Dictionary is Pro, but the tab looks like a normal, inviting tab (no lock/dim) — a free
+        // user discovers it's locked by tapping it (which opens the Dictionary, then the paywall).
         const locked = !!seg.pro && !isPro;
         return (
           <TouchableOpacity
@@ -217,7 +217,7 @@ function ExploreModeToggle({ mode, setMode, isPro, onPreviewDictionary, t }: { m
             }}
             style={[styles.modeTab, isActive && { backgroundColor: t.accent }]}
           >
-            <Ionicons name={locked ? 'lock-closed' : seg.icon} size={16} color={isActive ? '#fff' : t.txt3} />
+            <Ionicons name={seg.icon} size={16} color={isActive ? '#fff' : t.txt3} />
             <Text style={{ fontSize: 14, fontWeight: '700', color: isActive ? '#fff' : t.txt3 }}>{seg.label}</Text>
           </TouchableOpacity>
         );
