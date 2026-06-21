@@ -360,15 +360,13 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
 
   const getFlashAnim = (midi: number) => { if (!flashAnims.current[midi]) { flashAnims.current[midi] = new Animated.Value(1); } return flashAnims.current[midi]; };
   const doFlashMidi = (midi: number) => { const anim = getFlashAnim(midi); Animated.sequence([ Animated.timing(anim, { toValue: 0.95, duration: 60, useNativeDriver: true }), Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }), ]).start(); };
-  // Each key gets its own tap gesture rather than sharing React Native's single touch
-  // responder, so several keys pressed at the same time each fire independently —
-  // this is what enables double stops / playing multiple notes at once.
-  const makeKeyTap = (midi: number) =>
-    Gesture.Tap()
-      .runOnJS(true)
-      .maxDuration(600000) // holding a key down before releasing still counts as a tap
-      .maxDistance(16)     // a small drag fails the tap so the keyboard can still scroll
-      .onStart(() => { doFlashMidi(midi); onNotePress?.(midi); });
+  // Per-key tap gestures are built ONCE into a stable map below (keyTaps), keyed by MIDI.
+  // They previously were recreated inline every render (makeKeyTap(midi)), which handed
+  // every key's GestureDetector a brand-new gesture object on each chord change — that
+  // re-registered ~90 native gesture handlers and defeated the WhiteKey/BlackKey
+  // React.memo, so the whole keyboard re-rendered on every chord. Stable gestures let the
+  // memoized keys actually skip re-render. Several keys still fire independently (multitouch
+  // double-stops) — onStart fires per key — and onNotePressRef keeps the latest callback.
   // Reset any in-flight flash to rest when the displayed notes change, so a key whose
   // press-pulse was cut off mid-flight (left at 0.95) isn't reused stuck-pressed on the
   // next chord. We reset the VALUES in place rather than recreating the objects, so each
@@ -499,6 +497,27 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   const hitTestRef = useRef(hitTestMidi); hitTestRef.current = hitTestMidi;
   const onNotePressRef = useRef(onNotePress); onNotePressRef.current = onNotePress;
 
+  // Stable per-key tap gestures, built once. See the doFlashMidi note above: a fresh
+  // gesture per render was the hidden cost that re-rendered the whole keyboard on every
+  // chord. doFlashMidi reads the live flashAnims ref, and onNotePressRef holds the latest
+  // callback, so these one-time closures stay correct without being rebuilt.
+  const keyTaps = useMemo(() => {
+    const m = new Map<number, any>();
+    for (const oct of OCTAVE_LIST) {
+      const base = oct * 12;
+      for (const pc of [...WHITE_PCS, ...BLACK_PCS]) {
+        const midi = base + pc;
+        m.set(midi, Gesture.Tap()
+          .runOnJS(true)
+          .maxDuration(600000)
+          .maxDistance(16)
+          .onStart(() => { doFlashMidi(midi); onNotePressRef.current?.(midi); }));
+      }
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Per-touch start positions, so we can tell a TAP (play the key) from a DRAG (scroll the
   // keyboard, play nothing). Keyed by touch id for true multitouch.
   const touchStartsRef = useRef<Map<number, { x: number; y: number; moved: boolean }>>(new Map());
@@ -606,7 +625,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           const midi = base + pc;
           const v = keyVisuals.get(midi) || {};
           return (
-            <GestureDetector key={pc} gesture={makeKeyTap(midi)}>
+            <GestureDetector key={pc} gesture={keyTaps.get(midi)}>
               <WhiteKey keyColor={v.keyColor} keyTextColor={v.keyTextColor} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} anim={getFlashAnim(midi)} isActive={v.isActive} borderColor={theme.border} />
             </GestureDetector>
           );
@@ -615,7 +634,7 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           const midi = base + pc;
           const v = keyVisuals.get(midi) || {};
           return (
-            <GestureDetector key={pc} gesture={makeKeyTap(midi)}>
+            <GestureDetector key={pc} gesture={keyTaps.get(midi)}>
               <BlackKey keyColor={v.keyColor} keyTextColor={v.keyTextColor} keyBorder={v.keyBorder} label={v.label} isOverlay={v.isOverlay} overlayColor={v.overlayColor} left={BLACK_LEFT_PCT[pc]} width={BLACK_WIDTH_PCT} anim={getFlashAnim(midi)} borderColor={theme.border} />
             </GestureDetector>
           );

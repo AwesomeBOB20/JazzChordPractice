@@ -179,13 +179,17 @@ const FretboardNote = React.memo(function FretboardNote({ cx, cy, color, textCol
         elevation: isOpen ? 0 : 4,
       }}
     >
-      {/* Per-note tap gesture (instead of the shared touch responder) so multiple
-          notes pressed at once each fire independently — enables double stops. */}
-      <GestureDetector gesture={Gesture.Tap().runOnJS(true).maxDuration(600000).maxDistance(16).onStart(() => onNotePress?.())}>
-        <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
-          <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
-        </View>
-      </GestureDetector>
+      {/* Visual only. Touches are handled by the diagram's single surface gesture
+          (noteGesture — a Manual multitouch hit-tester that maps each finger to the
+          nearest dot). This dot previously wrapped its OWN GestureDetector, but the
+          outer Animated.View is pointerEvents="none", so that per-dot handler never
+          fired — it was dead weight that still registered a native gesture handler for
+          every dot on each diagram swap (the measured tab-switch / randomize render
+          wall: ~6 on a chord, ~60 on a scale/arp). Dropping it preserves multitouch
+          (the surface gesture already does it) and slashes mount cost. */}
+      <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+        <Text style={{ color: isOpen ? (openColor || color) : (textColor || '#fff'), fontSize: 13, fontWeight: 'bold' }}>{label}</Text>
+      </View>
     </Animated.View>
   );
 });
