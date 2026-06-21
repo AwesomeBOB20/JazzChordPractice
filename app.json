@@ -4,6 +4,7 @@
     "slug": "jazzchordpractice",
     "owner": "anthonysteller314s-organization",
     "version": "1.0.0",
+    "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "dark",
