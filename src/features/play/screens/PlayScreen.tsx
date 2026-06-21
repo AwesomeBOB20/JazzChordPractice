@@ -11,7 +11,6 @@ import { useShallow } from 'zustand/react/shallow';
 import { useChordStore, PendingVoicing } from '@features/play/store/chordStore';
 import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import { FREE_VOICING_TABS, isChordTypeFree, type ProFeature } from '@features/pro/proConstants';
-import { AdBanner } from '@features/ads/AdBanner';
 import { useInterstitial } from '@features/ads/useInterstitial';
 import { INTERSTITIAL_CHORD_CHANGES } from '@features/ads/adConfig';
 import ChordDictionary from '@features/play/components/ChordDictionary';
@@ -1571,7 +1570,6 @@ export default function PlayScreen() {
   if (dict.mode === 'dictionary') {
     return (
       <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-        <AdBanner />
         <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} onPreviewDictionary={startDictionaryPreview} t={t} />
         <View style={{ flex: 1 }} pointerEvents={dictPreview ? 'none' : 'auto'}>
           <ChordDictionary t={t} preview={dictPreview} onPreviewEnd={() => openPaywall('dictionary')} />
@@ -1582,7 +1580,6 @@ export default function PlayScreen() {
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-      <AdBanner />
       <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} onPreviewDictionary={startDictionaryPreview} t={t} />
       <VoicingExplorer
         rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
