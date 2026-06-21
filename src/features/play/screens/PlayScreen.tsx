@@ -1524,7 +1524,19 @@ export default function PlayScreen() {
   const { theme, instrument, setInstrument, isPro, openPaywall, paywallFeature } = useSettingsStore();
   const { rootSemi, chordType, namingMode, shiftRoot, cycleType, pendingVoicingTab, setPendingVoicingTab, pendingVoicing, setPendingVoicing, setSelectedScaleId } = useChordStore();
   const dict = useDictionaryStore();
+  const { stopAudio: stopChordAudio } = useAudio();
+  const isFocused = useIsFocused();
   const t = THEMES[theme];
+  // Both screens stay mounted now (instant Chord⇄Dictionary flip), so switching no longer unmounts
+  // the Chord viewer — which used to stop its audio. Stop chord-mode audio when the user actually
+  // flips the mode ON-SCREEN. FOCUS-GATED + skips the initial mount so a backgrounded mount never
+  // calls the global stopAudio and kills a Song progression (see soundfont-source-stable).
+  const prevModeRef = React.useRef(dict.mode);
+  React.useEffect(() => {
+    if (prevModeRef.current === dict.mode) return;
+    prevModeRef.current = dict.mode;
+    if (isFocused) stopChordAudio();
+  }, [dict.mode, isFocused, stopChordAudio]);
 
   // Free users tapping the locked Dictionary get a "cinematic reveal": the real Dictionary opens in a
   // non-interactive auto-scroll (dictPreview) so they SEE how deep it is, then the paywall slides up.
@@ -1567,31 +1579,29 @@ export default function PlayScreen() {
     }
   }, [pendingVoicingTab, pendingVoicing, setPendingVoicingTab, setPendingVoicing, setSelectedScaleId]);
 
-  if (dict.mode === 'dictionary') {
-    return (
-      <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-        <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} onPreviewDictionary={startDictionaryPreview} t={t} />
-        <View style={{ flex: 1 }} pointerEvents={dictPreview ? 'none' : 'auto'}>
-          <ChordDictionary t={t} preview={dictPreview} onPreviewEnd={() => openPaywall('dictionary')} />
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
       <ExploreModeToggle mode={dict.mode} setMode={dict.setMode} isPro={isPro} onPreviewDictionary={startDictionaryPreview} t={t} />
-      <VoicingExplorer
-        rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
-        instrument={instrument} setInstrument={setInstrument}
-        voicingTab={chordVoicingTab} setVoicingTab={setChordVoicingTab}
-        shiftRoot={shiftRoot} cycleType={cycleType}
-        showChordChrome={true} showInstrumentToggle={false}
-        sheetVisible={sheetVisible} setSheetVisible={setSheetVisible}
-        playRef={livePlayRef}
-        targetVoicing={targetVoicing} onTargetVoicingApplied={() => setTargetVoicing(null)}
-      />
-      <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
+
+      {/* Both screens stay MOUNTED; we only show/hide them (display none), so Chord⇄Dictionary is an
+          instant flip instead of unmounting one heavy tree and re-mounting the other every switch. */}
+      <View style={{ flex: 1, display: dict.mode === 'dictionary' ? 'flex' : 'none' }} pointerEvents={dictPreview ? 'none' : 'auto'}>
+        <ChordDictionary t={t} preview={dictPreview} onPreviewEnd={() => openPaywall('dictionary')} />
+      </View>
+
+      <View style={{ flex: 1, display: dict.mode === 'chord' ? 'flex' : 'none' }}>
+        <VoicingExplorer
+          rootSemi={rootSemi} chordType={chordType} namingMode={namingMode}
+          instrument={instrument} setInstrument={setInstrument}
+          voicingTab={chordVoicingTab} setVoicingTab={setChordVoicingTab}
+          shiftRoot={shiftRoot} cycleType={cycleType}
+          showChordChrome={true} showInstrumentToggle={false}
+          sheetVisible={sheetVisible} setSheetVisible={setSheetVisible}
+          playRef={livePlayRef}
+          targetVoicing={targetVoicing} onTargetVoicingApplied={() => setTargetVoicing(null)}
+        />
+        <CommandSheet visible={sheetVisible} onClose={() => setSheetVisible(false)} onLivePreview={(r, c) => { setTimeout(() => livePlayRef.current(), 50); }} onExecute={() => {}} />
+      </View>
     </View>
   );
 }
