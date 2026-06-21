@@ -408,13 +408,13 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
 
   // ── Pro preview: a free user tapping the (normal-looking) Dictionary lands here in PREVIEW mode.
-  // PlayScreen wraps this in pointerEvents:none (non-interactive). We expand a couple of sections so
-  // the grids fill with diagrams — a glimpse of the real thing — then raise the paywall after a brief
-  // beat (no animation). They see it's locked behind the dimmed wall.
+  // PlayScreen wraps this in pointerEvents:none (non-interactive). We OPEN the sections so the screen
+  // fills with diagram grids — they see the real thing — then after a beat raise the lock-out paywall;
+  // dismissing it redirects back to Chord. Click → see → rejected → back.
   React.useEffect(() => {
     if (!preview) return;
-    setExpanded(new Set(visibleItems.slice(0, 3).map(i => i.key)));
-    const id = setTimeout(() => onPreviewEnd?.(), 900);
+    setExpanded(new Set(visibleItems.slice(0, 6).map(i => i.key)));
+    const id = setTimeout(() => onPreviewEnd?.(), 1300);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview]);
