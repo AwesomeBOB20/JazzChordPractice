@@ -16,22 +16,50 @@ const SLIDES: Array<{
   {
     icon: 'sparkles-outline',
     title: 'Welcome!',
-    body: 'Jazz Chord Practice helps you learn chords, voicings, and progressions on piano and guitar. Here\'s a quick tour.',
+    body: 'Tune your instrument, learn any chord on guitar and piano, understand the theory behind them, practice with real progressions, and train your ear — everything a musician needs, in one app.',
+  },
+  {
+    icon: 'piano',
+    lib: 'mci',
+    title: 'Piano & Guitar',
+    body: 'Switch between Piano and Guitar with the top-left toggle. Each has its own voicing families — triads, shells, drop voicings, scales, arpeggios, and more. See how the same chord looks and sounds on both.',
   },
   {
     icon: 'compass-outline',
-    title: 'Explore Chords',
-    body: 'Use the ‹ › steppers to change the root and chord quality. Voicing tabs switch between triads, shells, drop voicings, scales, arpeggios, and more.',
+    title: 'Explore: Chord Mode',
+    body: 'Use the ‹ › steppers to change root and chord quality. Voicing tabs below switch families. The navigators beside the card pick the exact position and shape. Tap any dot or key to hear that note.',
   },
   {
-    icon: 'play-circle-outline',
-    title: 'Hear Every Voicing',
-    body: 'Tap Play or any dot/key to hear notes. Switch Piano and Guitar at the top. The Dictionary mode shows every shape at once for quick browsing.',
+    icon: 'book-outline',
+    title: 'Explore: Dictionary',
+    body: 'Toggle to Dictionary to browse every voicing, scale, and arpeggio for any root at a glance. Tap a row to expand its diagrams — tap any diagram to hear it.',
   },
   {
     icon: 'musical-notes-outline',
-    title: 'Song & Quiz',
-    body: 'Build progressions in the Song tab and play them back. Quiz yourself by sight and ear — great for training your ear to recognize chords.',
+    title: 'Song Screen',
+    body: 'Build a chord progression and play it back at any tempo. Practice comping over real jazz changes — from a ii–V–I to a full set of rhythm changes.',
+  },
+  {
+    icon: 'puzzle-outline',
+    lib: 'mci',
+    title: 'Quiz Screen',
+    body: 'Visual mode shows a chord diagram — name it. Audio mode plays the chord — identify it by ear. Both sharpen the recognition skills you need to play in real musical situations.',
+  },
+  {
+    icon: 'guitar-pick-outline',
+    lib: 'mci',
+    title: 'Tuner',
+    body: 'Use the built-in chromatic tuner (listens via mic) to tune your instrument, or play a sustained reference tone and tune by ear.',
+  },
+  {
+    icon: 'settings-outline',
+    title: 'Settings',
+    body: 'Tap ⚙ (top right) to change the theme, note naming (sharp ♯ or flat ♭), diagram labels, font, and audio playback style.',
+  },
+  {
+    icon: 'help-circle-outline',
+    title: 'Want the Full Guide?',
+    body: 'Every feature has a detailed explanation. Tap ⚙ Settings → Help & Tutorial any time to open the complete in-app guide.',
   },
 ];
 
