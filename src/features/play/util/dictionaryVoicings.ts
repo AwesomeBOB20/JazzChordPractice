@@ -555,12 +555,32 @@ export interface MorphSection { inversionLabel: string; cells: MorphCell[]; }
 
 const MORPH_INV_LABELS = ['Root Position', '1st Inversion', '2nd Inversion', '3rd Inversion'];
 // Voicing families that support the morph view (clean, fixed string sets). Guitar only.
-export const MORPH_CATEGORIES = new Set<DictionaryCategory>(['triads', 'drop2', 'drop3', 'drop2and4']);
+export const MORPH_CATEGORIES = new Set<DictionaryCategory>(['triads', 'shells', 'drop2', 'drop3', 'drop2and4']);
 
 // The active string-index set of a grip, as a STRING_SETS_BY_TYPE key (sorted indices, 0 = low E).
 const activeStringKey = (frets: any[]): string =>
   (frets || []).map((f: any, i: number) => (f && f.fret != null ? i : null))
     .filter((x: any): x is number => x != null).sort((a, b) => a - b).join(',');
+
+// Shells pin the GUIDE TONES (3rd + 7th) to a string PAIR while the root bounces onto a lower bass
+// string — so the morph axis for shells is that guide-tone lock (b01 = E&A bass → guides on the D&G
+// strings; b12 = A&D bass → guides on the G&B strings), NOT a physical string set. Mirrors
+// SHELL_LOCK_GUIDE_STRINGS / SHELL_G3 / SHELL_G7 in voiceLeading.ts (kept in sync).
+const SHELL_LOCK_GUIDE_STRINGS: Record<string, [number, number]> = { b01: [2, 3], b12: [3, 4] };
+const SHELL_G3 = new Set(['3rd', 'b3rd', '4th', '2nd']);
+const SHELL_G7 = new Set(['7th', 'b7th', 'bb7', '6th']);
+// True when a shell grip's 3rd AND 7th sit exactly on the locked guide-string pair (root anywhere).
+function shellOnLock(frets: any[], lockKey: string): boolean {
+  const pair = SHELL_LOCK_GUIDE_STRINGS[lockKey];
+  if (!pair) return false;
+  let s3: number | null = null, s7: number | null = null;
+  (frets || []).forEach((f: any, i: number) => {
+    if (f && f.fret != null) { if (SHELL_G3.has(f.role)) s3 = i; else if (SHELL_G7.has(f.role)) s7 = i; }
+  });
+  if (s3 == null || s7 == null || s3 === s7) return false;
+  const a: number = s3, b: number = s7;
+  return (a === pair[0] || a === pair[1]) && (b === pair[0] || b === pair[1]);
+}
 
 // Which chord tone sits in the bass → the inversion bucket (0 root · 1 third · 2 fifth · 3 seventh/sixth).
 function bassBucket(role: string): number {
@@ -613,16 +633,20 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
 
   type Entry = { type: string; ch: any; voicing: any; bucket: number };
   const entries: Entry[] = [];
+  const isShell = category === 'shells';
   for (const ct of types) {
     const def = (CH as any)[ct];
     if (!def) continue;
     const chordName = `${rootName} ${def.l}`;
     let groups: any[] = [];
     if (category === 'triads') groups = buildTriadVoicings(def, rootSemi, rootName, namingMode);
+    else if (isShell) groups = buildShellVoicings(ct, def, rootSemi, rootName, chordName, namingMode);
     else groups = buildDropVoicings(ct, def, rootSemi, rootName, chordName, namingMode).filter((g: any) => g.voicings[0]?.type === category);
     for (const g of groups) {
       for (const v of g.voicings) {
-        if (activeStringKey(v.frets) !== stringSetKey) continue;
+        // Shells match on the guide-tone lock (3rd+7th string pair); everything else on the physical set.
+        const onSet = isShell ? shellOnLock(v.frets, stringSetKey) : activeStringKey(v.frets) === stringSetKey;
+        if (!onSet) continue;
         entries.push({ type: ct, ch: def, voicing: v, bucket: bassBucket(v.bassNote) });
       }
     }
