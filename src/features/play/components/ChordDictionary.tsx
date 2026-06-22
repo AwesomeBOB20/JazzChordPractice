@@ -270,7 +270,7 @@ function RootPicker({ open, rootSemi, t, onPick, onClose }: {
 // ── MORPH VIEW: one inversion group → a flat grid of every quality on the chosen string set, in
 // morph order. Mirrors DictSectionRow's flat-grid cell sizing/borders, but the corners read
 // quality (name) · formula · bass, and the inversion is the section header. ──
-function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode, labelMode, onPlay, colorMode, selectiveRoles }: any) {
+function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode, labelMode, onPlay, colorMode, selectiveRoles, allRoots }: any) {
   const items: any[] = section.cells;
   const CELL_PAD = 8;
   const innerW = Math.max(40, L.cellW - CELL_PAD * 2);
@@ -310,7 +310,7 @@ function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode,
               <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
                 <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={rootSemi} />
               </View>
-              {pill(formatChordSymbol(it.chordName), styles.cTL, true)}
+              {pill(allRoots ? `ANY ${it.symbol}` : formatChordSymbol(it.chordName), styles.cTL, true)}
               {formulaPill(it.formulaTokens, styles.cBL)}
               {pill(it.bass, styles.cBR)}
             </TouchableOpacity>
@@ -675,7 +675,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           {morphSections.length === 0
             ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>No voicings on this string set.</Text>
             : morphSections.map(sec => (
-                <MorphSectionGrid key={sec.inversionLabel} section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} />
+                <MorphSectionGrid key={sec.inversionLabel} section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} allRoots={effectiveAllRoots} />
               ))}
         </ScrollView>
       ) : (

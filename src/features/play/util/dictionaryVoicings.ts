@@ -544,6 +544,7 @@ export interface MorphCell {
   key: string;
   voicing: any;            // guitar grip → MiniChordDiagram `voicing`
   chordName: string;       // "C m7" (root + def.s)
+  symbol: string;          // just the quality symbol ("m7") — used for the "ANY <quality>" all-roots label
   chordType: string;
   formula: string;         // "1 ♭3 5 ♭7"
   formulaTokens: string[];
@@ -623,6 +624,7 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
         key: `${e.type}-${inv}-${i}`,
         voicing: e.voicing,
         chordName: `${rootName} ${(CH as any)[e.type].s}`,
+        symbol: (CH as any)[e.type].s,
         chordType: e.type,
         formula: toks.map(formulaGlyph).join(' '),
         formulaTokens: toks,
