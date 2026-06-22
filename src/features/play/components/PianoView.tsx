@@ -682,11 +682,11 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           empty (Quiz: no card + no navigation) so there's no fixed-height gap above the keyboard.
           On the Chord screen (leftSlot) it's wrapped in a flex ScrollView so IT absorbs vertical
           overflow — scrolling internally when squeezed — while the tabs + keyboard stay pinned. */}
-      {(leftSlot || showNavigation || parentScales.length > 0) && (() => { const bandEl = (
-      <View style={[styles.band, leftSlot ? { height: 210 } : null, { borderBottomColor: theme.border }]}>
-        {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
+      {(leftSlot || showNavigation || parentScales.length > 0) && (
+      <View style={[styles.band, leftSlot ? styles.bandFixed : { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
+        {leftSlot ? <ScrollView style={styles.bandColScroll} contentContainerStyle={styles.bandLeftContent} showsVerticalScrollIndicator={false}>{leftSlot}</ScrollView> : null}
         {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
-        <View style={styles.bandNav}>
+        {(() => { const inner = (<>
       {showNavigation && groups && groups.length > 1 && (() => {
         const idx = Math.max(0, groups.findIndex(g => voicingIdx >= g.startIdx && voicingIdx < g.startIdx + g.count));
         return (
@@ -749,11 +749,11 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
           <TouchableOpacity style={[styles.navBtn, { borderColor: theme.border, backgroundColor: theme.bg }]} onPress={onNextVoicing}><Text style={[styles.navArrow, { color: theme.txt1 }]}>›</Text></TouchableOpacity>
         </View>
       )}
-        </View>
+        </>); return leftSlot
+          ? (<ScrollView style={styles.bandColScroll} contentContainerStyle={styles.bandNavContent} showsVerticalScrollIndicator={false}>{inner}</ScrollView>)
+          : (<View style={styles.bandNav}>{inner}</View>); })()}
       </View>
-      ); return leftSlot
-        ? (<ScrollView style={styles.bandScroll} contentContainerStyle={styles.bandScrollContent} showsVerticalScrollIndicator={false}>{bandEl}</ScrollView>)
-        : bandEl; })()}
+      )}
       {/* Voicing-tab selector — now BELOW the card + navigator band (previously the view header). */}
       {header}
       {showMiniMap && (
@@ -834,15 +834,16 @@ const styles = StyleSheet.create({
   container: { overflow: 'hidden', position: 'relative', paddingTop: 0 },
   // Chord screen only: fill the fixed (non-scrolling) area so the band/tabs/keyboard split the height.
   containerFill: { flex: 1 },
-  // The band's scroll region takes all leftover height (after the pinned tabs + keyboard) and scrolls
-  // internally only when its 210px content can't fit; centered when there's room to spare.
-  bandScroll: { flex: 1 },
-  bandScrollContent: { flexGrow: 1, justifyContent: 'center' },
-  // Fixed height (applied INLINE only when leftSlot is present — the Chord screen) so the band never
-  // resizes as content changes (1 vs 2 nav rows, 1 vs 2 pill rows, sub-label present/absent). Sized to
-  // the tallest case (scales: sub-label + 2 pill rows ≈ 208); shorter content centers within it. The
-  // Quiz (no leftSlot, no navigation) skips the band entirely — no fixed height, no empty gap.
-  band: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1 },
+  // Chord-screen band: a fixed 210 row that can shrink on short screens. Each COLUMN scrolls on its
+  // own (bandColScroll) so the chord card and the navigators move independently; content centers when
+  // there's room and scrolls when squeezed. No bottom border — that line now lives on the voicing tab
+  // bar's TOP edge instead. The divider (alignSelf:stretch) spans the band's full height.
+  bandFixed: { height: 210, flexShrink: 1 },
+  bandColScroll: { flex: 1 },
+  bandLeftContent: { flexGrow: 1, justifyContent: 'center' },
+  bandNavContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  // The Quiz (no leftSlot) path keeps the band as a plain bordered row.
+  band: { flexDirection: 'row', alignItems: 'stretch' },
   bandLeft: { flex: 1, justifyContent: 'center' },
   bandDivider: { width: 1, alignSelf: 'stretch' },
   bandNav: { flex: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },

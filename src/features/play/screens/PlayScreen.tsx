@@ -72,7 +72,7 @@ function VoicingTabBar({ voicingTab, setVoicingTab, tabCounts, isPro, openPaywal
   const TABS = ALL_TABS.filter(tab => tabCounts[tab.key] > 0);
 
   return (
-    <View style={[styles.tabBarOuter, { backgroundColor: t.bg2, borderBottomColor: t.border, paddingHorizontal: 0 }]}>
+    <View style={[styles.tabBarOuter, { backgroundColor: t.bg2, borderTopColor: t.border, borderBottomColor: t.border, paddingHorizontal: 0 }]}>
       <ScrollView ref={scrollRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 12 }}>
         {TABS.map(tab => {
           const isActive = voicingTab === tab.key;
@@ -1628,7 +1628,7 @@ const styles = StyleSheet.create({
   modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 10 },
   modeBtnText: { ...TYPE.body, fontWeight: FONT_WEIGHT.bold },
   
-  tabBarOuter: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1 },
+  tabBarOuter: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderTopWidth: 1, borderBottomWidth: 1 },
   tabBtn: { height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 
   visualSettingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },

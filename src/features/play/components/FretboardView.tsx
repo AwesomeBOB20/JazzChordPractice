@@ -1412,11 +1412,11 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           column, freeing the space the old standalone nav row took up below the diagram.
           On the Chord screen (leftSlot) it's wrapped in a flex ScrollView so IT absorbs vertical
           overflow — scrolling internally when squeezed — while the tabs + fretboard stay pinned. */}
-      {(leftSlot || !hideNavigators) && (() => { const bandEl = (
-      <View style={[styles.band, leftSlot ? { height: 210 } : null, { borderBottomColor: theme.border }]}>
-        {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
+      {(leftSlot || !hideNavigators) && (
+      <View style={[styles.band, leftSlot ? styles.bandFixed : { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
+        {leftSlot ? <ScrollView style={styles.bandColScroll} contentContainerStyle={styles.bandLeftContent} showsVerticalScrollIndicator={false}>{leftSlot}</ScrollView> : null}
         {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
-        <View style={styles.bandNav}>
+        {(() => { const inner = (<>
 
       {/* Navigator 0: CHORD (sub-chord filter) — only when the chord yields more than one */}
       {!hideNavigators && hasChordAxis && (
@@ -1565,11 +1565,11 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
           </TouchableOpacity>
         </View>
       )}
-        </View>
+        </>); return leftSlot
+          ? (<ScrollView style={styles.bandColScroll} contentContainerStyle={styles.bandNavContent} showsVerticalScrollIndicator={false}>{inner}</ScrollView>)
+          : (<View style={styles.bandNav}>{inner}</View>); })()}
       </View>
-      ); return leftSlot
-        ? (<ScrollView style={styles.bandScroll} contentContainerStyle={styles.bandScrollContent} showsVerticalScrollIndicator={false}>{bandEl}</ScrollView>)
-        : bandEl; })()}
+      )}
 
       {/* Voicing-tab selector — now BELOW the card + navigator band (previously the view header). */}
       {header}
@@ -1655,17 +1655,17 @@ const styles = StyleSheet.create({
   container: { overflow: 'hidden', paddingTop: 0 },
   // Chord screen only: fill the fixed (non-scrolling) area so the band/tabs/fretboard split the height.
   containerFill: { flex: 1 },
-  // The band's scroll region takes all leftover height (after the pinned tabs + fretboard) and scrolls
-  // internally only when its 210px content can't fit; centered when there's room to spare.
-  bandScroll: { flex: 1 },
-  bandScrollContent: { flexGrow: 1, justifyContent: 'center' },
-  // Top band: card (left) + stacked navigators (right), separated by a vertical divider, with a
-  // single full-width bottom border above the diagram.
-  // Fixed height (applied INLINE only when leftSlot is present — the Chord screen) so the band never
-  // resizes as content changes (1 vs 2 nav rows, 1 vs 2 pill rows, sub-label present/absent). Sized to
-  // the tallest case (scales: sub-label + 2 pill rows + 2 nav rows ≈ 208); shorter content centers
-  // within it. The Quiz (no leftSlot, navigators hidden) skips the band entirely — no fixed height.
-  band: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1 },
+  // Chord-screen band: a fixed 210 row that can shrink on short screens. Each COLUMN scrolls on its
+  // own (bandColScroll) so the chord card and the navigators move independently; content centers when
+  // there's room and scrolls when squeezed. No bottom border — that line now lives on the voicing tab
+  // bar's TOP edge instead. The divider (alignSelf:stretch) spans the band's full height.
+  bandFixed: { height: 210, flexShrink: 1 },
+  bandColScroll: { flex: 1 },
+  bandLeftContent: { flexGrow: 1, justifyContent: 'center' },
+  bandNavContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
+  // Top band: card (left) + stacked navigators (right), separated by a full-height vertical divider.
+  // The Quiz (no leftSlot) path keeps the band as a plain bordered row.
+  band: { flexDirection: 'row', alignItems: 'stretch' },
   bandLeft: { flex: 1, justifyContent: 'center' },
   bandDivider: { width: 1, alignSelf: 'stretch' },
   bandNav: { flex: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
