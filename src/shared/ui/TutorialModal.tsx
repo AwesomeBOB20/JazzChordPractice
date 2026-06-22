@@ -40,7 +40,7 @@ const SLIDES: Array<{
     lib: 'mci',
     title: 'Piano or Guitar',
     bullets: [
-      { icon: 'swap-horizontal-outline', text: 'Tap the top-left switch to pick your instrument' },
+      { icon: 'guitar-acoustic', lib: 'mci', text: 'Tap the top-left switch to pick your instrument' },
       { icon: 'hand-left-outline', text: 'Diagrams show right where to press' },
       { icon: 'color-palette-outline', text: 'Colored dots tell each note apart' },
       { icon: 'eye-outline', text: 'See the same chord on both instruments' },
@@ -72,7 +72,7 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'add-circle-outline', text: 'Add chords one by one to build a sequence' },
       { icon: 'play-circle-outline', text: 'Press play to hear them in order' },
-      { icon: 'speedometer-outline', text: 'Slow it down or speed it up to any pace' },
+      { icon: 'metronome', lib: 'mci', text: 'Slow it down or speed it up to any pace' },
       { icon: 'repeat-outline', text: 'Loop it and play along to practice' },
     ],
   },
