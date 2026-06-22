@@ -564,19 +564,18 @@ const activeStringKey = (frets: any[]): string =>
   (frets || []).map((f: any, i: number) => (f && f.fret != null ? i : null))
     .filter((x: any): x is number => x != null).sort((a, b) => a - b).join(',');
 
-// Shells are divided by which string carries the BASS — E (6th), A (5th) or D (4th) — exactly how the
-// Shells browse tab groups them (BASS_STR_LABEL in voicings.ts). That's the morph axis for shells: pick
-// a bass string, see every quality's shell sitting on it, grouped by inversion.
-export const SHELL_BASS_SETS: { key: string; label: string }[] = [
-  { key: '0', label: 'E Bass' },
-  { key: '1', label: 'A Bass' },
-  { key: '2', label: 'D Bass' },
+// Shells morph axis = the SIX physical string sets, two per bass string: E bass = 654 (consecutive) +
+// 643 (skip), A bass = 543 + 532, D bass = 432 + 421. Each is its own clean quality-by-inversion morph,
+// so no shape is hidden. Keys are activeStringKey form, so shells filter exactly like triads/drops; the
+// dock button shows the bass + set ("E Bass" / "654"). Consecutive set listed before its skip sibling.
+export const SHELL_MORPH_SETS: { key: string; bass: string; set: string; label: string }[] = [
+  { key: '0,1,2', bass: 'E Bass', set: '654', label: 'E Bass 654' },
+  { key: '0,2,3', bass: 'E Bass', set: '643', label: 'E Bass 643' },
+  { key: '1,2,3', bass: 'A Bass', set: '543', label: 'A Bass 543' },
+  { key: '1,3,4', bass: 'A Bass', set: '532', label: 'A Bass 532' },
+  { key: '2,3,4', bass: 'D Bass', set: '432', label: 'D Bass 432' },
+  { key: '2,4,5', bass: 'D Bass', set: '421', label: 'D Bass 421' },
 ];
-// The string index carrying the bass (lowest fretted) note of a grip; -1 if none.
-const bassStringOf = (frets: any[]): number => {
-  for (let i = 0; i < (frets || []).length; i++) if (frets[i] && frets[i].fret != null) return i;
-  return -1;
-};
 
 // Which chord tone sits in the bass → the inversion bucket (0 root · 1 third · 2 fifth · 3 seventh/sixth).
 function bassBucket(role: string): number {
@@ -640,62 +639,48 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
     else groups = buildDropVoicings(ct, def, rootSemi, rootName, chordName, namingMode).filter((g: any) => g.voicings[0]?.type === category);
     for (const g of groups) {
       for (const v of g.voicings) {
-        // Shells match on the bass string (E/A/D); everything else on the physical string set.
-        const onSet = isShell ? bassStringOf(v.frets) === Number(stringSetKey) : activeStringKey(v.frets) === stringSetKey;
-        if (!onSet) continue;
+        if (activeStringKey(v.frets) !== stringSetKey) continue;
         entries.push({ type: ct, ch: def, voicing: v, bucket: bassBucket(v.bassNote) });
       }
     }
   }
 
-  // Each shell bass string hosts TWO physical sets (E bass = 654 consecutive + 643 skip, etc.). Split
-  // the morph by set so neither shape is hidden — each gets its own clean quality-by-inversion morph,
-  // labelled "654 · Root Position". Lexical sort puts the consecutive set (654) before the skip set
-  // (643). Other families have one implicit set (the one the dock already picked).
-  const compactSet = (key: string) => key.split(',').map(i => 6 - Number(i)).join('');
-  const setKeys: (string | null)[] = isShell
-    ? Array.from(new Set(entries.map(e => activeStringKey(e.voicing.frets)))).sort()
-    : [null];
-
+  // One section per inversion; the string set was already picked by the dock (for shells it's one of the
+  // six in SHELL_MORPH_SETS, so the section header is just the inversion).
   const sections: MorphSection[] = [];
-  for (const setKey of setKeys) {
-    const groupEntries = setKey == null ? entries : entries.filter(e => activeStringKey(e.voicing.frets) === setKey);
-    const setLabel = setKey == null ? '' : compactSet(setKey);
-    for (let inv = 0; inv < 4; inv++) {
-      const byType = new Map<string, Entry>();
-      for (const e of groupEntries) if (e.bucket === inv && !byType.has(e.type)) byType.set(e.type, e);
-      if (byType.size === 0) continue;
-      const list = [...byType.values()].sort((a, b) =>
-        morphDarkness(a.ch.iv) - morphDarkness(b.ch.iv) || types.indexOf(a.type) - types.indexOf(b.type));
-      const cells: MorphCell[] = list.map((e, i) => {
-        const toks = sortFormulaTokens(comboKeyOf(e.voicing, 'guitar').tokens);
-        let bassRole = '';
-        for (const f of e.voicing.frets) { if (f && f.fret != null) { bassRole = f.role; break; } }
-        const bp = bassPlain(bassRole);
-        return {
-          key: `${setLabel}-${e.type}-${inv}-${i}`,
-          voicing: e.voicing,
-          chordName: `${rootName} ${(CH as any)[e.type].s}`,
-          symbol: (CH as any)[e.type].s,
-          chordType: e.type,
-          formula: toks.map(formulaGlyph).join(' '),
-          formulaTokens: toks,
-          bass: bp ? `${bp} in bass` : '',
-          playMidi: voicingMidi(e.voicing),
-        };
-      });
-      // In "All roots" mode the chosen root is meaningless (every cell is movable), so slide the whole
-      // group down to its lowest playable window — one shared shift, so the qualities stay vertically
-      // aligned for the morph comparison and the diagrams sit compactly near the nut (lowest fret = 1).
-      let outCells = cells;
-      if (allRoots) {
-        let gmin = Infinity;
-        for (const c of cells) { const m = minFretOf(c.voicing); if (m < gmin) gmin = m; }
-        if (gmin !== Infinity && gmin !== 1) outCells = cells.map(c => transposeMorphCell(c, 1 - gmin));
-      }
-      const label = setLabel ? `${setLabel} · ${MORPH_INV_LABELS[inv]}` : MORPH_INV_LABELS[inv];
-      sections.push({ inversionLabel: label, cells: outCells });
+  for (let inv = 0; inv < 4; inv++) {
+    const byType = new Map<string, Entry>();
+    for (const e of entries) if (e.bucket === inv && !byType.has(e.type)) byType.set(e.type, e);
+    if (byType.size === 0) continue;
+    const list = [...byType.values()].sort((a, b) =>
+      morphDarkness(a.ch.iv) - morphDarkness(b.ch.iv) || types.indexOf(a.type) - types.indexOf(b.type));
+    const cells: MorphCell[] = list.map((e, i) => {
+      const toks = sortFormulaTokens(comboKeyOf(e.voicing, 'guitar').tokens);
+      let bassRole = '';
+      for (const f of e.voicing.frets) { if (f && f.fret != null) { bassRole = f.role; break; } }
+      const bp = bassPlain(bassRole);
+      return {
+        key: `${e.type}-${inv}-${i}`,
+        voicing: e.voicing,
+        chordName: `${rootName} ${(CH as any)[e.type].s}`,
+        symbol: (CH as any)[e.type].s,
+        chordType: e.type,
+        formula: toks.map(formulaGlyph).join(' '),
+        formulaTokens: toks,
+        bass: bp ? `${bp} in bass` : '',
+        playMidi: voicingMidi(e.voicing),
+      };
+    });
+    // In "All roots" mode the chosen root is meaningless (every cell is movable), so slide the whole
+    // group down to its lowest playable window — one shared shift, so the qualities stay vertically
+    // aligned for the morph comparison and the diagrams sit compactly near the nut (lowest fret = 1).
+    let outCells = cells;
+    if (allRoots) {
+      let gmin = Infinity;
+      for (const c of cells) { const m = minFretOf(c.voicing); if (m < gmin) gmin = m; }
+      if (gmin !== Infinity && gmin !== 1) outCells = cells.map(c => transposeMorphCell(c, 1 - gmin));
     }
+    sections.push({ inversionLabel: MORPH_INV_LABELS[inv], cells: outCells });
   }
   return sections;
 }

@@ -10,7 +10,7 @@ import { useDictionaryStore, DictionaryCategory } from '@features/play/store/dic
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useAudio } from '@shared/audio/AudioContext';
-import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, buildCagedMorphSections, MORPH_CATEGORIES, CAGED_MORPH_CATEGORIES, CAGED_MORPH_BOXES, SHELL_BASS_SETS, MorphSection } from '@features/play/util/dictionaryVoicings';
+import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, buildCagedMorphSections, MORPH_CATEGORIES, CAGED_MORPH_CATEGORIES, CAGED_MORPH_BOXES, SHELL_MORPH_SETS, MorphSection } from '@features/play/util/dictionaryVoicings';
 import { dictionaryGroups, tabKind, ALL_CATEGORIES, DictGroup } from '@features/play/util/dictionaryGroups';
 import { STRING_SETS_BY_TYPE } from '@shared/guitar';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
@@ -879,24 +879,28 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           <Text style={{ color: effectiveAllRoots ? t.txt3 : '#fff', fontSize: 22, fontWeight: '800' }}>{rootName(rootSemi)}</Text>
           <Ionicons name={dialOpen ? 'chevron-down' : 'chevron-up'} size={15} color={effectiveAllRoots ? t.txt3 : 'rgba(255,255,255,0.85)'} style={{ marginLeft: 4 }} />
         </TouchableOpacity>
-        {/* Morph axis — guitar only. Chord families cycle Any → each string set (shells: guide-tone lock);
-            arp families cycle Any → Box 1…5. Selecting one flips the grid into MORPH mode. */}
+        {/* Morph axis — guitar only. Chord families cycle Any → each string set (shells: each bass's two
+            sets, e.g. "E Bass 654"); arp families cycle Any → Box 1…5. Selecting one flips into MORPH. */}
         {morphEligible && (() => {
-          const sets = cagedMorph
+          const isShellMorph = effectiveCategory === 'shells';
+          const sets: any[] = cagedMorph
             ? Array.from({ length: CAGED_MORPH_BOXES }, (_, i) => ({ key: String(i + 1), label: `Box ${i + 1}` }))
-            : effectiveCategory === 'shells'
-            ? SHELL_BASS_SETS
+            : isShellMorph
+            ? SHELL_MORPH_SETS
             : (STRING_SETS_BY_TYPE[effectiveCategory] || []);
           const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
-          const curLabel = stringSet ? (sets.find(s => s.key === stringSet)?.label ?? stringSet) : 'Any';
+          const cur: any = sets.find(s => s.key === stringSet);
+          // Shells stack bass over set ("E Bass" / "654"); other families keep one value line.
+          const topText = isShellMorph && cur ? cur.bass : (cagedMorph ? 'BOX' : 'STRINGS');
+          const bottomText = !stringSet ? 'Any' : (isShellMorph && cur ? cur.set : (cur?.label ?? stringSet));
           return (
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); stopAudio?.(); const idx = keys.indexOf(stringSet); setStringSet(keys[(idx + 1) % keys.length]); }}
               style={[styles.dockIcon, { width: 66, borderColor: stringSet ? t.accent : t.border, backgroundColor: stringSet ? t.accent : t.bg2 }]}
             >
-              <Text style={{ fontSize: 8, fontWeight: '800', color: stringSet ? '#fff' : t.txt3 }}>{cagedMorph ? 'BOX' : 'STRINGS'}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '700', marginTop: 1, color: stringSet ? '#fff' : t.txt1 }}>{curLabel}</Text>
+              <Text style={{ fontSize: 8, fontWeight: '800', color: stringSet ? '#fff' : t.txt3 }}>{topText}</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', marginTop: 1, color: stringSet ? '#fff' : t.txt1 }}>{bottomText}</Text>
             </TouchableOpacity>
           );
         })()}
