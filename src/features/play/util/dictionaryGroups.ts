@@ -98,14 +98,17 @@ const shapeChords = (shapeKey: string): { type: string; label: string }[] => {
 };
 
 // Curated, musically-canonical subset of voicingTabSupportsType (Triads=3-note,
-// Shells=4+ with a 6th/7th, Drops=4+; else the shared predicate). Only ever REMOVES.
+// Shells=4+ with a 6th/7th, Drops=3+; else the shared predicate). Only ever REMOVES.
 export function dictionaryMember(category: DictionaryCategory, instrument: string, type: string): boolean {
   const ch = CH[type];
   if (!ch) return false;
   switch (category) {
     case 'triads': return ch.iv.length === 3;
     case 'shells': return ch.iv.length >= 4 && ch.iv.some(iv => iv === 9 || iv === 10 || iv === 11);
-    case 'drop2': case 'drop3': case 'drop2and4': return ch.iv.length >= 4;
+    // Drops include 3-note triads too (spread/octave-framed grips) so the Dictionary matches the
+    // Explore→Chord screen, which has shown triad drop voicings since 2026-06-02. buildDropVoicings
+    // emits them via buildTriadDropVoicings (drop3/drop2&4) + the triad DROP_VOICINGS data (drop2).
+    case 'drop2': case 'drop3': case 'drop2and4': return ch.iv.length >= 3;
     default: return voicingTabSupportsType(category, instrument, type);
   }
 }
