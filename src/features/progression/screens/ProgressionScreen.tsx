@@ -9,6 +9,7 @@ import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useChordStore } from '@features/play/store/chordStore';
+import { useDictionaryStore } from '@features/play/store/dictionaryStore';
 import { useProgressionStore } from '@features/progression/store/progressionStore';
 import { THEMES } from '@shared/ui/themes';
 import { NOTE_SHARP, NOTE_FLAT, CH, getChordNotes, getChordIntervals, CHORD_CATEGORIES, CHORD_SCALE_MAP, SCALES, GUITAR_TUNING, detectKey } from '@shared/theory/musicTheory';
@@ -29,6 +30,14 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const ROOTS = [0,1,2,3,4,5,6,7,8,9,10,11];
+
+// Map a progression guitar voicing's `type` (from calculateOptimalVoiceLeading) to the
+// Explore screen's voicing-tab key, so tapping a Song chord lands on the matching tab and
+// its exact grip (matched by fingerprint). Note 'drop24' -> 'drop2and4'.
+const GUITAR_TYPE_TO_TAB: Record<string, string> = {
+  triad: 'triads', shell: 'shells', drop2: 'drop2', drop3: 'drop3',
+  drop24: 'drop2and4', open: 'open', barre: 'barre',
+};
 
 // Voicing families gated behind Pro (mirrors the Explore screen's free set:
 // block/open/barre/triads). Shells + drop voicings require the Pro unlock.
@@ -1054,7 +1063,29 @@ export default function ProgressionScreen() {
                   setSelectedCell(selectedCell === idx ? null : idx);
                   if (chord && !chord.spacer) {
                     setBrushRoot(chord.rootSemi); setBrushType(chord.chordType);
-                    useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
+                    // Single tap loads this exact chord + voicing into the Explore Chord screen
+                    // (consumed by PlayScreen via the one-shot pendingVoicing, mirroring the
+                    // Dictionary's chip→chord flow). Double-tap / long-press open the measure editor
+                    // instead, so editing never also jumps the Explore chord.
+                    const cs = useChordStore.getState();
+                    cs.setChord(chord.rootSemi, chord.chordType);
+                    if (instrument === 'piano') {
+                      const notes = pianoVoicings[idx]?.notes;
+                      // pcKey (root-relative pitch-class set) is the matcher's fallback when the exact
+                      // MIDI notes don't line up — the Song voicing may sit a different octave than the
+                      // Explore block voicings, so this still lands on the right chord/inversion family.
+                      const pcKey = notes?.length
+                        ? Array.from(new Set<number>(notes.map((m: number) => ((((m % 12) - chord.rootSemi) % 12) + 12) % 12))).sort((a, b) => a - b).join(',')
+                        : undefined;
+                      cs.setPendingVoicingTab(notes?.length ? 'block' : null);
+                      cs.setPendingVoicing(notes?.length ? { notes, pcKey } : null);
+                    } else {
+                      const v: any = diagramVoicings[idx];
+                      const tab = v && GUITAR_TYPE_TO_TAB[v.type];
+                      cs.setPendingVoicingTab(v?.fingerprint && tab ? tab : null);
+                      cs.setPendingVoicing(v?.fingerprint && tab ? { fingerprint: v.fingerprint } : null);
+                    }
+                    useDictionaryStore.getState().setMode('chord');
                     playSelectedCellAudio(idx, chord);
                   }
                 }
