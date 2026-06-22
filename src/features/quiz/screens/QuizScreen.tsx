@@ -1880,7 +1880,7 @@ const WRONG_COLOR = '#D4537E';
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: { paddingVertical: 16, paddingBottom: 32, gap: 12 },
-  compactScore: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 16 },
+  compactScore: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1 },
   scoreItem: { alignItems: 'center', gap: 2, flex: 1 },
   scoreVal: { ...TYPE.heading },
   scoreLbl: { ...TYPE.caption, letterSpacing: 1 },

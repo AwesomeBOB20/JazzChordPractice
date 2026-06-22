@@ -111,7 +111,7 @@ export const useSettingsStore = create<SettingsState>()(
       bassEnabled: false,
       metronomeEnabled: false,
       voiceLeading: true,
-      voiceLeadDir: 'down',
+      voiceLeadDir: 'zone',
       fontFamily: 'Inter',
       fretCap: 5,
       pianoZone: 4,
