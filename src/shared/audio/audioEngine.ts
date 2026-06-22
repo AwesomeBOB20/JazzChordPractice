@@ -482,18 +482,23 @@ export const getAudioEngineHtml = (assets: any) => `
               // NO sub-octave: that half-frequency tone rattles small phone speakers
               // (the real source of the "buzz"). Low-pass is open so the high end stays.
               const partials = [
-                { mult: 1.0, gain: 1.0 },  // fundamental (dominant → round)
-                { mult: 2.0, gain: 0.4 },  // octave (body/roundness)
-                { mult: 4.0, gain: 0.12 }, // double-octave (gentle air/presence)
+                { mult: 1.0, gain: 1.0 },   // fundamental (dominant → round)
+                { mult: 2.0, gain: 0.45 },  // octave — a touch more body for warmth
+                { mult: 4.0, gain: 0.09 },  // double-octave — softer top so it never edges
               ];
               const totalGain = partials.reduce((s, p) => s + p.gain, 0);
               noteGain.gain.value = level / totalGain; // normalise the summed partials
               noteGain.connect(masterGain);
               const lp = audioCtx.createBiquadFilter();
               lp.type = 'lowpass';
-              lp.frequency.value = 3000; // open enough to keep air, tames only the very top
               lp.Q.value = 0.5;
               lp.connect(noteGain);
+              // Soft "bloom": ease the cutoff open across the attack so each note rounds IN gently
+              // instead of arriving fully bright — this is what makes the onset feel smooth. The
+              // steady-state ceiling (3000) is unchanged, so the sustained air the tone already had
+              // is preserved; only the first ~0.2s is softened.
+              lp.frequency.setValueAtTime(1700, now);
+              lp.frequency.exponentialRampToValueAtTime(3000, now + 0.22);
               partials.forEach(p => {
                 const o = audioCtx.createOscillator();
                 o.type = 'sine';
