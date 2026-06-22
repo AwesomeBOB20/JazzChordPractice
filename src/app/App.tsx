@@ -3,6 +3,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Audio } from 'expo-av';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, useNavigationState, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -28,6 +29,9 @@ import BpmModal from '@shared/ui/BpmModal';
 import SlidingToggle from '@shared/ui/SlidingToggle';
 import PaywallModal from '@features/pro/PaywallModal';
 import { initPurchases } from '@features/pro/purchases';
+import { TutorialModal } from '@shared/ui/TutorialModal';
+
+const TUTORIAL_KEY = '@jcp_tutorial_v1';
 
 // Patch React Native's <Text> once so the app-wide font chosen in Settings applies
 // everywhere, mapping each style's fontWeight to the matching weighted family. A Text
@@ -292,9 +296,21 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
 // ─── ROOT LAYOUT ──────────────────────────────────────────────────────────────
 function RootLayout() {
   const [showBpm, setShowBpm] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const { theme } = useSettingsStore();
   const fontFamily = useSettingsStore(s => s.fontFamily);
   const t = THEMES[theme];
+
+  useEffect(() => {
+    AsyncStorage.getItem(TUTORIAL_KEY).then(val => {
+      if (!val) setShowTutorial(true);
+    });
+  }, []);
+
+  const handleTutorialDismiss = useCallback(() => {
+    setShowTutorial(false);
+    AsyncStorage.setItem(TUTORIAL_KEY, '1');
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -313,6 +329,7 @@ function RootLayout() {
       <SettingsScreen />
       <BpmModal visible={showBpm} onClose={() => setShowBpm(false)} />
       <PaywallModal />
+      <TutorialModal visible={showTutorial} onDismiss={handleTutorialDismiss} />
     </View>
   );
 }

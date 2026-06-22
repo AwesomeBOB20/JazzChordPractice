@@ -167,7 +167,7 @@ const DictSectionRow = React.memo(function DictSectionRow({
     );
   };
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderLeftWidth: DIVIDER, borderTopWidth: DIVIDER, borderColor: t.border }}>
       {shownItems.map(it => {
         // Guitar cells carry four corner pills in place of the old caption; piano keeps its caption.
         const c = instrument === 'guitar' ? dictCorners(it, category, rootSemi, allRoots) : null;
@@ -780,7 +780,7 @@ const styles = StyleSheet.create({
   // "+N more" cap, so every chord is reachable. Label stays fixed; the scroller takes the rest.
   foundInRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: H_PAD, paddingVertical: 8 },
   // Flat grid cell (no card): sharp corners, shared right/bottom 1px borders, content centred.
-  cell: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 2, position: 'relative', overflow: 'hidden' },
+  cell: { alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 2, position: 'relative', overflow: 'hidden', borderRightWidth: DIVIDER, borderBottomWidth: DIVIDER },
   // Corner-label pill: flush to the cell corner, only the inner corner rounded (set per-anchor).
   cornerPill: { position: 'absolute', zIndex: 2, paddingHorizontal: 5, paddingVertical: 2 },
   cTL: { top: 0, left: 0, borderBottomRightRadius: 8 },

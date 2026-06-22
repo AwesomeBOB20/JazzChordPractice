@@ -146,7 +146,7 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
              x={k.x} y={0}
              width={WHITE_WIDTH} height={WHITE_HEIGHT}
              fill={k.color}
-             stroke={isDark ? 'rgba(255,255,255,0.3)' : theme.border} strokeWidth={1} rx={1}
+             stroke={theme.border} strokeWidth={1} rx={1}
            />
          ))}
          {/* Soft, blurred drop shadow under each black key — a radial fade (dark contact
@@ -192,7 +192,7 @@ const MiniPianoDiagram = React.memo(({ chord, notes: providedNotes, theme, octav
            x={0} y={0}
            width={SVG_W} height={SVG_H}
            fill="none"
-           stroke={isDark ? 'rgba(255,255,255,0.5)' : '#000'}
+           stroke={isDark ? theme.border : '#000'}
            strokeWidth={1.5}
            rx={1}
          />
