@@ -569,12 +569,12 @@ const activeStringKey = (frets: any[]): string =>
 // so no shape is hidden. Keys are activeStringKey form, so shells filter exactly like triads/drops; the
 // dock button shows the bass + set ("E Bass" / "654"). Consecutive set listed before its skip sibling.
 export const SHELL_MORPH_SETS: { key: string; bass: string; set: string; label: string }[] = [
-  { key: '0,1,2', bass: 'E Bass', set: '654', label: 'E Bass 654' },
-  { key: '0,2,3', bass: 'E Bass', set: '643', label: 'E Bass 643' },
-  { key: '1,2,3', bass: 'A Bass', set: '543', label: 'A Bass 543' },
-  { key: '1,3,4', bass: 'A Bass', set: '532', label: 'A Bass 532' },
-  { key: '2,3,4', bass: 'D Bass', set: '432', label: 'D Bass 432' },
-  { key: '2,4,5', bass: 'D Bass', set: '421', label: 'D Bass 421' },
+  { key: '0,1,2', bass: 'E Bass', set: '6-5-4', label: 'E Bass 6-5-4' },
+  { key: '0,2,3', bass: 'E Bass', set: '6-4-3', label: 'E Bass 6-4-3' },
+  { key: '1,2,3', bass: 'A Bass', set: '5-4-3', label: 'A Bass 5-4-3' },
+  { key: '1,3,4', bass: 'A Bass', set: '5-3-2', label: 'A Bass 5-3-2' },
+  { key: '2,3,4', bass: 'D Bass', set: '4-3-2', label: 'D Bass 4-3-2' },
+  { key: '2,4,5', bass: 'D Bass', set: '4-2-1', label: 'D Bass 4-2-1' },
 ];
 
 // Which chord tone sits in the bass → the inversion bucket (0 root · 1 third · 2 fifth · 3 seventh/sixth).

@@ -1,7 +1,7 @@
 import { buildMorphSections, SHELL_MORPH_SETS } from './src/features/play/util/dictionaryVoicings';
 
-// compact string set of a grip, e.g. [0,2,3] → "643"
-const setOf = (v: any) => (v.frets || []).map((f: any, i: number) => (f && f.fret != null ? 6 - i : null)).filter(Boolean).join('');
+// string set of a grip, e.g. [0,2,3] → "6-4-3"
+const setOf = (v: any) => (v.frets || []).map((f: any, i: number) => (f && f.fret != null ? 6 - i : null)).filter(Boolean).join('-');
 
 let fails = 0;
 // Each of the six shell sets is its OWN clean morph: every cell sits on exactly that string set, and no
@@ -21,7 +21,7 @@ for (const s of SHELL_MORPH_SETS) {
   }
 }
 // All six sets exist (two per bass — no skip-string shape hidden).
-const expected = ['654', '643', '543', '532', '432', '421'];
+const expected = ['6-5-4', '6-4-3', '5-4-3', '5-3-2', '4-3-2', '4-2-1'];
 for (const e of expected) if (!SHELL_MORPH_SETS.some(s => s.set === e)) { fails++; console.log(`✗ missing set ${e}`); }
 
 // ANY normalization still lands lowest fret = 1.
