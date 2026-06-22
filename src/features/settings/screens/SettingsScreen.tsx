@@ -139,12 +139,11 @@ const HELP_SECTIONS: HelpSection[] = [
         'Tap a row ("Maj 7", "Major") to open its diagrams; tap a diagram to hear it.',
         'Rootless voicings and scales list the chords they fit ("Comp with" / "Solo with"). Tap a chip, then a diagram, to open it on the Chord screen.',
         'Or long-press a diagram to open it on the Chord screen (you may be asked to pick a chord first).',
-        ['The ', BARS(1), ' / ', BARS(2), ' / ', BARS(3), ' buttons set diagrams per row.'],
+        ['The ', BARS(2), ' button cycles 1 / 2 / 3 diagrams per row.'],
       ] },
       { h: 'Picking the Root', b: [
-        'The ‹ › stepper moves the root a half step.',
-        'Tap the middle letter for a strip of 12 roots — tap one to jump.',
-        [I('grid-outline'), ' All (guitar) shows every shape across all 12 roots once — for learning movable shapes.'],
+        'Tap the root button for a strip of 12 roots — tap one to jump.',
+        [I('grid-outline'), ' All (guitar) shows every shape across all 12 roots once, drawn at the lowest fret and labelled ANY — for learning movable shapes.'],
       ] },
       { h: 'The Four Corner Labels', b: [
         'Each guitar diagram tags its corners.',
@@ -152,6 +151,11 @@ const HELP_SECTIONS: HelpSection[] = [
         'Top-right — the string set (4-3-2-1) for Triads/Shells/Drops, or the shape name ("Box 3 (C Shape)") for Arps/Scales/Shapes.',
         'Bottom-left — the formula (e.g. 1 3 5 7).',
         'Bottom-right — the bass note ("Root in bass", "3rd in bass"…).',
+      ] },
+      { h: 'Compare Mode', b: [
+        'Guitar only. In Triads, Shells, Drop 2 / 3 / 2&4, tap STRINGS in the dock to pick a string set (Shells use guide-tone pairs — E&A or A&D bass). The grid then lays every chord quality on that set side by side, grouped by inversion and ordered so one note slides at a time: maj7 → 7 → m7 → m7♭5 → dim7.',
+        'In Scales, Arps, Intervals and Shapes the button becomes BOX — pick Box 1–5 to compare every scale / arpeggio / interval / shape in that CAGED position up the neck.',
+        'Tap a section row to open or close it. With All on, the shapes are drawn at the lowest fret and labelled ANY.',
       ] },
     ],
   },
