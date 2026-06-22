@@ -571,10 +571,42 @@ const BASS_ROLE_RANK: Record<string, number> = {
   '11th': 15, '#11': 16, 'b13': 17, '13th': 18
 };
 
+// Default string-set ORDER per voicing family. Treble-first families list the
+// highest string set first and walk down toward the low E; bass-first families
+// start on the lowest bass string and walk up. (Index 0 = low E / 6th string, so a
+// lower bass-string index = a lower-pitched bass note.)
+//   • Triads (3-2-1 → 6-5-4) and Drop 2 (4-3-2-1 → 6-5-4-3): treble-first.
+//   • Shells (E → A → D bass), Drop 3 and Drop 2&4 (E-bass → A-bass): bass-first.
+const TREBLE_FIRST_TYPES = new Set(['triad', 'drop2']);
+const BASS_FIRST_TYPES = new Set(['shell', 'drop3', 'drop2and4']);
+// Stable family ordering so a mixed group list (buildDropVoicings returns
+// drop2 + drop3 + drop2&4 together) sorts as a proper total order; consumers
+// filter to one type per tab afterward, so this only keeps the sort consistent.
+const FAMILY_RANK = ['triad', 'drop2', 'drop3', 'drop2and4', 'shell'];
+
 function sortVoicingGroups(groups: VoicingGroup[]): VoicingGroup[] {
   // Shell bass groups order by string, thickest first: 6th (E) → 5th (A) → 4th (D).
   const bassRank = (label: string) => label.includes('E Bass') ? 0 : label.includes('A Bass') ? 1 : label.includes('D Bass') ? 2 : label.charCodeAt(0);
-  groups.sort((a, b) => bassRank(a.label) - bassRank(b.label));
+  // Bass string index of a group = lowest played string in its first voicing
+  // (index 0 = low E). Lower index → lower-pitched bass note.
+  const bassStringIdx = (g: VoicingGroup): number => {
+    const v = g.voicings[0];
+    if (!v) return 99;
+    for (let i = 0; i < v.frets.length; i++) if (v.frets[i].fret !== null) return i;
+    return 99;
+  };
+  const groupType = (g: VoicingGroup): string => g.voicings[0]?.type ?? '';
+  groups.sort((a, b) => {
+    const ta = groupType(a), tb = groupType(b);
+    if (ta !== tb) {
+      const ra = FAMILY_RANK.indexOf(ta), rb = FAMILY_RANK.indexOf(tb);
+      if (ra !== rb) return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
+      return bassRank(a.label) - bassRank(b.label); // both unranked → legacy
+    }
+    if (TREBLE_FIRST_TYPES.has(ta)) return bassStringIdx(b) - bassStringIdx(a); // high → low
+    if (BASS_FIRST_TYPES.has(ta)) return bassStringIdx(a) - bassStringIdx(b);   // low → high
+    return bassRank(a.label) - bassRank(b.label); // open / barre / CAGED: unchanged
+  });
   groups.forEach(g => {
     g.voicings.sort((a, b) => {
       // KEEP DROP & SHELL VOICINGS IN STRICT FRETBOARD ORDER
@@ -1714,9 +1746,13 @@ const DROP2_STRING_GROUPS = [
   { label: 'Strings 6-5-4-3', stringNums: '6 5 4 3', indices: [0, 1, 2, 3] },
 ];
 
+// Bass-first order (lowest bass string leads): 6-4-3-2 (E bass), then 5-3-2-1 (A bass),
+// with the rarer 6-5-3-1 last. This drives the Song-screen Drop 3 string-set cycle and
+// its default (the first entry). The Explore/Dictionary Drop 3 order is handled
+// separately by sortVoicingGroups (bass-first), so the two stay consistent.
 const DROP3_STRING_GROUPS = [
-  { label: 'Strings 5-3-2-1', stringNums: '5 3 2 1', indices: [1, 3, 4, 5] },
   { label: 'Strings 6-4-3-2', stringNums: '6 4 3 2', indices: [0, 2, 3, 4] },
+  { label: 'Strings 5-3-2-1', stringNums: '5 3 2 1', indices: [1, 3, 4, 5] },
   { label: 'Strings 6-5-3-1', stringNums: '6 5 3 1', indices: [0, 1, 3, 5] },
 ];
 
