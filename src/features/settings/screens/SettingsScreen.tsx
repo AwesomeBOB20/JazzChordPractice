@@ -160,7 +160,7 @@ const HELP_SECTIONS: HelpSection[] = [
     paras: [
       { t: 'Build a chord progression and play it back with a band — comping, bass, and a metronome.' },
       { h: 'The Grid', b: [
-        'Each cell is one measure — tap to select and hear it.',
+        'Each cell is one measure — tap to select, hear it, and load that exact chord + voicing into the Explore screen.',
         'Long-press or double-tap a cell to edit it.',
       ] },
       { h: 'The Cell Editor', b: [
