@@ -407,12 +407,9 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
     () => (morphActive ? buildMorphSections(effectiveCategory, rootSemi, stringSet!) : []),
     [morphActive, effectiveCategory, rootSemi, stringSet]
   );
-  // The inversion groups are collapsible accordion rows (like the browse view). Default: open the first
-  // group when the data (re)builds — pick a string set and you immediately see root-position comparison.
+  // The inversion groups are collapsible accordion rows (like the browse view). They start CLOSED —
+  // nothing opens until the user taps a row.
   const [morphExpanded, setMorphExpanded] = React.useState<Set<string>>(new Set());
-  React.useEffect(() => {
-    setMorphExpanded(new Set(morphSections.length ? [morphSections[0].inversionLabel] : []));
-  }, [morphSections]);
   const toggleMorph = React.useCallback((label: string) => setMorphExpanded(prev => {
     const n = new Set(prev);
     if (n.has(label)) n.delete(label); else n.add(label);
