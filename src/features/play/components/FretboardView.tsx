@@ -97,12 +97,15 @@ const getRank = (item: any) => {
 
 const GS_MIDI = [40, 45, 50, 55, 59, 64];
 const STRING_LABELS = ['E','A','D','G','B','E'];
+// Fretboard diagram footprint, trimmed a touch (frets/dots/margins) so the diagram sits a little
+// smaller and the chord-card + navigator band above it can be taller. Each fret row is FRET_SPACING
+// tall, so this shaves ~FRET_SPACING-drop × NUM_FRETS plus the margin trims off the SVG height.
 const STR_SPACING = 46;
-const FRET_SPACING = 33;
+const FRET_SPACING = 30;
 const MARGIN_LEFT = 72;
-const MARGIN_TOP = 40;
-const MARGIN_BOTTOM = 32;
-const DOT_R = 14;
+const MARGIN_TOP = 36;
+const MARGIN_BOTTOM = 28;
+const DOT_R = 13;
 
 // ── True multitouch input (mirrors PianoView) ───────────────────────────────
 // The dots are purely visual; a single GestureDetector over the note layer reads every
@@ -1659,7 +1662,7 @@ const styles = StyleSheet.create({
   // own (bandColScroll) so the chord card and the navigators move independently; content centers when
   // there's room and scrolls when squeezed. No bottom border — that line now lives on the voicing tab
   // bar's TOP edge instead. The divider (alignSelf:stretch) spans the band's full height.
-  bandFixed: { height: 210, flexShrink: 1 },
+  bandFixed: { height: 228, flexShrink: 1 },
   bandColScroll: { flex: 1 },
   bandLeftContent: { flexGrow: 1, justifyContent: 'center' },
   bandNavContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },

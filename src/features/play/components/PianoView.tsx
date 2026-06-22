@@ -838,7 +838,7 @@ const styles = StyleSheet.create({
   // own (bandColScroll) so the chord card and the navigators move independently; content centers when
   // there's room and scrolls when squeezed. No bottom border — that line now lives on the voicing tab
   // bar's TOP edge instead. The divider (alignSelf:stretch) spans the band's full height.
-  bandFixed: { height: 210, flexShrink: 1 },
+  bandFixed: { height: 228, flexShrink: 1 },
   bandColScroll: { flex: 1 },
   bandLeftContent: { flexGrow: 1, justifyContent: 'center' },
   bandNavContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 6, gap: 8 },
