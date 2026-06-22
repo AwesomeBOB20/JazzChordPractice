@@ -1948,6 +1948,14 @@ function buildDropVoicingsUncached(
     // shadowed those grids — same class of bug as the old add9→maj7 fallback.
   };
 
+  // A chord can borrow another quality's drop SHAPES (pitch-identical grips) but must keep its OWN
+  // spelling for an enharmonic tone. dom7♭13 reuses dom7♯5's grips, yet its +8 tone is a ♭13 (F over A,
+  // coloured as a 13) — NOT a ♯5 (E♯, coloured as a 5th). Relabel the borrowed role + formula on the
+  // cross-type fallback pass so the function, spelling, and colour all follow the real chord.
+  const FALLBACK_RELABEL: Record<string, Record<string, string>> = {
+    'dom7b13': { '#5th': 'b13th', '#5': 'b13' },
+  };
+
   const passes = [
     { effectiveType: fallbackMap[chordType] || chordType, effectiveRootSemi: rootSemi, isRootless: false, roleMap: null as string[] | null, rootFormula: '' }
   ];
@@ -1977,6 +1985,9 @@ function buildDropVoicingsUncached(
       const dropDefs = (DROP_VOICINGS[dropType] as any)[pass.effectiveType];
       if (!dropDefs) continue;
       const effectiveDef = CH[pass.effectiveType] || chordDef;
+      // Only the cross-type fallback pass borrows foreign roles; the self/rootless passes already
+      // carry the chord's own spelling, so they need no relabel.
+      const relabel = (!pass.isRootless && pass.effectiveType !== chordType) ? FALLBACK_RELABEL[chordType] : undefined;
 
       for (const shape of dropDefs) {
         const bassNoteDef = shape.notes[0];
@@ -2002,8 +2013,8 @@ function buildDropVoicingsUncached(
             const fret = actualBaseFret + (offset - bassRefOffset);
             if (fret < 0 || fret > 22) { isValid = false; break; }
             
-            const role = pass.isRootless && pass.roleMap ? pass.roleMap[intIdx] : (typeof formulaOverride === 'string' ? formulaOverride : effectiveDef.r[intIdx]);
-              
+            let role = pass.isRootless && pass.roleMap ? pass.roleMap[intIdx] : (typeof formulaOverride === 'string' ? formulaOverride : effectiveDef.r[intIdx]);
+
             let formula = role;
             if (pass.isRootless && pass.roleMap) {
                formula = role.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
@@ -2011,6 +2022,8 @@ function buildDropVoicingsUncached(
                const rawFormula = typeof formulaOverride === 'string' ? formulaOverride : (effectiveDef.f?.[intIdx] ?? role);
                formula = rawFormula.replace(/root/gi, '1').replace(/(nd|rd|th|st)/g, '');
             }
+            // Keep the chord's own spelling for a borrowed enharmonic tone (e.g. dom7♭13's ♯5→♭13).
+            if (relabel) { role = relabel[role] ?? role; formula = relabel[formula] ?? formula; }
 
             rolesUsed.push(role);
             formulasUsed.push(formula === 'root' ? '1' : formula);
@@ -2039,7 +2052,7 @@ function buildDropVoicingsUncached(
               chordLabel: String(chordLabelText),
               frets: assignFingers(fretArr),
               fingerprint: fp,
-              bassNote: pass.isRootless && pass.roleMap ? pass.roleMap[bassIntervalIdx] : effectiveDef.r[bassIntervalIdx],
+              bassNote: rolesUsed[0], // bass = shape.notes[0], processed first → already relabeled
               type: dropType,
             };
             
