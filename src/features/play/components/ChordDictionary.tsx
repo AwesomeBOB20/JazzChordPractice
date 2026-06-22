@@ -538,7 +538,6 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
     setAllRoots(false);
     setRootSemi(r);
   }, [stopAudio, setAllRoots, setRootSemi]);
-  const nudgeRoot = (d: number) => pickRoot((((rootSemi + d) % 12) + 12) % 12);
   const closeDial = React.useCallback(() => setDialOpen(false), []);
 
   return (
@@ -727,34 +726,27 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
         )}
         {/* When "All" is active the root isn't used, so the stepper reads as inactive:
             neutral fill + dimmed glyphs instead of the themed accent. */}
-        <View style={[styles.stepper, { backgroundColor: effectiveAllRoots ? t.bg2 : t.accent, borderWidth: effectiveAllRoots ? 1 : 0, borderColor: t.border }]}>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => nudgeRoot(-1)} style={styles.stepArrow}><Ionicons name="chevron-back" size={24} color={effectiveAllRoots ? t.txt3 : '#fff'} /></TouchableOpacity>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => setDialOpen(o => !o)} style={styles.stepCenter}>
-            <Text style={{ color: effectiveAllRoots ? t.txt3 : '#fff', fontSize: 24, fontWeight: '800' }}>{rootName(rootSemi)}</Text>
-            <Ionicons name={dialOpen ? 'chevron-down' : 'chevron-up'} size={16} color={effectiveAllRoots ? t.txt3 : 'rgba(255,255,255,0.85)'} style={{ marginLeft: 4 }} />
-          </TouchableOpacity>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => nudgeRoot(1)} style={styles.stepArrow}><Ionicons name="chevron-forward" size={24} color={effectiveAllRoots ? t.txt3 : '#fff'} /></TouchableOpacity>
-        </View>
-        <View style={[styles.densitySeg, { borderColor: t.border }]}>
-          {[1, 2, 3].map((n, i) => {
-            const isActive = L.cols === n;
-            const barW = (22 - (n - 1) * 2) / n;
-            return (
-              <TouchableOpacity
-                key={n}
-                activeOpacity={0.7}
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCols(n); }}
-                style={[styles.densitySegItem, { borderLeftWidth: i === 0 ? 0 : 1, borderLeftColor: t.border, backgroundColor: isActive ? t.accent : t.bg2 }]}
-              >
-                <View style={{ flexDirection: 'row', gap: 2 }}>
-                  {Array.from({ length: n }).map((_, bi) => (
-                    <View key={bi} style={{ width: barW, height: 20, borderRadius: 1.5, backgroundColor: isActive ? '#fff' : t.txt2 }} />
-                  ))}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {/* Root — a single tappable note (spelled ♯/♭ by key) that opens the picker. No nudge chevrons. */}
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => setDialOpen(o => !o)}
+          style={[styles.rootBtn, { backgroundColor: effectiveAllRoots ? t.bg2 : t.accent, borderWidth: effectiveAllRoots ? 1 : 0, borderColor: t.border }]}
+        >
+          <Text style={{ color: effectiveAllRoots ? t.txt3 : '#fff', fontSize: 22, fontWeight: '800' }}>{rootName(rootSemi)}</Text>
+          <Ionicons name={dialOpen ? 'chevron-down' : 'chevron-up'} size={15} color={effectiveAllRoots ? t.txt3 : 'rgba(255,255,255,0.85)'} style={{ marginLeft: 4 }} />
+        </TouchableOpacity>
+        {/* Columns — one button that cycles 1 → 2 → 3 diagrams per row (stacks instead of 3 buttons). */}
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCols(cols >= 3 ? 1 : cols + 1); }}
+          style={[styles.dockIcon, { borderColor: t.border, backgroundColor: t.bg2 }]}
+        >
+          <View style={{ flexDirection: 'row', gap: 2 }}>
+            {Array.from({ length: L.cols }).map((_, bi) => (
+              <View key={bi} style={{ width: (20 - (L.cols - 1) * 2) / L.cols, height: 20, borderRadius: 1.5, backgroundColor: t.txt2 }} />
+            ))}
+          </View>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -791,10 +783,8 @@ const styles = StyleSheet.create({
   dock: { flexDirection: 'row', alignItems: 'stretch', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 24 : 12, borderTopWidth: 1, zIndex: 6 },
   dockIcon: { width: 56, height: 56, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   stepper: { flex: 1, flexDirection: 'row', alignItems: 'center', height: 56, borderRadius: 20, overflow: 'hidden' },
-  stepArrow: { width: 36, height: 56, alignItems: 'center', justifyContent: 'center' },
-  stepCenter: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 56, paddingHorizontal: 6 },
-  densitySeg: { flexDirection: 'row', borderWidth: 1, borderRadius: 20, overflow: 'hidden', height: 56 },
-  densitySegItem: { width: 44, height: 56, alignItems: 'center', justifyContent: 'center' },
+  // Root button: a single tappable note that opens the picker (replaced the old ‹ note › stepper).
+  rootBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 56, borderRadius: 20, paddingHorizontal: 6 },
   // Root picker (12 circles, horizontal scroll)
   dialBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 4 },
   dialWrap: {
