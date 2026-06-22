@@ -98,10 +98,13 @@ function MiniChordDiagram({ voicing, arpShape, theme, isMasked, scale, fitWidth,
     : (scale ?? 1);
 
   // Open-string ring stroke. SVG stroke is in viewBox units, so a fixed value gets heavy as the
-  // diagram scales up (the dictionary's big grids). Dividing by `s` keeps it ~2.6 screen-px at ANY
-  // size — an even outline. The stroke is centred on the radius, so a ring drawn at
-  // r = dotR − openRingSW/2 has its OUTER edge exactly on the fretted-dot radius (same overall size).
-  const openRingSW = 2.6 / s;
+  // diagram scales up (the dictionary's big grids). Dividing by `s` keeps it a constant screen-px
+  // outline at ANY size. The stroke is centred on the radius, so a ring drawn at r = dotR − openRingSW/2
+  // has its OUTER edge exactly on the fretted-dot radius (same overall size).
+  // When a note LABEL sits inside the ring, a thick stroke eats the hollow centre and covers the
+  // glyph — so the ring is drawn THIN with labels on (big hole for the letter/number) and bolder when
+  // there are no labels (the bare progression/shape view, where the ring is just an "open" marker).
+  const openRingSW = (showLabels ? 1.4 : 2.6) / s;
 
   // The negative margins below "tighten" the compact progression grid by trimming the
   // viewBox's dot padding. They scale with `s`, so in fit-to-box mode (the dictionary)
