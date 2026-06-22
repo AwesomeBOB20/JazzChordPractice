@@ -72,6 +72,17 @@ export const getAudioEngineHtml = (assets: any) => `
     dryBus.gain.value = MASTER_DRIVE;
     dryBus.connect(masterLimiter);
 
+    // Selectable tuner play-tones (PLAY_TONE tunerMode). Each is a recipe of harmonic SINE partials
+    // ([multiple, gain]) + a low-pass ceiling — all smooth (no buzz), all pitch-exact. The shared
+    // octave-up, equal-loudness tilt, attack swell, filter bloom and master reverb apply to every one.
+    const TONE_PRESETS = {
+      pure:   { partials: [[1, 1.0]],                              lp: 3500 }, // clean single sine
+      warm:   { partials: [[1, 1.0], [2, 0.45], [4, 0.09]],        lp: 3000 }, // round even-harmonic (default)
+      mellow: { partials: [[1, 1.0], [2, 0.25]],                   lp: 1900 }, // soft, dark, flute-like
+      glass:  { partials: [[1, 1.0], [2, 0.5], [4, 0.35], [6, 0.14]], lp: 4500 }, // bright, bell/glassy shimmer
+      organ:  { partials: [[1, 1.0], [2, 0.7], [3, 0.45], [4, 0.3]],  lp: 3500 }, // drawbar-ish (adds the 12th)
+    };
+
     const buffers = { piano: {}, guitar: {}, bass: {} };
     let activeSources = [];
     // Metronome click oscillators are tracked separately (NOT in activeSources, which the
@@ -475,36 +486,28 @@ export const getAudioEngineHtml = (assets: any) => `
               level *= Math.max(0.35, Math.min(1.7, tilt));
             }
             if (tunerMode) {
-              // Round, full tone built from EVEN/octave harmonics only — fundamental +
-              // octave + a soft double-octave. Even harmonics are octave-consonant, so it
-              // sounds round and smooth with some presence/air, but has NO odd partials
-              // (3rd/5th) and NO sawtooth, so it can't get reedy or buzzy. Deliberately
-              // NO sub-octave: that half-frequency tone rattles small phone speakers
-              // (the real source of the "buzz"). Low-pass is open so the high end stays.
-              const partials = [
-                { mult: 1.0, gain: 1.0 },   // fundamental (dominant → round)
-                { mult: 2.0, gain: 0.45 },  // octave — a touch more body for warmth
-                { mult: 4.0, gain: 0.09 },  // double-octave — softer top so it never edges
-              ];
-              const totalGain = partials.reduce((s, p) => s + p.gain, 0);
+              // The chosen tuner timbre (default warm). All recipes are harmonic SINES — octave-consonant,
+              // no sawtooth/odd-buzz — and stay pitch-exact (it's a tuning reference, no vibrato). The
+              // cutoff eases open across the attack (bloom) so every note rounds IN gently rather than
+              // arriving fully bright; the per-preset ceiling sets the steady-state air.
+              const preset = TONE_PRESETS[data.tone] || TONE_PRESETS.warm;
+              const partials = preset.partials;
+              const totalGain = partials.reduce((s, p) => s + p[1], 0);
               noteGain.gain.value = level / totalGain; // normalise the summed partials
               noteGain.connect(masterGain);
               const lp = audioCtx.createBiquadFilter();
               lp.type = 'lowpass';
               lp.Q.value = 0.5;
               lp.connect(noteGain);
-              // Soft "bloom": ease the cutoff open across the attack so each note rounds IN gently
-              // instead of arriving fully bright — this is what makes the onset feel smooth. The
-              // steady-state ceiling (3000) is unchanged, so the sustained air the tone already had
-              // is preserved; only the first ~0.2s is softened.
-              lp.frequency.setValueAtTime(1700, now);
-              lp.frequency.exponentialRampToValueAtTime(3000, now + 0.22);
+              const openHz = preset.lp;
+              lp.frequency.setValueAtTime(Math.min(1700, openHz * 0.6), now);
+              lp.frequency.exponentialRampToValueAtTime(openHz, now + 0.22);
               partials.forEach(p => {
                 const o = audioCtx.createOscillator();
                 o.type = 'sine';
-                o.frequency.value = freq * p.mult;
+                o.frequency.value = freq * p[0];
                 const g = audioCtx.createGain();
-                g.gain.value = p.gain;
+                g.gain.value = p[1];
                 o.connect(g);
                 g.connect(lp);
                 o.start(now);

@@ -243,6 +243,7 @@ const HELP_SECTIONS: HelpSection[] = [
       ] },
       { h: 'Play', b: [
         [I('volume-high'), ' Tap a string to sound its pitch; tap again to stop.'],
+        'Sound picker — choose the reference tone: Pure, Warm, Mellow, Glass, or Organ.',
       ] },
       { h: 'Setup', b: [
         [I('options'), ' Tunings: Standard, Drop D, ½ Step Down, Open G, DADGAD.'],

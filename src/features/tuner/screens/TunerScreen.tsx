@@ -52,6 +52,15 @@ const GRAPH_CENTER_X = NOTE_SCALE_WIDTH + GRAPH_AREA_WIDTH / 2;
 const VISIBLE_SEMITONE_RANGE = 10; // How many semitones to show vertically
 const HEADROOM_SEMITONES = 0.9; // Bias the chart so the live pitch line never touches the top
 
+// Selectable Play-mode reference tones (ids match TONE_PRESETS in audioEngine.ts).
+const TUNER_TONES: { id: string; label: string }[] = [
+  { id: 'pure', label: 'Pure' },
+  { id: 'warm', label: 'Warm' },
+  { id: 'mellow', label: 'Mellow' },
+  { id: 'glass', label: 'Glass' },
+  { id: 'organ', label: 'Organ' },
+];
+
 function calculatePitch(frequency: number, refFreq: number) {
   const A4_INDEX = 69;
   const noteFloat = 12 * Math.log2(frequency / refFreq) + A4_INDEX;
@@ -71,7 +80,7 @@ function findClosestString(midi: number, cents: number, strings: { name: string;
 export default function TunerScreen() {
   const insets = useSafeAreaInsets();
   const { playTone, stopAudio } = useAudio();
-  const { theme, referenceFrequency, fontFamily, isPro, openPaywall } = useSettingsStore();
+  const { theme, referenceFrequency, fontFamily, isPro, openPaywall, tunerTone, setTunerTone } = useSettingsStore();
   const svgFont = familyForWeight(fontFamily, '700');
   const t = THEMES[theme];
 
@@ -254,12 +263,20 @@ export default function TunerScreen() {
     } else {
       stopAudio();
       const s = tuningStrings[stringIdx];
-      // Smooth, continuous sine reference held until tapped off. The engine applies
-      // a per-note loudness tilt so it stays pleasant and undistorted across strings.
-      setTimeout(() => { playTone(s.midi, 100); }, 30);
+      // Smooth, continuous reference held until tapped off, in the user's chosen timbre. The engine
+      // applies a per-note loudness tilt so it stays pleasant and undistorted across strings.
+      setTimeout(() => { playTone(s.midi, 100, tunerTone); }, 30);
       setPlayingStringIdx(stringIdx);
     }
-  }, [tuningStrings, playTone, stopAudio, playingStringIdx]);
+  }, [tuningStrings, playTone, stopAudio, playingStringIdx, tunerTone]);
+
+  // Switch the reference timbre; if a string is sounding, re-trigger it so the change is heard at once
+  // (PLAY_TONE crossfades, so it's seamless).
+  const pickTone = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTunerTone(id);
+    if (playingStringIdx !== null) playTone(tuningStrings[playingStringIdx].midi, 100, id);
+  }, [setTunerTone, playingStringIdx, tuningStrings, playTone]);
 
   // Read live values out of refs (re-read every render-tick driven by the rAF loop).
   // `renderTick` is referenced so React doesn't bail on the dependency.
@@ -454,6 +471,22 @@ export default function TunerScreen() {
 
         {mode === 'play' && (
           <View style={styles.playWrap}>
+            {/* Sound picker — choose the reference timbre. */}
+            <View style={styles.toneRow}>
+              {TUNER_TONES.map(tone => {
+                const active = tunerTone === tone.id;
+                return (
+                  <TouchableOpacity
+                    key={tone.id}
+                    activeOpacity={0.7}
+                    onPress={() => pickTone(tone.id)}
+                    style={[styles.toneChip, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : t.bg2 }]}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: active ? '#fff' : t.txt2 }}>{tone.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <View style={styles.stringsColumn}>
               {tuningStrings.map((s, i) => {
                 const isPlaying = playingStringIdx === i;
@@ -537,7 +570,9 @@ const styles = StyleSheet.create({
   
   listenLayout: { width: '100%', overflow: 'hidden' },
   
-  playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 32, justifyContent: 'center' },
+  playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 24, justifyContent: 'center' },
+  toneRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 28 },
+  toneChip: { paddingHorizontal: 14, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 stringsColumn: { gap: 0 },
   stringRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },
   stringNum: { fontSize: 14, fontWeight: '700', width: 20, textAlign: 'center' },

@@ -47,6 +47,7 @@ export interface SettingsState {
   sortMode: 'list' | 'voicings';
   pianoKeyWidth: number;
   referenceFrequency: number;
+  tunerTone: string; // selected tuner play-tone timbre (pure / warm / mellow / glass / organ)
   isSettingsOpen: boolean;
   isTutorialOpen: boolean;
   octaveNumbering: boolean;
@@ -84,6 +85,7 @@ export interface SettingsState {
   setSortMode: (mode: 'list' | 'voicings') => void;
   setPianoKeyWidth: (width: number) => void;
   setReferenceFrequency: (freq: number) => void;
+  setTunerTone: (tone: string) => void;
   setIsSettingsOpen: (isOpen: boolean) => void;
   setIsTutorialOpen: (isOpen: boolean) => void;
   setMixChordVol:  (v: number) => void;
@@ -123,6 +125,7 @@ export const useSettingsStore = create<SettingsState>()(
       sortMode: 'list',
       pianoKeyWidth: 24,
       referenceFrequency: 440,
+      tunerTone: 'warm',
       isSettingsOpen: false,
       isTutorialOpen: false,
       octaveNumbering: false,
@@ -173,6 +176,7 @@ export const useSettingsStore = create<SettingsState>()(
       setSortMode: (sortMode) => set({ sortMode }),
       setPianoKeyWidth: (pianoKeyWidth) => set({ pianoKeyWidth }),
       setReferenceFrequency: (referenceFrequency) => set({ referenceFrequency }),
+      setTunerTone: (tunerTone) => set({ tunerTone }),
       setIsSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
       setIsTutorialOpen: (isTutorialOpen) => set({ isTutorialOpen }),
       setMixChordVol:  (mixChordVol)  => set({ mixChordVol }),
@@ -208,6 +212,7 @@ export const useSettingsStore = create<SettingsState>()(
         pianoZone: 4,
         colorMode: 'roles',
         referenceFrequency: 440,
+        tunerTone: 'warm',
         mixChordVol: 70,
         mixBassVol: 100,
         mixClickVol: 21,
@@ -238,6 +243,7 @@ export const useSettingsStore = create<SettingsState>()(
         instrument: state.instrument,
         sortMode: state.sortMode,
         referenceFrequency: state.referenceFrequency,
+        tunerTone: state.tunerTone,
         mixChordVol:  state.mixChordVol,
         mixBassVol:   state.mixBassVol,
         mixClickVol:  state.mixClickVol,

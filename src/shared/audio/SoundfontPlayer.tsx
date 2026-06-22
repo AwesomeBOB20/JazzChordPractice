@@ -18,7 +18,7 @@ export interface SoundfontPlayerRef {
   playArpLoop: (midiNotes: number[], bpm: number, volume: number, guitar?: boolean, arpSwing?: boolean) => void;
   stop: () => void;
   playMeasure: (midiNotes: number[], config: PlayMeasureConfig) => void;
-  playTone: (midi: number, volume: number) => void;
+  playTone: (midi: number, volume: number, tone?: string) => void;
   stopTone: () => void;
   playHoldChord: (midiNotes: number[], volume: number) => void;
   playProgression: (sequence: ProgressionMeasure[], onChordChange: (seqIdx: number, chordIdx: number) => void, onEnd: () => void, loop?: boolean) => void;
@@ -209,10 +209,10 @@ const SoundfontPlayer = React.memo(forwardRef<SoundfontPlayerRef>((_, ref) => {
       sendSchedule([{ instrument: guitar ? 'guitar' : 'piano', midi, volume: volume / 100, timeOffset: 0, durationMs, releaseMs: 350 }]);
     },
 
-    playTone: (midi, volume) => {
+    playTone: (midi, volume, tone) => {
       if (!isEngineReady || !webViewRef.current) return;
-      // tunerMode=true → engine shifts +1 octave, preserving E-A-D-G-B-E order.
-      webViewRef.current.postMessage(JSON.stringify({ type: 'PLAY_TONE', midis: [midi], volume: volume / 100, tunerMode: true }));
+      // tunerMode=true → engine shifts +1 octave, preserving E-A-D-G-B-E order. `tone` picks the timbre.
+      webViewRef.current.postMessage(JSON.stringify({ type: 'PLAY_TONE', midis: [midi], volume: volume / 100, tunerMode: true, tone }));
     },
 
     stopTone: () => {
