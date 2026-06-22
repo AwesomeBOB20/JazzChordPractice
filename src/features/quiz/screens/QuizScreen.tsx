@@ -1886,7 +1886,7 @@ const styles = StyleSheet.create({
   scoreLbl: { ...TYPE.caption, letterSpacing: 1 },
   scoreDivider: { width: 1, height: 24 },
   scoreResetBtn: { paddingHorizontal: 8, paddingVertical: 8 },
-  card: { borderTopWidth: 1, borderBottomWidth: 1, padding: 16 },
+  card: { borderBottomWidth: 1, padding: 16 },
   cardInner: { flexDirection: 'row', alignItems: 'stretch' },
   cardLeft: { flex: 1, paddingRight: 12, alignItems: 'center', justifyContent: 'center' },
   cardRight: { flex: 1.1, paddingLeft: 12, justifyContent: 'center' },
