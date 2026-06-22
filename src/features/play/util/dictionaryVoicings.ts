@@ -648,40 +648,54 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
     }
   }
 
+  // Each shell bass string hosts TWO physical sets (E bass = 654 consecutive + 643 skip, etc.). Split
+  // the morph by set so neither shape is hidden — each gets its own clean quality-by-inversion morph,
+  // labelled "654 · Root Position". Lexical sort puts the consecutive set (654) before the skip set
+  // (643). Other families have one implicit set (the one the dock already picked).
+  const compactSet = (key: string) => key.split(',').map(i => 6 - Number(i)).join('');
+  const setKeys: (string | null)[] = isShell
+    ? Array.from(new Set(entries.map(e => activeStringKey(e.voicing.frets)))).sort()
+    : [null];
+
   const sections: MorphSection[] = [];
-  for (let inv = 0; inv < 4; inv++) {
-    const byType = new Map<string, Entry>();
-    for (const e of entries) if (e.bucket === inv && !byType.has(e.type)) byType.set(e.type, e);
-    if (byType.size === 0) continue;
-    const list = [...byType.values()].sort((a, b) =>
-      morphDarkness(a.ch.iv) - morphDarkness(b.ch.iv) || types.indexOf(a.type) - types.indexOf(b.type));
-    const cells: MorphCell[] = list.map((e, i) => {
-      const toks = sortFormulaTokens(comboKeyOf(e.voicing, 'guitar').tokens);
-      let bassRole = '';
-      for (const f of e.voicing.frets) { if (f && f.fret != null) { bassRole = f.role; break; } }
-      const bp = bassPlain(bassRole);
-      return {
-        key: `${e.type}-${inv}-${i}`,
-        voicing: e.voicing,
-        chordName: `${rootName} ${(CH as any)[e.type].s}`,
-        symbol: (CH as any)[e.type].s,
-        chordType: e.type,
-        formula: toks.map(formulaGlyph).join(' '),
-        formulaTokens: toks,
-        bass: bp ? `${bp} in bass` : '',
-        playMidi: voicingMidi(e.voicing),
-      };
-    });
-    // In "All roots" mode the chosen root is meaningless (every cell is movable), so slide the whole
-    // group down to its lowest playable window — one shared shift, so the qualities stay vertically
-    // aligned for the morph comparison and the diagrams sit compactly near the nut (lowest fret = 1).
-    let outCells = cells;
-    if (allRoots) {
-      let gmin = Infinity;
-      for (const c of cells) { const m = minFretOf(c.voicing); if (m < gmin) gmin = m; }
-      if (gmin !== Infinity && gmin !== 1) outCells = cells.map(c => transposeMorphCell(c, 1 - gmin));
+  for (const setKey of setKeys) {
+    const groupEntries = setKey == null ? entries : entries.filter(e => activeStringKey(e.voicing.frets) === setKey);
+    const setLabel = setKey == null ? '' : compactSet(setKey);
+    for (let inv = 0; inv < 4; inv++) {
+      const byType = new Map<string, Entry>();
+      for (const e of groupEntries) if (e.bucket === inv && !byType.has(e.type)) byType.set(e.type, e);
+      if (byType.size === 0) continue;
+      const list = [...byType.values()].sort((a, b) =>
+        morphDarkness(a.ch.iv) - morphDarkness(b.ch.iv) || types.indexOf(a.type) - types.indexOf(b.type));
+      const cells: MorphCell[] = list.map((e, i) => {
+        const toks = sortFormulaTokens(comboKeyOf(e.voicing, 'guitar').tokens);
+        let bassRole = '';
+        for (const f of e.voicing.frets) { if (f && f.fret != null) { bassRole = f.role; break; } }
+        const bp = bassPlain(bassRole);
+        return {
+          key: `${setLabel}-${e.type}-${inv}-${i}`,
+          voicing: e.voicing,
+          chordName: `${rootName} ${(CH as any)[e.type].s}`,
+          symbol: (CH as any)[e.type].s,
+          chordType: e.type,
+          formula: toks.map(formulaGlyph).join(' '),
+          formulaTokens: toks,
+          bass: bp ? `${bp} in bass` : '',
+          playMidi: voicingMidi(e.voicing),
+        };
+      });
+      // In "All roots" mode the chosen root is meaningless (every cell is movable), so slide the whole
+      // group down to its lowest playable window — one shared shift, so the qualities stay vertically
+      // aligned for the morph comparison and the diagrams sit compactly near the nut (lowest fret = 1).
+      let outCells = cells;
+      if (allRoots) {
+        let gmin = Infinity;
+        for (const c of cells) { const m = minFretOf(c.voicing); if (m < gmin) gmin = m; }
+        if (gmin !== Infinity && gmin !== 1) outCells = cells.map(c => transposeMorphCell(c, 1 - gmin));
+      }
+      const label = setLabel ? `${setLabel} · ${MORPH_INV_LABELS[inv]}` : MORPH_INV_LABELS[inv];
+      sections.push({ inversionLabel: label, cells: outCells });
     }
-    sections.push({ inversionLabel: MORPH_INV_LABELS[inv], cells: outCells });
   }
   return sections;
 }
