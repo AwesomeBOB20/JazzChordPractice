@@ -122,16 +122,17 @@ export function TutorialModal({ visible, onDismiss }: Props) {
           ))}
         </View>
 
-        {/* Back / Next row */}
+        {/* Back / Next row — back only appears from slide 2 onwards */}
         <View style={styles.btnRow}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleBack}
-            disabled={isFirst}
-            style={[styles.btnSecondary, { borderColor: t.border, opacity: isFirst ? 0 : 1 }]}
-          >
-            <Ionicons name="chevron-back" size={20} color={t.txt1} />
-          </TouchableOpacity>
+          {!isFirst && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={handleBack}
+              style={[styles.btnSecondary, { borderColor: t.border }]}
+            >
+              <Ionicons name="chevron-back" size={20} color={t.txt1} />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             activeOpacity={0.8}
