@@ -277,7 +277,14 @@ function buildBarreVoicingsUncached(
 
   for (const shape of shapes) {
     let rootFret = (targetSemi - shape.rootSemi + 12) % 12;
-    if (rootFret === 0) continue; 
+    if (rootFret === 0) continue;
+
+    // Some shapes (e.g. the A-shape m9/dom9) fret a tone BELOW the root with a separate finger
+    // (a negative relative fret). At a low root position that tone falls below the nut and would be
+    // silently dropped — leaving, say, a Min 9 with no ♭3. Shift the whole grip up an octave so every
+    // tone stays on the neck and the chord keeps all its notes.
+    const minRel = Math.min(...shape.frets.filter((f): f is number => f !== null));
+    if (rootFret + minRel < 0) rootFret += 12;
 
     const fretsArr: VoicingFret[] = [];
     for (let i = 0; i < 6; i++) {
