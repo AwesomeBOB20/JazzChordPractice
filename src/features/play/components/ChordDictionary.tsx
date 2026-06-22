@@ -420,6 +420,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
       : buildMorphSections(effectiveCategory, rootSemi, stringSet!, effectiveAllRoots)),
     [morphActive, cagedMorph, effectiveCategory, rootSemi, stringSet, effectiveAllRoots, octave, selectedScaleId]
   );
+  const isQualityMorph = morphActive && !cagedMorph;
   // The inversion groups are collapsible accordion rows (like the browse view). They start CLOSED —
   // nothing opens until the user taps a row.
   const [morphExpanded, setMorphExpanded] = React.useState<Set<string>>(new Set());
@@ -477,7 +478,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   React.useEffect(() => { if (morphActive) morphScrollY.setValue(0); }, [morphActive, morphScrollY]);
   // Different axis/root/instrument → different grip heights, so drop stale section measurements (the sticky
   // math re-measures on the next layout). Open/closed state is intentionally preserved.
-  React.useEffect(() => { setMorphHeights({}); }, [effectiveCategory, instrument, stringSet, rootSemi]);
+  React.useEffect(() => { setMorphHeights({}); }, [effectiveCategory, instrument, stringSet, rootSemi, familyIdx]);
   // Changing the root (or family) re-renders different grips/chords → any armed selection no longer
   // maps cleanly, so disarm.
   React.useEffect(() => { setArmed(null); setArmedDiagram(null); }, [rootSemi, familyIdx]);
@@ -507,6 +508,36 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   const activeGroup = groupedSections[fIdx];
   // Items shown for this root (empties hidden so header counts match what's rendered).
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
+  // Chord-family morph: the family tabs (Triads / 7th Chords / …) split the qualities, so a string set
+  // doesn't dump every quality in one pile. Derived from the built cells, in CHORD_CATEGORIES order, so
+  // only families actually present (for this voicing type + string set) get a tab. (Caged morph already
+  // groups by family as sections, so it keeps the browse family bar.)
+  const morphFamilies = React.useMemo(() => {
+    if (!isQualityMorph) return [] as { label: string; count: number }[];
+    const byFam = new Map<string, Set<string>>();
+    for (const sec of morphSections) for (const c of sec.cells as any[]) {
+      const fam = c.family || 'Other';
+      (byFam.get(fam) ?? byFam.set(fam, new Set()).get(fam)!).add(c.chordType);
+    }
+    const out = (CHORD_CATEGORIES as any[]).filter(cc => byFam.has(cc.label)).map(cc => ({ label: cc.label, count: byFam.get(cc.label)!.size }));
+    byFam.forEach((set, label) => { if (!(CHORD_CATEGORIES as any[]).some(cc => cc.label === label)) out.push({ label, count: set.size }); });
+    return out;
+  }, [isQualityMorph, morphSections]);
+  const morphFIdx = morphFamilies.length ? Math.min(familyIdx, morphFamilies.length - 1) : 0;
+  const selectedMorphFamily = morphFamilies[morphFIdx]?.label;
+  // Apply the family filter to the inversion sections; empty inversions (e.g. triads have no 3rd) drop out.
+  const displayedMorphSections = React.useMemo(() => {
+    if (!isQualityMorph || !selectedMorphFamily) return morphSections;
+    return morphSections
+      .map(sec => ({ ...sec, cells: (sec.cells as any[]).filter(c => (c.family || 'Other') === selectedMorphFamily) }))
+      .filter(sec => sec.cells.length > 0);
+  }, [isQualityMorph, selectedMorphFamily, morphSections]);
+  // Family tab bar: browse uses the category's groups; the chord-family morph uses the quality families
+  // present in the built cells. Both feed setFamilyIdx by index, so the active highlight stays in sync.
+  const familyTabs = isQualityMorph
+    ? morphFamilies.map((f, i) => ({ label: f.label, count: f.count, idx: i }))
+    : groupedSections.map((g, gi) => ({ label: g.label, count: familyAvailItems[gi], idx: gi })).filter(tab => tab.count > 0);
+  const activeFamIdx = isQualityMorph ? morphFIdx : fIdx;
 
   // ── Pro preview: a free user tapping the (normal-looking) Dictionary lands here in PREVIEW mode.
   // PlayScreen wraps this in pointerEvents:none (non-interactive). We OPEN the sections so the screen
@@ -668,21 +699,20 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
             underline text-tabs (no pill fill) with the shared CountChip, so they read as SECONDARY
             to the filled voicing-type pills — one primary bar + one quiet bar, instead of two
             identical stacked rows. Empty families are hidden; shown only when ≥2 have chords. ── */}
-      {familyAvailItems.filter(n => n > 0).length > 1 && (
+      {familyTabs.length > 1 && (
         <View style={[styles.familyBar, { backgroundColor: t.bg, borderBottomColor: t.border }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 2 }}>
-            {groupedSections.map((g, gi) => {
-              if (familyAvailItems[gi] === 0) return null; // nothing here for this root → hide it
-              const isActive = gi === fIdx;
+            {familyTabs.map(tab => {
+              const isActive = tab.idx === activeFamIdx;
               return (
                 <TouchableOpacity
-                  key={g.label}
+                  key={tab.label}
                   activeOpacity={0.7}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setFamilyIdx(gi); }}
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setFamilyIdx(tab.idx); }}
                   style={[styles.familyTab, { borderBottomColor: isActive ? t.accent : 'transparent' }]}
                 >
-                  <Text style={[TYPE.body, { fontWeight: '700', color: isActive ? t.accent : t.txt3, includeFontPadding: false }]}>{g.label}</Text>
-                  <CountChip count={familyAvailItems[gi]} t={t} />
+                  <Text style={[TYPE.body, { fontWeight: '700', color: isActive ? t.accent : t.txt3, includeFontPadding: false }]}>{tab.label}</Text>
+                  <CountChip count={tab.count} t={t} />
                 </TouchableOpacity>
               );
             })}
@@ -705,9 +735,9 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
             scrollEventThrottle={16}
             onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: morphScrollY } } }], { useNativeDriver: true })}
           >
-            {morphSections.length === 0
+            {displayedMorphSections.length === 0
               ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>{cagedMorph ? 'Nothing in this box.' : 'No voicings on this string set.'}</Text>
-              : morphSections.map(sec => (
+              : displayedMorphSections.map(sec => (
                   <View key={sec.inversionLabel} onLayout={(e) => setMorphHeight(sec.inversionLabel, Math.round(e.nativeEvent.layout.height))}>
                     <MorphSectionGrid section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} allRoots={effectiveAllRoots} />
                   </View>
@@ -715,10 +745,10 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           </Animated.ScrollView>
           {/* Floating header per OPEN section — mirrors the browse overlay. Positions come from one
               cumulative height pass so opening/closing one can't leave another with a stale top. */}
-          {morphSections.length > 0 && (() => {
+          {displayedMorphSections.length > 0 && (() => {
             const H = PixelRatio.roundToNearestPixel(44); // styles.sectionHeader fixed height
             let acc = 0;
-            return morphSections.map(sec => {
+            return displayedMorphSections.map(sec => {
               const top = acc;
               const h = morphHeights[sec.inversionLabel] ?? H;
               const bottom = top + h;

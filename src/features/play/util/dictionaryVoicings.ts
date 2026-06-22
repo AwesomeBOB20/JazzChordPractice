@@ -547,6 +547,7 @@ export interface MorphCell {
   chordName: string;       // "C m7" (root + def.s)
   symbol: string;          // just the quality symbol ("m7") — used for the "ANY <quality>" all-roots label
   chordType: string;
+  family?: string;         // CHORD_CATEGORIES label (Triads / 7th Chords / …) — drives the morph family tabs
   label?: string;          // arp-family display name (scale / interval / shape / arp), shown in the TL corner
   formula: string;         // "1 ♭3 5 ♭7"
   formulaTokens: string[];
@@ -577,12 +578,15 @@ export const SHELL_MORPH_SETS: { key: string; bass: string; set: string; label: 
   { key: '2,4,5', bass: 'D Bass', set: '4-2-1', label: 'D Bass 4-2-1' },
 ];
 
-// Which chord tone sits in the bass → the inversion bucket (0 root · 1 third · 2 fifth · 3 seventh/sixth).
+// Which chord tone sits in the bass → the inversion bucket (0 root · 1 third-or-sus · 2 fifth ·
+// 3 seventh/sixth/extension). Matches roles EXACTLY (not substring) so a sus 4th/2nd counts as the
+// third (a sus triad tops out at 2nd inversion, no fake "3rd inversion"), while a 13th/b13th in the
+// bass is an extension (bucket 3), not mistaken for a third by an "includes('3')" match.
 function bassBucket(role: string): number {
   const r = (role || '').toLowerCase();
   if (r.includes('root') || r === 'r' || r === '1') return 0;
-  if (r.includes('3')) return 1;
-  if (r.includes('5')) return 2;
+  if (r === '3rd' || r === 'b3rd' || r === '#3rd' || r === '2nd' || r === '4th') return 1;
+  if (r === '5th' || r === 'b5th' || r === '#5th') return 2;
   return 3;
 }
 // Voice-leading "darkness": how flat a chord's tones sit vs major. Lower = brighter. Sorting ascending
@@ -665,6 +669,7 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
         chordName: `${rootName} ${(CH as any)[e.type].s}`,
         symbol: (CH as any)[e.type].s,
         chordType: e.type,
+        family: categoryOf(e.type),
         formula: toks.map(formulaGlyph).join(' '),
         formulaTokens: toks,
         bass: bp ? `${bp} in bass` : '',
