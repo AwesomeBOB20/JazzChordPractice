@@ -267,6 +267,20 @@ function RootPicker({ open, rootSemi, t, onPick, onClose }: {
   );
 }
 
+// One morph section header. Shared by the in-list row AND its floating sticky copy so the takeover is
+// pixel-identical (same accordion style as the browse view's renderHeader).
+function MorphHeader({ label, count, open, onToggle, t }: any) {
+  return (
+    <TouchableOpacity activeOpacity={0.7} onPress={onToggle} style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{label}</Text>
+        <CountChip count={count} t={t} solid />
+      </View>
+      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
+    </TouchableOpacity>
+  );
+}
+
 // ── MORPH VIEW: one inversion group → a flat grid of every quality on the chosen string set, in
 // morph order. Mirrors DictSectionRow's flat-grid cell sizing/borders, but the corners read
 // quality (name) · formula · bass, and the inversion is the section header. ──
@@ -295,14 +309,8 @@ function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode,
   );
   return (
     <View>
-      {/* Collapsible inversion row — same accordion header style as the browse view. */}
-      <TouchableOpacity activeOpacity={0.7} onPress={onToggle} style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}>
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{section.inversionLabel}</Text>
-          <CountChip count={items.length} t={t} solid />
-        </View>
-        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
-      </TouchableOpacity>
+      {/* Collapsible header — shared with the floating sticky copy (see MorphHeader). */}
+      <MorphHeader label={section.inversionLabel} count={items.length} open={open} onToggle={onToggle} t={t} />
       {open && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderLeftWidth: DIVIDER, borderTopWidth: DIVIDER, borderColor: t.border }}>
           {items.map((it) => (
@@ -458,7 +466,18 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   const setItemHeight = React.useCallback((key: string, h: number) => setHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
   const headerHRef = React.useRef(40); // measured section-header height — drives the slide distance
   const scrollY = React.useRef(new Animated.Value(0)).current; // native-driven scroll offset
+  // Morph view gets the SAME floating-sticky-header treatment as the browse list, on its own scroll
+  // value + measured section heights (keyed by section label) so the two never cross-talk.
+  const [morphHeights, setMorphHeights] = React.useState<Record<string, number>>({});
+  const setMorphHeight = React.useCallback((key: string, h: number) => setMorphHeights(prev => prev[key] === h ? prev : ({ ...prev, [key]: h })), []);
+  const morphScrollY = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => { setExpanded(new Set()); setPendingUnmount(new Set()); setFamilyIdx(0); setHeights({}); setArmed(null); setArmedDiagram(null); }, [effectiveCategory, instrument]);
+  // The morph ScrollView remounts at offset 0 each time the grid flips into morph mode, so re-zero its
+  // animated scroll value to match — otherwise a stale offset could show a floating header before any scroll.
+  React.useEffect(() => { if (morphActive) morphScrollY.setValue(0); }, [morphActive, morphScrollY]);
+  // Different axis/root/instrument → different grip heights, so drop stale section measurements (the sticky
+  // math re-measures on the next layout). Open/closed state is intentionally preserved.
+  React.useEffect(() => { setMorphHeights({}); }, [effectiveCategory, instrument, stringSet, rootSemi]);
   // Changing the root (or family) re-renders different grips/chords → any armed selection no longer
   // maps cleanly, so disarm.
   React.useEffect(() => { setArmed(null); setArmedDiagram(null); }, [rootSemi, familyIdx]);
@@ -676,13 +695,46 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
             OPEN item's header at the top while its diagrams are scrolled under it, driven by scroll
             position + measured layouts. Same behaviour on both platforms. ── */}
       {morphActive ? (
-        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-          {morphSections.length === 0
-            ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>{cagedMorph ? 'Nothing in this box.' : 'No voicings on this string set.'}</Text>
-            : morphSections.map(sec => (
-                <MorphSectionGrid key={sec.inversionLabel} section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} allRoots={effectiveAllRoots} />
-              ))}
-        </ScrollView>
+        // Same floating-sticky-header treatment as the browse list (its own scroll value + measured
+        // section heights): the open section's header pins to the top while its grid scrolls under it.
+        <View style={{ flex: 1, overflow: 'hidden' }}>
+          <Animated.ScrollView
+            style={{ flex: 1 }}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 32 }}
+            scrollEventThrottle={16}
+            onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: morphScrollY } } }], { useNativeDriver: true })}
+          >
+            {morphSections.length === 0
+              ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>{cagedMorph ? 'Nothing in this box.' : 'No voicings on this string set.'}</Text>
+              : morphSections.map(sec => (
+                  <View key={sec.inversionLabel} onLayout={(e) => setMorphHeight(sec.inversionLabel, Math.round(e.nativeEvent.layout.height))}>
+                    <MorphSectionGrid section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} allRoots={effectiveAllRoots} />
+                  </View>
+                ))}
+          </Animated.ScrollView>
+          {/* Floating header per OPEN section — mirrors the browse overlay. Positions come from one
+              cumulative height pass so opening/closing one can't leave another with a stale top. */}
+          {morphSections.length > 0 && (() => {
+            const H = PixelRatio.roundToNearestPixel(44); // styles.sectionHeader fixed height
+            let acc = 0;
+            return morphSections.map(sec => {
+              const top = acc;
+              const h = morphHeights[sec.inversionLabel] ?? H;
+              const bottom = top + h;
+              acc = bottom;
+              if (!morphExpanded.has(sec.inversionLabel)) return null;
+              if (bottom - top <= H) return null; // header only, nothing to stick under
+              const opacity = morphScrollY.interpolate({ inputRange: [top - 1, top], outputRange: [0, 1], extrapolate: 'clamp' });
+              const translateY = morphScrollY.interpolate({ inputRange: [bottom - H, bottom], outputRange: [0, -H], extrapolate: 'clamp' });
+              return (
+                <Animated.View key={`mfloat-${sec.inversionLabel}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, opacity, transform: [{ translateY }] }} pointerEvents="box-none">
+                  <MorphHeader label={sec.inversionLabel} count={sec.cells.length} open onToggle={() => toggleMorph(sec.inversionLabel)} t={t} />
+                </Animated.View>
+              );
+            });
+          })()}
+        </View>
       ) : (
       <View style={{ flex: 1, overflow: 'hidden' }}>
         <Animated.ScrollView
