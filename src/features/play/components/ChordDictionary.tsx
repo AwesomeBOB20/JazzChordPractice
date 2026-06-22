@@ -10,8 +10,10 @@ import { useDictionaryStore, DictionaryCategory } from '@features/play/store/dic
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useAudio } from '@shared/audio/AudioContext';
-import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem } from '@features/play/util/dictionaryVoicings';
+import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, MORPH_CATEGORIES, MorphSection } from '@features/play/util/dictionaryVoicings';
 import { dictionaryGroups, tabKind, ALL_CATEGORIES, DictGroup } from '@features/play/util/dictionaryGroups';
+import { STRING_SETS_BY_TYPE } from '@shared/guitar';
+import { formatChordSymbol } from '@shared/theory/core/nomenclature';
 
 // ─── EXPLORE — DICTIONARY MODE (version 2) ──────────────────────────────────
 // A self-contained reference grid. Pick a voicing TYPE (chips) + ROOT (sticky
@@ -265,6 +267,54 @@ function RootPicker({ open, rootSemi, t, onPick, onClose }: {
   );
 }
 
+// ── MORPH VIEW: one inversion group → a flat grid of every quality on the chosen string set, in
+// morph order. Mirrors DictSectionRow's flat-grid cell sizing/borders, but the corners read
+// quality (name) · formula · bass, and the inversion is the section header. ──
+function MorphSectionGrid({ section, L, t, rootSemi, namingMode, labelMode, onPlay, colorMode, selectiveRoles }: any) {
+  const items: any[] = section.cells;
+  const CELL_PAD = 8;
+  const innerW = Math.max(40, L.cellW - CELL_PAD * 2);
+  const MAX_SCALE = L.cols === 1 ? 4.2 : L.cols === 2 ? 2.8 : 2.0;
+  const MAX_BOX_H = L.cols === 1 ? 240 : L.cols === 2 ? 168 : 116;
+  const boxH = Math.round(Math.min(MAX_BOX_H, Math.max(60, ...items.map((it: any) => {
+    const fp = miniChordFootprint(it.voicing, undefined);
+    return fp.h * Math.min(MAX_SCALE, innerW / fp.w);
+  }))));
+  const guitarCellH = PixelRatio.roundToNearestPixel(boxH + (L.cornerFs + 9) * 2);
+  const pill = (text: string | undefined, anchor: any, accent?: boolean) => !text ? null : (
+    <View style={[styles.cornerPill, anchor, accent ? { backgroundColor: t.accent } : { backgroundColor: t.bg2 }]}>
+      <Text numberOfLines={1} style={{ fontSize: L.cornerFs, fontWeight: accent ? '800' : '700', color: accent ? '#fff' : t.txt3, maxWidth: L.cellW * 0.62 }}>{text}</Text>
+    </View>
+  );
+  const formulaPill = (tokens: string[], anchor: any) => (
+    <View style={[styles.cornerPill, anchor, { backgroundColor: t.bg2 }]}>
+      <Text numberOfLines={1} style={{ fontSize: L.cornerFs, fontWeight: '700', maxWidth: L.cellW * 0.5 }}>
+        {tokens.map((tk, i) => <Text key={i} style={{ fontWeight: '700', color: getNoteColor(tk, colorMode, t, selectiveRoles) }}>{formulaGlyph(tk)}{i < tokens.length - 1 ? ' ' : ''}</Text>)}
+      </Text>
+    </View>
+  );
+  return (
+    <View>
+      <View style={[styles.sectionHeader, { borderBottomColor: t.border }]}>
+        <Text style={[TYPE.body, { fontWeight: '800', color: t.txt1 }]}>{section.inversionLabel}</Text>
+        <Text style={{ fontSize: L.cornerFs, fontWeight: '700', color: t.txt3 }}>{items.length}</Text>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderLeftWidth: DIVIDER, borderTopWidth: DIVIDER, borderColor: t.border }}>
+        {items.map((it) => (
+          <TouchableOpacity key={it.key} activeOpacity={0.7} onPress={() => onPlay(it)} style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: guitarCellH, paddingVertical: 0 }]}>
+            <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
+              <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={rootSemi} />
+            </View>
+            {pill(formatChordSymbol(it.chordName), styles.cTL, true)}
+            {formulaPill(it.formulaTokens, styles.cBL)}
+            {pill(it.bass, styles.cBR)}
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 interface Props { t: Theme; preview?: boolean; onPreviewEnd?: () => void; }
 
 export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
@@ -276,7 +326,9 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   const setChord = useChordStore((s: any) => s.setChord);
   const setPendingVoicingTab = useChordStore((s: any) => s.setPendingVoicingTab);
   const setPendingVoicing = useChordStore((s: any) => s.setPendingVoicing);
-  const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode } = useDictionaryStore();
+  const { category, setCategory, rootSemi, setRootSemi, allRoots, setAllRoots, cols, setCols, setMode, stringSet, setStringSet } = useDictionaryStore();
+  const colorMode = useSettingsStore((s: any) => s.colorMode);
+  const selectiveRoles = useSettingsStore((s: any) => s.selectiveRoles);
   // "All roots" is guitar-only — never let a piano frame paint the aggregated view.
   const effectiveAllRoots = allRoots && instrument === 'guitar';
   const { playChord, stopAudio } = useAudio();
@@ -338,6 +390,17 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
 
   const isChordQuality = tabKind(effectiveCategory) === 'chordQuality';
   const groupedSections = groupsByCat[effectiveCategory] ?? [];
+
+  // Spell the diagrams' note labels by the root's key (flat roots → flats), matching the rest of the app.
+  const namingMode: 'sharp' | 'flat' = FLAT_ROOTS.includes(rootSemi) ? 'flat' : 'sharp';
+  // MORPH view: guitar only, on a triad/drop family, with a string set picked from the dock. When on,
+  // the grid compares every quality on that one string set, grouped by inversion, in morph order.
+  const morphEligible = instrument === 'guitar' && MORPH_CATEGORIES.has(effectiveCategory);
+  const morphActive = morphEligible && !!stringSet;
+  const morphSections: MorphSection[] = React.useMemo(
+    () => (morphActive ? buildMorphSections(effectiveCategory, rootSemi, stringSet!) : []),
+    [morphActive, effectiveCategory, rootSemi, stringSet]
+  );
 
   // Accordion: items collapsed by default so only opened ones build their diagrams
   // (keeps scrolling smooth + the list short). Category/instrument change collapses all.
@@ -593,6 +656,15 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
             renders differently web vs phone — lingering/clipping); instead we pin our own copy of the
             OPEN item's header at the top while its diagrams are scrolled under it, driven by scroll
             position + measured layouts. Same behaviour on both platforms. ── */}
+      {morphActive ? (
+        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+          {morphSections.length === 0
+            ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>No voicings on this string set.</Text>
+            : morphSections.map(sec => (
+                <MorphSectionGrid key={sec.inversionLabel} section={sec} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} />
+              ))}
+        </ScrollView>
+      ) : (
       <View style={{ flex: 1, overflow: 'hidden' }}>
         <Animated.ScrollView
           style={{ flex: 1 }}
@@ -708,6 +780,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           });
         })()}
       </View>
+      )}
 
       {/* ── Spin dial (slides up from behind the dock when the root chip is tapped) ── */}
       <RootPicker open={dialOpen} rootSemi={rootSemi} t={t} onPick={pickRoot} onClose={closeDial} />
@@ -735,6 +808,23 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           <Text style={{ color: effectiveAllRoots ? t.txt3 : '#fff', fontSize: 22, fontWeight: '800' }}>{rootName(rootSemi)}</Text>
           <Ionicons name={dialOpen ? 'chevron-down' : 'chevron-up'} size={15} color={effectiveAllRoots ? t.txt3 : 'rgba(255,255,255,0.85)'} style={{ marginLeft: 4 }} />
         </TouchableOpacity>
+        {/* String Set — guitar, triad/drop families only. Cycles Any → each set; selecting one flips the
+            grid into MORPH mode (every quality on that set, grouped by inversion, in morph order). */}
+        {morphEligible && (() => {
+          const sets = STRING_SETS_BY_TYPE[effectiveCategory] || [];
+          const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
+          const curLabel = stringSet ? (sets.find(s => s.key === stringSet)?.label ?? stringSet) : 'Any';
+          return (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); stopAudio?.(); const idx = keys.indexOf(stringSet); setStringSet(keys[(idx + 1) % keys.length]); }}
+              style={[styles.dockIcon, { width: 66, borderColor: stringSet ? t.accent : t.border, backgroundColor: stringSet ? t.accent : t.bg2 }]}
+            >
+              <Text style={{ fontSize: 8, fontWeight: '800', color: stringSet ? '#fff' : t.txt3 }}>STRINGS</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', marginTop: 1, color: stringSet ? '#fff' : t.txt1 }}>{curLabel}</Text>
+            </TouchableOpacity>
+          );
+        })()}
         {/* Columns — one button that cycles 1 → 2 → 3 diagrams per row (stacks instead of 3 buttons). */}
         <TouchableOpacity
           activeOpacity={0.7}

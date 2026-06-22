@@ -22,16 +22,22 @@ export interface DictionaryState {
   rootSemi: number;
   allRoots: boolean; // guitar-only "All roots" view (dedup distinct shapes across all 12 roots)
   cols: number; // diagrams per row in the grid (1 | 2 | 3)
+  // MORPH view (guitar, triads/shells/drop families only): when a string-set key is selected, the grid
+  // flips from "browse qualities" to "compare every quality on THIS string set, grouped by inversion,
+  // in voice-leading (morph) order". null = off = normal browse. The key is one of STRING_SETS_BY_TYPE
+  // for the current category; cleared automatically when it isn't valid for the active category.
+  stringSet: string | null;
 
   setMode: (mode: ExploreMode) => void;
   setCategory: (category: DictionaryCategory) => void;
   setRootSemi: (rootSemi: number) => void;
   setAllRoots: (allRoots: boolean) => void;
   setCols: (cols: number) => void;
+  setStringSet: (stringSet: string | null) => void;
   reset: () => void;
 }
 
-const DICTIONARY_DEFAULTS = { mode: 'chord' as ExploreMode, category: 'triads' as DictionaryCategory, rootSemi: 0, allRoots: false, cols: 2 };
+const DICTIONARY_DEFAULTS = { mode: 'chord' as ExploreMode, category: 'triads' as DictionaryCategory, rootSemi: 0, allRoots: false, cols: 2, stringSet: null as string | null };
 
 export const useDictionaryStore = create<DictionaryState>()(
   persist(
@@ -39,10 +45,13 @@ export const useDictionaryStore = create<DictionaryState>()(
       ...DICTIONARY_DEFAULTS,
 
       setMode: (mode) => set({ mode }),
-      setCategory: (category) => set({ category }),
       setRootSemi: (rootSemi) => set({ rootSemi }),
       setAllRoots: (allRoots) => set({ allRoots }),
       setCols: (cols) => set({ cols }),
+      setStringSet: (stringSet) => set({ stringSet }),
+      // Switching the voicing family invalidates any selected string set (the sets differ per family),
+      // so clear morph mode on category change.
+      setCategory: (category) => set({ category, stringSet: null }),
       reset: () => set({ ...DICTIONARY_DEFAULTS }),
     }),
     {

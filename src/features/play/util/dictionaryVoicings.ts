@@ -534,3 +534,103 @@ export function getDictionaryVoicingsAllRoots(
     })
     .map(c => c.item);
 }
+
+// ─── MORPH VIEW (guitar) ─────────────────────────────────────────────────────
+// "Pick a string set, see every quality on it." Fixes the root + voicing family + string set, then
+// lays the qualities out grouped by INVERSION, each group in voice-leading (morph) order — so you
+// watch a note slide a fret as the quality changes (maj7 → 7 → m7 → m7♭5 → dim7).
+
+export interface MorphCell {
+  key: string;
+  voicing: any;            // guitar grip → MiniChordDiagram `voicing`
+  chordName: string;       // "C m7" (root + def.s)
+  chordType: string;
+  formula: string;         // "1 ♭3 5 ♭7"
+  formulaTokens: string[];
+  bass: string;            // "♭3 in bass"
+  playMidi: number[];
+}
+export interface MorphSection { inversionLabel: string; cells: MorphCell[]; }
+
+const MORPH_INV_LABELS = ['Root Position', '1st Inversion', '2nd Inversion', '3rd Inversion'];
+// Voicing families that support the morph view (clean, fixed string sets). Guitar only.
+export const MORPH_CATEGORIES = new Set<DictionaryCategory>(['triads', 'drop2', 'drop3', 'drop2and4']);
+
+// The active string-index set of a grip, as a STRING_SETS_BY_TYPE key (sorted indices, 0 = low E).
+const activeStringKey = (frets: any[]): string =>
+  (frets || []).map((f: any, i: number) => (f && f.fret != null ? i : null))
+    .filter((x: any): x is number => x != null).sort((a, b) => a - b).join(',');
+
+// Which chord tone sits in the bass → the inversion bucket (0 root · 1 third · 2 fifth · 3 seventh/sixth).
+function bassBucket(role: string): number {
+  const r = (role || '').toLowerCase();
+  if (r.includes('root') || r === 'r' || r === '1') return 0;
+  if (r.includes('3')) return 1;
+  if (r.includes('5')) return 2;
+  return 3;
+}
+// Voice-leading "darkness": how flat a chord's tones sit vs major. Lower = brighter. Sorting ascending
+// yields the morph order — aug(-1) → maj7(0) → 7(1) → m7(2) → m7♭5(3) → dim7(4).
+function morphDarkness(iv: number[]): number {
+  let d = 0;
+  for (const x of iv) {
+    const pc = (((x % 12) + 12) % 12);
+    if (pc === 3) d += 1;        // ♭3
+    else if (pc === 6) d += 1;   // ♭5
+    else if (pc === 8) d -= 1;   // ♯5 (brighter)
+    else if (pc === 10) d += 1;  // ♭7
+    else if (pc === 9) d += 2;   // ♭♭7 / 6
+  }
+  return d;
+}
+
+export function buildMorphSections(category: DictionaryCategory, rootSemi: number, stringSetKey: string): MorphSection[] {
+  if (!MORPH_CATEGORIES.has(category)) return [];
+  const namingMode = namingOf(rootSemi);
+  const rootName = rootNameOf(rootSemi);
+  const types = ORDERED_TYPES.filter(ct => dictionaryMember(category, 'guitar', ct));
+
+  type Entry = { type: string; ch: any; voicing: any; bucket: number };
+  const entries: Entry[] = [];
+  for (const ct of types) {
+    const def = (CH as any)[ct];
+    if (!def) continue;
+    const chordName = `${rootName} ${def.l}`;
+    let groups: any[] = [];
+    if (category === 'triads') groups = buildTriadVoicings(def, rootSemi, rootName, namingMode);
+    else groups = buildDropVoicings(ct, def, rootSemi, rootName, chordName, namingMode).filter((g: any) => g.voicings[0]?.type === category);
+    for (const g of groups) {
+      for (const v of g.voicings) {
+        if (activeStringKey(v.frets) !== stringSetKey) continue;
+        entries.push({ type: ct, ch: def, voicing: v, bucket: bassBucket(v.bassNote) });
+      }
+    }
+  }
+
+  const sections: MorphSection[] = [];
+  for (let inv = 0; inv < 4; inv++) {
+    const byType = new Map<string, Entry>();
+    for (const e of entries) if (e.bucket === inv && !byType.has(e.type)) byType.set(e.type, e);
+    if (byType.size === 0) continue;
+    const list = [...byType.values()].sort((a, b) =>
+      morphDarkness(a.ch.iv) - morphDarkness(b.ch.iv) || types.indexOf(a.type) - types.indexOf(b.type));
+    const cells: MorphCell[] = list.map((e, i) => {
+      const toks = sortFormulaTokens(comboKeyOf(e.voicing, 'guitar').tokens);
+      let bassRole = '';
+      for (const f of e.voicing.frets) { if (f && f.fret != null) { bassRole = f.role; break; } }
+      const bp = bassPlain(bassRole);
+      return {
+        key: `${e.type}-${inv}-${i}`,
+        voicing: e.voicing,
+        chordName: `${rootName} ${(CH as any)[e.type].s}`,
+        chordType: e.type,
+        formula: toks.map(formulaGlyph).join(' '),
+        formulaTokens: toks,
+        bass: bp ? `${bp} in bass` : '',
+        playMidi: voicingMidi(e.voicing),
+      };
+    });
+    sections.push({ inversionLabel: MORPH_INV_LABELS[inv], cells });
+  }
+  return sections;
+}
