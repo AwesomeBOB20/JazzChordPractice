@@ -153,7 +153,7 @@ const HELP_SECTIONS: HelpSection[] = [
         'Bottom-right — the bass note ("Root in bass", "3rd in bass"…).',
       ] },
       { h: 'Compare Mode', b: [
-        'Guitar only. In Triads, Shells, Drop 2 / 3 / 2&4, tap STRINGS in the dock to pick a string set (Shells use guide-tone pairs — E&A or A&D bass). The grid then lays every chord quality on that set side by side, grouped by inversion and ordered so one note slides at a time: maj7 → 7 → m7 → m7♭5 → dim7.',
+        'Guitar only. In Triads, Shells, Drop 2 / 3 / 2&4, tap STRINGS in the dock to pick a string set (Shells split by bass string — E, A or D bass). The grid then lays every chord quality on that set side by side, grouped by inversion and ordered so one note slides at a time: maj7 → 7 → m7 → m7♭5 → dim7.',
         'In Scales, Arps, Intervals and Shapes the button becomes BOX — pick Box 1–5 to compare every scale / arpeggio / interval / shape in that CAGED position up the neck.',
         'Tap a section row to open or close it. With All on, the shapes are drawn at the lowest fret and labelled ANY.',
       ] },

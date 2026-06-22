@@ -10,7 +10,7 @@ import { useDictionaryStore, DictionaryCategory } from '@features/play/store/dic
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useAudio } from '@shared/audio/AudioContext';
-import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, buildCagedMorphSections, MORPH_CATEGORIES, CAGED_MORPH_CATEGORIES, CAGED_MORPH_BOXES, MorphSection } from '@features/play/util/dictionaryVoicings';
+import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, buildCagedMorphSections, MORPH_CATEGORIES, CAGED_MORPH_CATEGORIES, CAGED_MORPH_BOXES, SHELL_BASS_SETS, MorphSection } from '@features/play/util/dictionaryVoicings';
 import { dictionaryGroups, tabKind, ALL_CATEGORIES, DictGroup } from '@features/play/util/dictionaryGroups';
 import { STRING_SETS_BY_TYPE } from '@shared/guitar';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
@@ -884,6 +884,8 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
         {morphEligible && (() => {
           const sets = cagedMorph
             ? Array.from({ length: CAGED_MORPH_BOXES }, (_, i) => ({ key: String(i + 1), label: `Box ${i + 1}` }))
+            : effectiveCategory === 'shells'
+            ? SHELL_BASS_SETS
             : (STRING_SETS_BY_TYPE[effectiveCategory] || []);
           const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
           const curLabel = stringSet ? (sets.find(s => s.key === stringSet)?.label ?? stringSet) : 'Any';

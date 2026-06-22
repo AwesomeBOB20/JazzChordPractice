@@ -564,25 +564,19 @@ const activeStringKey = (frets: any[]): string =>
   (frets || []).map((f: any, i: number) => (f && f.fret != null ? i : null))
     .filter((x: any): x is number => x != null).sort((a, b) => a - b).join(',');
 
-// Shells pin the GUIDE TONES (3rd + 7th) to a string PAIR while the root bounces onto a lower bass
-// string — so the morph axis for shells is that guide-tone lock (b01 = E&A bass → guides on the D&G
-// strings; b12 = A&D bass → guides on the G&B strings), NOT a physical string set. Mirrors
-// SHELL_LOCK_GUIDE_STRINGS / SHELL_G3 / SHELL_G7 in voiceLeading.ts (kept in sync).
-const SHELL_LOCK_GUIDE_STRINGS: Record<string, [number, number]> = { b01: [2, 3], b12: [3, 4] };
-const SHELL_G3 = new Set(['3rd', 'b3rd', '4th', '2nd']);
-const SHELL_G7 = new Set(['7th', 'b7th', 'bb7', '6th']);
-// True when a shell grip's 3rd AND 7th sit exactly on the locked guide-string pair (root anywhere).
-function shellOnLock(frets: any[], lockKey: string): boolean {
-  const pair = SHELL_LOCK_GUIDE_STRINGS[lockKey];
-  if (!pair) return false;
-  let s3: number | null = null, s7: number | null = null;
-  (frets || []).forEach((f: any, i: number) => {
-    if (f && f.fret != null) { if (SHELL_G3.has(f.role)) s3 = i; else if (SHELL_G7.has(f.role)) s7 = i; }
-  });
-  if (s3 == null || s7 == null || s3 === s7) return false;
-  const a: number = s3, b: number = s7;
-  return (a === pair[0] || a === pair[1]) && (b === pair[0] || b === pair[1]);
-}
+// Shells are divided by which string carries the BASS — E (6th), A (5th) or D (4th) — exactly how the
+// Shells browse tab groups them (BASS_STR_LABEL in voicings.ts). That's the morph axis for shells: pick
+// a bass string, see every quality's shell sitting on it, grouped by inversion.
+export const SHELL_BASS_SETS: { key: string; label: string }[] = [
+  { key: '0', label: 'E Bass' },
+  { key: '1', label: 'A Bass' },
+  { key: '2', label: 'D Bass' },
+];
+// The string index carrying the bass (lowest fretted) note of a grip; -1 if none.
+const bassStringOf = (frets: any[]): number => {
+  for (let i = 0; i < (frets || []).length; i++) if (frets[i] && frets[i].fret != null) return i;
+  return -1;
+};
 
 // Which chord tone sits in the bass → the inversion bucket (0 root · 1 third · 2 fifth · 3 seventh/sixth).
 function bassBucket(role: string): number {
@@ -646,8 +640,8 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
     else groups = buildDropVoicings(ct, def, rootSemi, rootName, chordName, namingMode).filter((g: any) => g.voicings[0]?.type === category);
     for (const g of groups) {
       for (const v of g.voicings) {
-        // Shells match on the guide-tone lock (3rd+7th string pair); everything else on the physical set.
-        const onSet = isShell ? shellOnLock(v.frets, stringSetKey) : activeStringKey(v.frets) === stringSetKey;
+        // Shells match on the bass string (E/A/D); everything else on the physical string set.
+        const onSet = isShell ? bassStringOf(v.frets) === Number(stringSetKey) : activeStringKey(v.frets) === stringSetKey;
         if (!onSet) continue;
         entries.push({ type: ct, ch: def, voicing: v, bucket: bassBucket(v.bassNote) });
       }
