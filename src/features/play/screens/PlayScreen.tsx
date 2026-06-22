@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Animated, Platform, useWindowDimensions, Easing
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Freeze } from 'react-freeze';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
@@ -1353,7 +1354,14 @@ function VoicingExplorer({
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
 
         <View style={{ justifyContent: 'center' }}>
-          {instrument === 'piano' ? (
+          {/* Both instrument views stay MOUNTED; we toggle display + freeze the inactive one, so
+              switching Piano⇄Guitar is an instant visibility flip instead of unmounting one heavy
+              SVG+gesture tree and remounting the other (the lag). react-freeze keeps the hidden view
+              mounted but skips its re-renders on chord changes — so chord-change cost is unchanged and
+              the only mount happens once, the first time each instrument is shown. Mirrors the
+              Chord⇄Dictionary fix (08468ec). */}
+          <View style={{ display: instrument === 'piano' ? 'flex' : 'none' }}>
+            <Freeze freeze={instrument !== 'piano'}>
             <PianoView
               ref={pianoRef} leftSlot={chordCardSlot} showAllLabels={true} header={combinedHeader} showMiniMap={false} onMiniMap={setMapNode} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
               groupLabel="CHORD" voicingLabel={voicingTab === 'arps' || voicingTab === 'intervals' ? 'SUBSET' : 'VOICING'}
@@ -1372,7 +1380,10 @@ function VoicingExplorer({
               onNotePress={sPianoNotePress}
               octave={octave} labelMode={labelMode} rootSemi={rootSemi} namingMode={namingMode} scaleOverlay={overlayActive && voicingTab !== 'scales'} overlayNotes={pianoOverlayMidiNotes.notes} overlayRoles={pianoOverlayMidiNotes.roles} overlayFormulas={pianoOverlayMidiNotes.formulas} parentScales={EMPTY_ARR} activeParentScale={selectedScaleId} onParentScaleChange={setSelectedScaleId}
             />
-          ) : (
+            </Freeze>
+          </View>
+          <View style={{ display: instrument === 'guitar' ? 'flex' : 'none' }}>
+            <Freeze freeze={instrument !== 'guitar'}>
             <FretboardView
               ref={fretboardRef} leftSlot={chordCardSlot} header={combinedHeader} showMiniMap={false} onMiniMap={setMapNode} groups={guitarGroups} theme={t} defaultGroupIdx={0}
               onNotePress={sGuitarNotePress} onNavigate={sFretNavigate}
@@ -1387,7 +1398,8 @@ function VoicingExplorer({
               selectedScaleId={selectedScaleId} onScaleChange={setSelectedScaleId}
               targetVoicing={targetVoicing} onTargetVoicingApplied={sTargetApplied}
             />
-          )}
+            </Freeze>
+          </View>
         </View>
 
       </ScrollView>
