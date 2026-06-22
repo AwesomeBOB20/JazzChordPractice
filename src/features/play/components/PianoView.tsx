@@ -677,10 +677,12 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
   }, [onMiniMap, midiKey, colorMode, theme, accentColor, rootSemi, miniContentWidth, viewW]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
+    <View style={[styles.container, leftSlot ? styles.containerFill : null, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
       {/* Top band: ChordCard (left column) + stacked navigators (right column). Skipped entirely when
-          empty (Quiz: no card + no navigation) so there's no fixed-height gap above the keyboard. */}
-      {(leftSlot || showNavigation || parentScales.length > 0) && (
+          empty (Quiz: no card + no navigation) so there's no fixed-height gap above the keyboard.
+          On the Chord screen (leftSlot) it's wrapped in a flex ScrollView so IT absorbs vertical
+          overflow — scrolling internally when squeezed — while the tabs + keyboard stay pinned. */}
+      {(leftSlot || showNavigation || parentScales.length > 0) && (() => { const bandEl = (
       <View style={[styles.band, leftSlot ? { height: 210 } : null, { borderBottomColor: theme.border }]}>
         {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
         {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
@@ -749,7 +751,9 @@ const PianoView = React.memo(forwardRef<PianoViewRef, Props>(function PianoView(
       )}
         </View>
       </View>
-      )}
+      ); return leftSlot
+        ? (<ScrollView style={styles.bandScroll} contentContainerStyle={styles.bandScrollContent} showsVerticalScrollIndicator={false}>{bandEl}</ScrollView>)
+        : bandEl; })()}
       {/* Voicing-tab selector — now BELOW the card + navigator band (previously the view header). */}
       {header}
       {showMiniMap && (
@@ -828,6 +832,12 @@ export default PianoView;
 
 const styles = StyleSheet.create({
   container: { overflow: 'hidden', position: 'relative', paddingTop: 0 },
+  // Chord screen only: fill the fixed (non-scrolling) area so the band/tabs/keyboard split the height.
+  containerFill: { flex: 1 },
+  // The band's scroll region takes all leftover height (after the pinned tabs + keyboard) and scrolls
+  // internally only when its 210px content can't fit; centered when there's room to spare.
+  bandScroll: { flex: 1 },
+  bandScrollContent: { flexGrow: 1, justifyContent: 'center' },
   // Fixed height (applied INLINE only when leftSlot is present — the Chord screen) so the band never
   // resizes as content changes (1 vs 2 nav rows, 1 vs 2 pill rows, sub-label present/absent). Sized to
   // the tallest case (scales: sub-label + 2 pill rows ≈ 208); shorter content centers within it. The

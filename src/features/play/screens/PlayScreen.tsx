@@ -1351,16 +1351,19 @@ function VoicingExplorer({
 
   return (
     <View style={[styles.safe, { backgroundColor: t.bg2 }]}>
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 0 }}>
+      {/* Fixed (non-scrolling) area between the header and the dock. The instrument view fills it and
+          manages its OWN internal scroll: the chord card + navigator band scrolls when it can't fit,
+          while the voicing tabs and the diagram stay pinned + fully in view. */}
+      <View style={{ flex: 1 }}>
 
-        <View style={{ justifyContent: 'center' }}>
+        <View style={{ flex: 1 }}>
           {/* Both instrument views stay MOUNTED; we toggle display + freeze the inactive one, so
               switching Piano⇄Guitar is an instant visibility flip instead of unmounting one heavy
               SVG+gesture tree and remounting the other (the lag). react-freeze keeps the hidden view
               mounted but skips its re-renders on chord changes — so chord-change cost is unchanged and
               the only mount happens once, the first time each instrument is shown. Mirrors the
               Chord⇄Dictionary fix (08468ec). */}
-          <View style={{ display: instrument === 'piano' ? 'flex' : 'none' }}>
+          <View style={{ flex: 1, display: instrument === 'piano' ? 'flex' : 'none' }}>
             <Freeze freeze={instrument !== 'piano'}>
             <PianoView
               ref={pianoRef} leftSlot={chordCardSlot} showAllLabels={true} header={combinedHeader} showMiniMap={false} onMiniMap={setMapNode} midiNotes={pianoVoicings[pianoVoicingIdx]?.notes || []} showNavigation={true}
@@ -1382,7 +1385,7 @@ function VoicingExplorer({
             />
             </Freeze>
           </View>
-          <View style={{ display: instrument === 'guitar' ? 'flex' : 'none' }}>
+          <View style={{ flex: 1, display: instrument === 'guitar' ? 'flex' : 'none' }}>
             <Freeze freeze={instrument !== 'guitar'}>
             <FretboardView
               ref={fretboardRef} leftSlot={chordCardSlot} header={combinedHeader} showMiniMap={false} onMiniMap={setMapNode} groups={guitarGroups} theme={t} defaultGroupIdx={0}
@@ -1402,7 +1405,7 @@ function VoicingExplorer({
           </View>
         </View>
 
-      </ScrollView>
+      </View>
 
       {/* ── Position Map slide-up (Pro) — floats above the dock, slides up/down like the root picker ── */}
       <BottomSlideSheet open={mapOpen && isPro} dockH={dockH} t={t}>

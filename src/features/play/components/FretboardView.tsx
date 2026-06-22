@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, ScrollView } from 'react-native';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Svg, { Line, Circle, Text as SvgText, Rect, Path } from 'react-native-svg';
 import { Theme } from '@shared/ui/themes';
@@ -1406,11 +1406,13 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
     : (specificName || baseName);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
+    <View style={[styles.container, leftSlot ? styles.containerFill : null, { backgroundColor: theme.bg2, borderColor: theme.border }]}>
       {/* Top band: ChordCard (left column) + navigators (right column). The navigators that
           used to be full-width rows are stacked vertically here so they fit the half-width
-          column, freeing the space the old standalone nav row took up below the diagram. */}
-      {(leftSlot || !hideNavigators) && (
+          column, freeing the space the old standalone nav row took up below the diagram.
+          On the Chord screen (leftSlot) it's wrapped in a flex ScrollView so IT absorbs vertical
+          overflow — scrolling internally when squeezed — while the tabs + fretboard stay pinned. */}
+      {(leftSlot || !hideNavigators) && (() => { const bandEl = (
       <View style={[styles.band, leftSlot ? { height: 210 } : null, { borderBottomColor: theme.border }]}>
         {leftSlot ? <View style={styles.bandLeft}>{leftSlot}</View> : null}
         {leftSlot ? <View style={[styles.bandDivider, { backgroundColor: theme.border }]} /> : null}
@@ -1565,7 +1567,9 @@ const FretboardView = React.memo(React.forwardRef<FretboardViewRef, Props>(funct
       )}
         </View>
       </View>
-      )}
+      ); return leftSlot
+        ? (<ScrollView style={styles.bandScroll} contentContainerStyle={styles.bandScrollContent} showsVerticalScrollIndicator={false}>{bandEl}</ScrollView>)
+        : bandEl; })()}
 
       {/* Voicing-tab selector — now BELOW the card + navigator band (previously the view header). */}
       {header}
@@ -1649,6 +1653,12 @@ export default FretboardView;
 
 const styles = StyleSheet.create({
   container: { overflow: 'hidden', paddingTop: 0 },
+  // Chord screen only: fill the fixed (non-scrolling) area so the band/tabs/fretboard split the height.
+  containerFill: { flex: 1 },
+  // The band's scroll region takes all leftover height (after the pinned tabs + fretboard) and scrolls
+  // internally only when its 210px content can't fit; centered when there's room to spare.
+  bandScroll: { flex: 1 },
+  bandScrollContent: { flexGrow: 1, justifyContent: 'center' },
   // Top band: card (left) + stacked navigators (right), separated by a vertical divider, with a
   // single full-width bottom border above the diagram.
   // Fixed height (applied INLINE only when leftSlot is present — the Chord screen) so the band never
