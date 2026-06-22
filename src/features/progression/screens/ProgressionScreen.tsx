@@ -73,7 +73,7 @@ const ProgressionCell = React.memo(function ProgressionCell({
   selectedCell, playingIdx,
   handleCellPress, handleCellLongPress,
   t, diagramVoicings, pianoVoicings, diagramArps, pianoArps,
-  groupedCells, NOTE_FLAT, NOTE_SHARP
+  groupedCells, NOTE_FLAT, NOTE_SHARP, labelMode
 }: any) {
   const getCellProps = (idx: number) => {
     const isSelected = selectedCell === idx;
@@ -134,9 +134,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
                 {chord && (
                   <View style={{ marginTop: 10 }}>
                     {instrument === 'piano' ? (
-                      <MiniPianoDiagram chord={chord} notes={arpView ? pianoArps[idx]?.notes : pianoVoicings[idx]?.notes} theme={t} octave={octave} />
+                      <MiniPianoDiagram chord={chord} notes={arpView ? pianoArps[idx]?.notes : pianoVoicings[idx]?.notes} theme={t} octave={octave} labelMode={labelMode} namingMode={chord.namingMode || 'sharp'} rootSemi={chord.rootSemi} />
                     ) : (
-                      <MiniChordDiagram voicing={diagramVoicings[idx]} arpShape={arpView ? diagramArps[idx] : undefined} theme={t} />
+                      <MiniChordDiagram voicing={diagramVoicings[idx]} arpShape={arpView ? diagramArps[idx] : undefined} theme={t} labelMode={labelMode} namingMode={chord.namingMode || 'sharp'} rootSemi={chord.rootSemi} />
                     )}
                   </View>
                 )}
@@ -231,9 +231,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
                       {renderSplitText(left, pLeft.isPlaying)}
                       <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                         {instrument === 'piano' ? (
-                          <MiniPianoDiagram chord={left} notes={arpView ? pianoArps[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} theme={t} octave={octave} />
+                          <MiniPianoDiagram chord={left} notes={arpView ? pianoArps[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} theme={t} octave={octave} labelMode={labelMode} namingMode={left.namingMode || 'sharp'} rootSemi={left.rootSemi} />
                         ) : (
-                          <MiniChordDiagram voicing={diagramVoicings[leftIdx]} arpShape={arpView ? diagramArps[leftIdx] : undefined} theme={t} />
+                          <MiniChordDiagram voicing={diagramVoicings[leftIdx]} arpShape={arpView ? diagramArps[leftIdx] : undefined} theme={t} labelMode={labelMode} namingMode={left.namingMode || 'sharp'} rootSemi={left.rootSemi} />
                         )}
                       </View>
                   </View>
@@ -241,9 +241,9 @@ const ProgressionCell = React.memo(function ProgressionCell({
                       {renderSplitText(right, pRight.isPlaying)}
                       <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                         {instrument === 'piano' ? (
-                          <MiniPianoDiagram chord={right} notes={arpView ? pianoArps[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} theme={t} octave={octave} />
+                          <MiniPianoDiagram chord={right} notes={arpView ? pianoArps[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} theme={t} octave={octave} labelMode={labelMode} namingMode={right.namingMode || 'sharp'} rootSemi={right.rootSemi} />
                         ) : (
-                          <MiniChordDiagram voicing={diagramVoicings[rightIdx]} arpShape={arpView ? diagramArps[rightIdx] : undefined} theme={t} />
+                          <MiniChordDiagram voicing={diagramVoicings[rightIdx]} arpShape={arpView ? diagramArps[rightIdx] : undefined} theme={t} labelMode={labelMode} namingMode={right.namingMode || 'sharp'} rootSemi={right.rootSemi} />
                         )}
                       </View>
                   </View>
@@ -269,9 +269,10 @@ const ProgressionCell = React.memo(function ProgressionCell({
 export default function ProgressionScreen() {
   const { playChord: onPlay, stopAudio: onStop } = useAudio();
   // Narrow selector: re-render this complex screen only when one of these fields changes, not on
-  // every settings mutation (mixer volumes, colorMode, labelMode, etc. don't touch this screen).
-  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro, openPaywall } = useSettingsStore(
-    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro, openPaywall: s.openPaywall }))
+  // every settings mutation (mixer volumes, colorMode, etc. don't touch this screen). labelMode IS
+  // included so the mini chord diagrams relabel (none / degrees / notes) when the global pref changes.
+  const { theme, instrument, bpm, setBpm, voiceLeading, voiceLeadDir, fretCap, pianoZone, setPianoZone, octave, fontFamily, setArpForced, isPro, openPaywall, labelMode } = useSettingsStore(
+    useShallow((s) => ({ theme: s.theme, instrument: s.instrument, bpm: s.bpm, setBpm: s.setBpm, voiceLeading: s.voiceLeading, voiceLeadDir: s.voiceLeadDir, fretCap: s.fretCap, pianoZone: s.pianoZone, setPianoZone: s.setPianoZone, octave: s.octave, fontFamily: s.fontFamily, setArpForced: s.setArpForced, isPro: s.isPro, openPaywall: s.openPaywall, labelMode: s.labelMode }))
   );
   const { rootSemi, chordType, namingMode, resetPulse } = useChordStore();
   const { progression, setProgressionChord, clearProgression, addMeasure, removeMeasure, insertBlanks, saveSong, savedSongs, loadSong, deleteSong, guitarNeckZone, setGuitarNeckZone, songVoicingType, setSongVoicingType, songStringSet, setSongStringSet, transposeProgression, setChordBeats, toggleRepeatStart, toggleRepeatEnd, removeProgressionChord, setVolta, toggleSection, categories, addCategory, setSongCategory, activeSongId } = useProgressionStore();
@@ -1332,9 +1333,9 @@ export default function ProgressionScreen() {
                             {chord && (
                               <View style={{ marginTop: 10 }}>
                                 {instrument === 'piano' ? (
-                                  <MiniPianoDiagram chord={chord} notes={arpView ? pianoArps[idx]?.notes : pianoVoicings[idx]?.notes} theme={t} octave={octave} />
+                                  <MiniPianoDiagram chord={chord} notes={arpView ? pianoArps[idx]?.notes : pianoVoicings[idx]?.notes} theme={t} octave={octave} labelMode={labelMode} namingMode={chord.namingMode || 'sharp'} rootSemi={chord.rootSemi} />
                                 ) : (
-                                  <MiniChordDiagram voicing={diagramVoicings[idx]} arpShape={arpView ? diagramArps[idx] : undefined} theme={t} />
+                                  <MiniChordDiagram voicing={diagramVoicings[idx]} arpShape={arpView ? diagramArps[idx] : undefined} theme={t} labelMode={labelMode} namingMode={chord.namingMode || 'sharp'} rootSemi={chord.rootSemi} />
                                 )}
                               </View>
                             )}
@@ -1450,9 +1451,9 @@ export default function ProgressionScreen() {
                                  {renderSplitText(left, pLeft.isPlaying, pLeft.isSelected)}
                                  <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                                    {instrument === 'piano' ? (
-                                     <MiniPianoDiagram chord={left} notes={arpView ? pianoArps[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} theme={t} octave={octave} />
+                                     <MiniPianoDiagram chord={left} notes={arpView ? pianoArps[leftIdx]?.notes : pianoVoicings[leftIdx]?.notes} theme={t} octave={octave} labelMode={labelMode} namingMode={left.namingMode || 'sharp'} rootSemi={left.rootSemi} />
                                    ) : (
-                                     <MiniChordDiagram voicing={diagramVoicings[leftIdx]} arpShape={arpView ? diagramArps[leftIdx] : undefined} theme={t} />
+                                     <MiniChordDiagram voicing={diagramVoicings[leftIdx]} arpShape={arpView ? diagramArps[leftIdx] : undefined} theme={t} labelMode={labelMode} namingMode={left.namingMode || 'sharp'} rootSemi={left.rootSemi} />
                                    )}
                                  </View>
                               </View>
@@ -1460,9 +1461,9 @@ export default function ProgressionScreen() {
                                  {renderSplitText(right, pRight.isPlaying, pRight.isSelected)}
                                  <View style={{ transform: [{ scale: instrument === 'piano' ? 0.75 : 0.75 }], marginTop: 0, marginBottom: -6 }}>
                                    {instrument === 'piano' ? (
-                                     <MiniPianoDiagram chord={right} notes={arpView ? pianoArps[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} theme={t} octave={octave} />
+                                     <MiniPianoDiagram chord={right} notes={arpView ? pianoArps[rightIdx]?.notes : pianoVoicings[rightIdx]?.notes} theme={t} octave={octave} labelMode={labelMode} namingMode={right.namingMode || 'sharp'} rootSemi={right.rootSemi} />
                                    ) : (
-                                     <MiniChordDiagram voicing={diagramVoicings[rightIdx]} arpShape={arpView ? diagramArps[rightIdx] : undefined} theme={t} />
+                                     <MiniChordDiagram voicing={diagramVoicings[rightIdx]} arpShape={arpView ? diagramArps[rightIdx] : undefined} theme={t} labelMode={labelMode} namingMode={right.namingMode || 'sharp'} rootSemi={right.rootSemi} />
                                    )}
                                  </View>
                               </View>
