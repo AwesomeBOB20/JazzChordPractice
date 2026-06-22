@@ -270,7 +270,7 @@ function RootPicker({ open, rootSemi, t, onPick, onClose }: {
 // ── MORPH VIEW: one inversion group → a flat grid of every quality on the chosen string set, in
 // morph order. Mirrors DictSectionRow's flat-grid cell sizing/borders, but the corners read
 // quality (name) · formula · bass, and the inversion is the section header. ──
-function MorphSectionGrid({ section, L, t, rootSemi, namingMode, labelMode, onPlay, colorMode, selectiveRoles }: any) {
+function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode, labelMode, onPlay, colorMode, selectiveRoles }: any) {
   const items: any[] = section.cells;
   const CELL_PAD = 8;
   const innerW = Math.max(40, L.cellW - CELL_PAD * 2);
@@ -295,22 +295,28 @@ function MorphSectionGrid({ section, L, t, rootSemi, namingMode, labelMode, onPl
   );
   return (
     <View>
-      <View style={[styles.sectionHeader, { borderBottomColor: t.border }]}>
-        <Text style={[TYPE.body, { fontWeight: '800', color: t.txt1 }]}>{section.inversionLabel}</Text>
-        <Text style={{ fontSize: L.cornerFs, fontWeight: '700', color: t.txt3 }}>{items.length}</Text>
-      </View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderLeftWidth: DIVIDER, borderTopWidth: DIVIDER, borderColor: t.border }}>
-        {items.map((it) => (
-          <TouchableOpacity key={it.key} activeOpacity={0.7} onPress={() => onPlay(it)} style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: guitarCellH, paddingVertical: 0 }]}>
-            <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
-              <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={rootSemi} />
-            </View>
-            {pill(formatChordSymbol(it.chordName), styles.cTL, true)}
-            {formulaPill(it.formulaTokens, styles.cBL)}
-            {pill(it.bass, styles.cBR)}
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* Collapsible inversion row — same accordion header style as the browse view. */}
+      <TouchableOpacity activeOpacity={0.7} onPress={onToggle} style={[styles.sectionHeader, { backgroundColor: t.bg2, borderBottomColor: t.border }]}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: t.txt1 }}>{section.inversionLabel}</Text>
+          <CountChip count={items.length} t={t} solid />
+        </View>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={t.txt3} />
+      </TouchableOpacity>
+      {open && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', borderLeftWidth: DIVIDER, borderTopWidth: DIVIDER, borderColor: t.border }}>
+          {items.map((it) => (
+            <TouchableOpacity key={it.key} activeOpacity={0.7} onPress={() => onPlay(it)} style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: guitarCellH, paddingVertical: 0 }]}>
+              <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
+                <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={rootSemi} />
+              </View>
+              {pill(formatChordSymbol(it.chordName), styles.cTL, true)}
+              {formulaPill(it.formulaTokens, styles.cBL)}
+              {pill(it.bass, styles.cBR)}
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -401,6 +407,17 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
     () => (morphActive ? buildMorphSections(effectiveCategory, rootSemi, stringSet!) : []),
     [morphActive, effectiveCategory, rootSemi, stringSet]
   );
+  // The inversion groups are collapsible accordion rows (like the browse view). Default: open the first
+  // group when the data (re)builds — pick a string set and you immediately see root-position comparison.
+  const [morphExpanded, setMorphExpanded] = React.useState<Set<string>>(new Set());
+  React.useEffect(() => {
+    setMorphExpanded(new Set(morphSections.length ? [morphSections[0].inversionLabel] : []));
+  }, [morphSections]);
+  const toggleMorph = React.useCallback((label: string) => setMorphExpanded(prev => {
+    const n = new Set(prev);
+    if (n.has(label)) n.delete(label); else n.add(label);
+    return n;
+  }), []);
 
   // Accordion: items collapsed by default so only opened ones build their diagrams
   // (keeps scrolling smooth + the list short). Category/instrument change collapses all.
@@ -661,7 +678,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           {morphSections.length === 0
             ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>No voicings on this string set.</Text>
             : morphSections.map(sec => (
-                <MorphSectionGrid key={sec.inversionLabel} section={sec} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} />
+                <MorphSectionGrid key={sec.inversionLabel} section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} />
               ))}
         </ScrollView>
       ) : (
