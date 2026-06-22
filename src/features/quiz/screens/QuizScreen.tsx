@@ -31,6 +31,7 @@ import {
   buildHardcodedShapeVoicings,
   getArpSubsets,
   getIntervalSubsets,
+  INTERVAL_SCALES,
   identifyCompleteChord,
   Voicing,
   VoicingGroup,
@@ -981,7 +982,21 @@ export default function QuizScreen() {
                   const scaleIds = CHORD_SCALE_MAP[finalType] || [];
                   const parentBoxes = buildScaleVoicings(scaleIds, SCALES, finalRoot, CH[finalType].iv, namingMode);
                   const diagramName = isArp ? (arp?.name || displayChordName) : `${subset.label} Interval`;
-                  const builtArps = buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subRoles, subFormulas, diagramName);
+                  // Intervals render from the interval's OWN 2-note scale (which ALWAYS contains both
+                  // notes), rooted at the pair's lower note — NOT by filtering the chord's parent scale.
+                  // Altered/whole-tone/lydian parents omit some chord tones, which dropped one of the
+                  // interval's two notes and rendered e.g. a P5 as just the root (verify-quiz-intervals.js).
+                  // Mirrors the Explore Intervals tab.
+                  let builtArps;
+                  if (isArp) {
+                    builtArps = buildArpVoicings(parentBoxes, finalRoot, subset.ivs, subRoles, subFormulas, diagramName);
+                  } else {
+                    const loIv = Math.min(subset.ivs[0], subset.ivs[1]);
+                    const hiIv = Math.max(subset.ivs[0], subset.ivs[1]);
+                    const ivGap = (((hiIv - loIv) % 12) + 12) % 12;
+                    const ivRoot = (((finalRoot + loIv) % 12) + 12) % 12;
+                    builtArps = buildScaleVoicings([`iv-${ivGap === 0 ? 12 : ivGap}`], INTERVAL_SCALES, ivRoot, [], namingMode);
+                  }
                   setArpVoicings(builtArps);
                   setScaleVoicings(parentBoxes);
                   // The fretboard arp/interval diagram renders from builtArps — if it
