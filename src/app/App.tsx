@@ -296,19 +296,20 @@ function TabNavigator({ onOpenBpmModal }: { onOpenBpmModal: () => void }) {
 // ─── ROOT LAYOUT ──────────────────────────────────────────────────────────────
 function RootLayout() {
   const [showBpm, setShowBpm] = useState(false);
-  const [showTutorial, setShowTutorial] = useState(false);
   const { theme } = useSettingsStore();
   const fontFamily = useSettingsStore(s => s.fontFamily);
+  const isTutorialOpen = useSettingsStore(s => s.isTutorialOpen);
+  const setIsTutorialOpen = useSettingsStore(s => s.setIsTutorialOpen);
   const t = THEMES[theme];
 
   useEffect(() => {
     AsyncStorage.getItem(TUTORIAL_KEY).then(val => {
-      if (!val) setShowTutorial(true);
+      if (!val) setIsTutorialOpen(true);
     });
   }, []);
 
   const handleTutorialDismiss = useCallback(() => {
-    setShowTutorial(false);
+    setIsTutorialOpen(false);
     AsyncStorage.setItem(TUTORIAL_KEY, '1');
   }, []);
 
@@ -329,7 +330,7 @@ function RootLayout() {
       <SettingsScreen />
       <BpmModal visible={showBpm} onClose={() => setShowBpm(false)} />
       <PaywallModal />
-      <TutorialModal visible={showTutorial} onDismiss={handleTutorialDismiss} />
+      <TutorialModal visible={isTutorialOpen} onDismiss={handleTutorialDismiss} />
     </View>
   );
 }

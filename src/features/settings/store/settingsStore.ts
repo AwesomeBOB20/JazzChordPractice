@@ -48,6 +48,7 @@ export interface SettingsState {
   pianoKeyWidth: number;
   referenceFrequency: number;
   isSettingsOpen: boolean;
+  isTutorialOpen: boolean;
   octaveNumbering: boolean;
   isPro: boolean;
   // Which Pro feature triggered the paywall, or null when the paywall is closed.
@@ -84,6 +85,7 @@ export interface SettingsState {
   setPianoKeyWidth: (width: number) => void;
   setReferenceFrequency: (freq: number) => void;
   setIsSettingsOpen: (isOpen: boolean) => void;
+  setIsTutorialOpen: (isOpen: boolean) => void;
   setMixChordVol:  (v: number) => void;
   setMixBassVol:   (v: number) => void;
   setMixClickVol:  (v: number) => void;
@@ -122,6 +124,7 @@ export const useSettingsStore = create<SettingsState>()(
       pianoKeyWidth: 24,
       referenceFrequency: 440,
       isSettingsOpen: false,
+      isTutorialOpen: false,
       octaveNumbering: false,
       isPro: false,
       paywallFeature: null,
@@ -171,6 +174,7 @@ export const useSettingsStore = create<SettingsState>()(
       setPianoKeyWidth: (pianoKeyWidth) => set({ pianoKeyWidth }),
       setReferenceFrequency: (referenceFrequency) => set({ referenceFrequency }),
       setIsSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
+      setIsTutorialOpen: (isTutorialOpen) => set({ isTutorialOpen }),
       setMixChordVol:  (mixChordVol)  => set({ mixChordVol }),
       setMixBassVol:   (mixBassVol)   => set({ mixBassVol }),
       setMixClickVol:  (mixClickVol)  => set({ mixClickVol }),

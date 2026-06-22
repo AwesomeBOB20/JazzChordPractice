@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
@@ -72,23 +72,26 @@ export function TutorialModal({ visible, onDismiss }: Props) {
   const [step, setStep] = useState(0);
   const theme = useSettingsStore((s: any) => s.theme);
   const t = THEMES[theme];
+  const isFirst = step === 0;
   const isLast = step === SLIDES.length - 1;
   const slide = SLIDES[step];
+
+  // Reset to first slide whenever the modal is (re-)opened
+  useEffect(() => {
+    if (visible) setStep(0);
+  }, [visible]);
 
   const handleNext = () => {
     if (isLast) {
       onDismiss();
-      // Reset for if user re-opens (shouldn't happen, but defensive)
-      setStep(0);
     } else {
       setStep(s => s + 1);
     }
   };
 
-  const handleSkip = () => {
-    onDismiss();
-    setStep(0);
-  };
+  const handleBack = () => setStep(s => s - 1);
+
+  const handleSkip = () => onDismiss();
 
   return (
     <PopUpModal visible={visible} onClose={handleSkip}>
@@ -106,7 +109,7 @@ export function TutorialModal({ visible, onDismiss }: Props) {
         {/* Body */}
         <Text style={[styles.body, { color: t.txt2 }]}>{slide.body}</Text>
 
-        {/* Dot indicator */}
+        {/* Dot indicator — tap any dot to jump to that slide */}
         <View style={styles.dots}>
           {SLIDES.map((_, i) => (
             <TouchableOpacity key={i} onPress={() => setStep(i)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -119,14 +122,25 @@ export function TutorialModal({ visible, onDismiss }: Props) {
           ))}
         </View>
 
-        {/* Buttons */}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={handleNext}
-          style={[styles.btn, { backgroundColor: t.accent }]}
-        >
-          <Text style={styles.btnText}>{isLast ? 'Get Started' : 'Next'}</Text>
-        </TouchableOpacity>
+        {/* Back / Next row */}
+        <View style={styles.btnRow}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleBack}
+            disabled={isFirst}
+            style={[styles.btnSecondary, { borderColor: t.border, opacity: isFirst ? 0 : 1 }]}
+          >
+            <Ionicons name="chevron-back" size={20} color={t.txt1} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleNext}
+            style={[styles.btnPrimary, { backgroundColor: t.accent }]}
+          >
+            <Text style={styles.btnText}>{isLast ? 'Get Started' : 'Next'}</Text>
+          </TouchableOpacity>
+        </View>
 
         {!isLast && (
           <TouchableOpacity onPress={handleSkip} hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}>
@@ -185,13 +199,26 @@ const styles = StyleSheet.create({
     width: 20,
     borderRadius: 4,
   },
-  btn: {
+  btnRow: {
+    flexDirection: 'row',
+    gap: 10,
     width: '100%',
+    marginBottom: 12,
+  },
+  btnSecondary: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPrimary: {
+    flex: 1,
     height: 48,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
   btnText: {
     color: '#fff',

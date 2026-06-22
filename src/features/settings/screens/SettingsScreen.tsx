@@ -352,7 +352,7 @@ const ROLE_LEGEND: { label: string; color: string }[] = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { theme, setTheme, factoryReset, isSettingsOpen, setIsSettingsOpen, fontFamily, isPro, openPaywall } = useSettingsStore();
+  const { theme, setTheme, factoryReset, isSettingsOpen, setIsSettingsOpen, setIsTutorialOpen, fontFamily, isPro, openPaywall } = useSettingsStore();
   const { clearProgression } = useProgressionStore();
   const { resetQuiz } = useQuizStore();
 
@@ -541,6 +541,18 @@ export default function SettingsScreen() {
         {/* Help & Tutorial */}
         <View style={[styles.card, { backgroundColor: t.bg2, borderColor: t.border }]}>
           <Text style={[styles.sectionLabel, { color: t.accent }]}>HELP & TUTORIAL</Text>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => { setIsSettingsOpen(false); setIsTutorialOpen(true); }}
+            style={[styles.helpHeader, { marginBottom: 4 }]}
+          >
+            <View style={styles.settingLeft}>
+              <Ionicons name="play-circle-outline" size={18} color={t.accent} />
+              <Text style={[styles.label, { color: t.txt1 }]}>Replay Tutorial</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={t.txt3} />
+          </TouchableOpacity>
+          <View style={[styles.divider, { backgroundColor: t.border }]} />
           {HELP_SECTIONS.map((sec, i) => {
             const open = openHelp === sec.key;
             return (
