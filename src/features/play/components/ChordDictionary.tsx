@@ -308,7 +308,7 @@ function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode,
           {items.map((it) => (
             <TouchableOpacity key={it.key} activeOpacity={0.7} onPress={() => onPlay(it)} style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: guitarCellH, paddingVertical: 0 }]}>
               <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
-                <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={rootSemi} />
+                <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={allRoots ? undefined : rootSemi} />
               </View>
               {pill(allRoots ? `ANY ${it.symbol}` : formatChordSymbol(it.chordName), styles.cTL, true)}
               {formulaPill(it.formulaTokens, styles.cBL)}
@@ -404,8 +404,8 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   const morphEligible = instrument === 'guitar' && MORPH_CATEGORIES.has(effectiveCategory);
   const morphActive = morphEligible && !!stringSet;
   const morphSections: MorphSection[] = React.useMemo(
-    () => (morphActive ? buildMorphSections(effectiveCategory, rootSemi, stringSet!) : []),
-    [morphActive, effectiveCategory, rootSemi, stringSet]
+    () => (morphActive ? buildMorphSections(effectiveCategory, rootSemi, stringSet!, effectiveAllRoots) : []),
+    [morphActive, effectiveCategory, rootSemi, stringSet, effectiveAllRoots]
   );
   // The inversion groups are collapsible accordion rows (like the browse view). They start CLOSED —
   // nothing opens until the user taps a row.

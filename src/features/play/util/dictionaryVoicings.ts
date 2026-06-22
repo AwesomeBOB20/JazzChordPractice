@@ -585,7 +585,27 @@ function morphDarkness(iv: number[]): number {
   return d;
 }
 
-export function buildMorphSections(category: DictionaryCategory, rootSemi: number, stringSetKey: string): MorphSection[] {
+// Lowest fretted note of a grip (muted/open-skipped strings ignored); Infinity if it has none.
+const minFretOf = (v: any): number => {
+  let m = Infinity;
+  for (const f of (v?.frets || [])) if (f && f.fret != null && f.fret < m) m = f.fret;
+  return m;
+};
+
+// Slide every fretted note of a grip by T frets — a rigid transposition of a movable shape — and
+// recompute its played pitches. Used in "All roots" mode to drop a whole inversion group to its
+// lowest playable window (so the comparison reads compactly near the nut) while keeping every
+// quality on the SAME shift, which preserves the voice-leading alignment that the morph view exists
+// to show.
+function transposeMorphCell(cell: MorphCell, T: number): MorphCell {
+  if (!T) return cell;
+  const v = cell.voicing;
+  const frets = (v.frets || []).map((f: any) => (f && f.fret != null ? { ...f, fret: f.fret + T } : f));
+  const voicing = { ...v, frets };
+  return { ...cell, voicing, playMidi: voicingMidi(voicing) };
+}
+
+export function buildMorphSections(category: DictionaryCategory, rootSemi: number, stringSetKey: string, allRoots = false): MorphSection[] {
   if (!MORPH_CATEGORIES.has(category)) return [];
   const namingMode = namingOf(rootSemi);
   const rootName = rootNameOf(rootSemi);
@@ -632,7 +652,16 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
         playMidi: voicingMidi(e.voicing),
       };
     });
-    sections.push({ inversionLabel: MORPH_INV_LABELS[inv], cells });
+    // In "All roots" mode the chosen root is meaningless (every cell is movable), so slide the whole
+    // group down to its lowest playable window — one shared shift, so the qualities stay vertically
+    // aligned for the morph comparison and the diagrams sit compactly near the nut (lowest fret = 1).
+    let outCells = cells;
+    if (allRoots) {
+      let gmin = Infinity;
+      for (const c of cells) { const m = minFretOf(c.voicing); if (m < gmin) gmin = m; }
+      if (gmin !== Infinity && gmin !== 1) outCells = cells.map(c => transposeMorphCell(c, 1 - gmin));
+    }
+    sections.push({ inversionLabel: MORPH_INV_LABELS[inv], cells: outCells });
   }
   return sections;
 }
