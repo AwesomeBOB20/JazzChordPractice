@@ -16,7 +16,7 @@ import {
 } from '@shared/guitar';
 import { buildPianoVoicings } from '@shared/piano';
 import { DictionaryCategory } from '@features/play/store/dictionaryStore';
-import { tabKind, dictionaryMember, ORDERED_TYPES } from '@features/play/util/dictionaryGroups';
+import { tabKind, dictionaryMember, ORDERED_TYPES, dictionaryGroups } from '@features/play/util/dictionaryGroups';
 
 const FLAT_ROOTS = [0, 1, 3, 5, 8, 10];
 const rootNameOf = (r: number) => (FLAT_ROOTS.includes(r) ? NOTE_FLAT : NOTE_SHARP)[r];
@@ -542,13 +542,15 @@ export function getDictionaryVoicingsAllRoots(
 
 export interface MorphCell {
   key: string;
-  voicing: any;            // guitar grip → MiniChordDiagram `voicing`
+  voicing?: any;           // chord-family grip → MiniChordDiagram `voicing`
+  arpShape?: any;          // arp-family CAGED box → MiniChordDiagram `arpShape`
   chordName: string;       // "C m7" (root + def.s)
   symbol: string;          // just the quality symbol ("m7") — used for the "ANY <quality>" all-roots label
   chordType: string;
+  label?: string;          // arp-family display name (scale / interval / shape / arp), shown in the TL corner
   formula: string;         // "1 ♭3 5 ♭7"
   formulaTokens: string[];
-  bass: string;            // "♭3 in bass"
+  bass: string;            // chord: "♭3 in bass"; arp: the box name
   playMidi: number[];
 }
 export interface MorphSection { inversionLabel: string; cells: MorphCell[]; }
@@ -686,6 +688,49 @@ export function buildMorphSections(category: DictionaryCategory, rootSemi: numbe
       if (gmin !== Infinity && gmin !== 1) outCells = cells.map(c => transposeMorphCell(c, 1 - gmin));
     }
     sections.push({ inversionLabel: MORPH_INV_LABELS[inv], cells: outCells });
+  }
+  return sections;
+}
+
+// ─── CAGED BOX MORPH (arp families: scales / arps / intervals / shapes) ───────
+// These tabs render CAGED boxes, not string-set grips, so their morph axis is the BOX (a neck region)
+// rather than a string set: pick "Box N" and compare every scale / arpeggio / interval / shape in that
+// same region, grouped by the browse families. The arp-family analog of buildMorphSections. Guitar only.
+export const CAGED_MORPH_CATEGORIES = new Set<DictionaryCategory>(['scales', 'arps', 'intervals', 'shapes']);
+export const CAGED_MORPH_BOXES = 5; // CAGED has five box positions up the neck.
+
+export function buildCagedMorphSections(
+  category: DictionaryCategory, rootSemi: number, boxIdx: number, octave: number, selectedScaleId: string | null,
+): MorphSection[] {
+  if (!CAGED_MORPH_CATEGORIES.has(category)) return [];
+  const groups = dictionaryGroups(category, 'guitar');
+  const sections: MorphSection[] = [];
+  for (const g of groups) {
+    const cells: MorphCell[] = [];
+    for (const item of g.items) {
+      let boxes = getDictionaryVoicings(category, 'guitar', rootSemi, item.key, octave, selectedScaleId)
+        .filter(d => !!d.arpShape);
+      // Arps list every subset × box; the morph compares only the FULL arpeggio (the first subset).
+      if (category === 'arps') boxes = boxes.filter(d => d.key.startsWith('arps-0-'));
+      // Neck order so "Box 1" is the lowest position, uniformly across every family.
+      boxes = boxes.slice().sort((a, b) => (a.arpShape?.minFret ?? 0) - (b.arpShape?.minFret ?? 0));
+      const box = boxes[boxIdx];
+      if (!box) continue;
+      const toks = sortFormulaTokens(
+        Array.from(new Set((box.arpShape.notes || []).map((n: any) => normTok(n.formula))))
+          .filter((tk: any) => FORMULA_IV[tk] !== undefined) as string[]
+      );
+      cells.push({
+        key: `${item.key}-box${boxIdx}`,
+        arpShape: box.arpShape,
+        chordName: item.label, symbol: item.label, chordType: item.key, label: item.label,
+        formula: toks.map(formulaGlyph).join(' '),
+        formulaTokens: toks,
+        bass: box.arpShape.boxName || '',
+        playMidi: box.playMidi,
+      });
+    }
+    if (cells.length) sections.push({ inversionLabel: g.label, cells });
   }
   return sections;
 }

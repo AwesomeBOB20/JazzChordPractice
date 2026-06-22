@@ -10,7 +10,7 @@ import { useDictionaryStore, DictionaryCategory } from '@features/play/store/dic
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 import { useChordStore } from '@features/play/store/chordStore';
 import { useAudio } from '@shared/audio/AudioContext';
-import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, MORPH_CATEGORIES, MorphSection } from '@features/play/util/dictionaryVoicings';
+import { getDictionaryVoicings, getDictionaryVoicingsAllRoots, isArpFamily, dictCorners, formulaGlyph, DictMiniItem, buildMorphSections, buildCagedMorphSections, MORPH_CATEGORIES, CAGED_MORPH_CATEGORIES, CAGED_MORPH_BOXES, MorphSection } from '@features/play/util/dictionaryVoicings';
 import { dictionaryGroups, tabKind, ALL_CATEGORIES, DictGroup } from '@features/play/util/dictionaryGroups';
 import { STRING_SETS_BY_TYPE } from '@shared/guitar';
 import { formatChordSymbol } from '@shared/theory/core/nomenclature';
@@ -277,7 +277,7 @@ function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode,
   const MAX_SCALE = L.cols === 1 ? 4.2 : L.cols === 2 ? 2.8 : 2.0;
   const MAX_BOX_H = L.cols === 1 ? 240 : L.cols === 2 ? 168 : 116;
   const boxH = Math.round(Math.min(MAX_BOX_H, Math.max(60, ...items.map((it: any) => {
-    const fp = miniChordFootprint(it.voicing, undefined);
+    const fp = miniChordFootprint(it.voicing, it.arpShape);
     return fp.h * Math.min(MAX_SCALE, innerW / fp.w);
   }))));
   const guitarCellH = PixelRatio.roundToNearestPixel(boxH + (L.cornerFs + 9) * 2);
@@ -308,9 +308,9 @@ function MorphSectionGrid({ section, open, onToggle, L, t, rootSemi, namingMode,
           {items.map((it) => (
             <TouchableOpacity key={it.key} activeOpacity={0.7} onPress={() => onPlay(it)} style={[styles.cell, { width: `${100 / L.cols}%`, borderColor: t.border, height: guitarCellH, paddingVertical: 0 }]}>
               <View style={{ height: boxH, justifyContent: 'center', alignItems: 'center' }}>
-                <MiniChordDiagram voicing={it.voicing} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={allRoots ? undefined : rootSemi} />
+                <MiniChordDiagram voicing={it.voicing} arpShape={it.arpShape} theme={t} fitWidth={innerW} fitHeight={boxH} labelMode={labelMode} namingMode={namingMode} rootSemi={it.arpShape ? rootSemi : (allRoots ? undefined : rootSemi)} />
               </View>
-              {pill(allRoots ? `ANY ${it.symbol}` : formatChordSymbol(it.chordName), styles.cTL, true)}
+              {pill(it.arpShape ? it.label : (allRoots ? `ANY ${it.symbol}` : formatChordSymbol(it.chordName)), styles.cTL, true)}
               {formulaPill(it.formulaTokens, styles.cBL)}
               {pill(it.bass, styles.cBR)}
             </TouchableOpacity>
@@ -399,13 +399,18 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
 
   // Spell the diagrams' note labels by the root's key (flat roots → flats), matching the rest of the app.
   const namingMode: 'sharp' | 'flat' = FLAT_ROOTS.includes(rootSemi) ? 'flat' : 'sharp';
-  // MORPH view: guitar only, on a triad/drop family, with a string set picked from the dock. When on,
-  // the grid compares every quality on that one string set, grouped by inversion, in morph order.
-  const morphEligible = instrument === 'guitar' && MORPH_CATEGORIES.has(effectiveCategory);
+  // MORPH view: guitar only. Chord families (triads/shells/drops) compare every quality on one string
+  // set (shells: guide-tone lock), grouped by inversion. Arp families (scales/arps/intervals/shapes)
+  // compare every item in one CAGED box, grouped by browse family. The dock's axis button picks the
+  // string set / box; selecting one flips the grid into morph mode.
+  const cagedMorph = CAGED_MORPH_CATEGORIES.has(effectiveCategory);
+  const morphEligible = instrument === 'guitar' && (MORPH_CATEGORIES.has(effectiveCategory) || cagedMorph);
   const morphActive = morphEligible && !!stringSet;
   const morphSections: MorphSection[] = React.useMemo(
-    () => (morphActive ? buildMorphSections(effectiveCategory, rootSemi, stringSet!, effectiveAllRoots) : []),
-    [morphActive, effectiveCategory, rootSemi, stringSet, effectiveAllRoots]
+    () => (!morphActive ? []
+      : cagedMorph ? buildCagedMorphSections(effectiveCategory, rootSemi, Number(stringSet) - 1, octave, selectedScaleId)
+      : buildMorphSections(effectiveCategory, rootSemi, stringSet!, effectiveAllRoots)),
+    [morphActive, cagedMorph, effectiveCategory, rootSemi, stringSet, effectiveAllRoots, octave, selectedScaleId]
   );
   // The inversion groups are collapsible accordion rows (like the browse view). They start CLOSED —
   // nothing opens until the user taps a row.
@@ -673,7 +678,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
       {morphActive ? (
         <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
           {morphSections.length === 0
-            ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>No voicings on this string set.</Text>
+            ? <Text style={{ color: t.txt3, fontSize: 13, textAlign: 'center', marginTop: 32 }}>{cagedMorph ? 'Nothing in this box.' : 'No voicings on this string set.'}</Text>
             : morphSections.map(sec => (
                 <MorphSectionGrid key={sec.inversionLabel} section={sec} open={morphExpanded.has(sec.inversionLabel)} onToggle={() => toggleMorph(sec.inversionLabel)} L={L} t={t} rootSemi={rootSemi} namingMode={namingMode} labelMode={labelMode} onPlay={handlePlay} colorMode={colorMode} selectiveRoles={selectiveRoles} allRoots={effectiveAllRoots} />
               ))}
@@ -822,10 +827,12 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
           <Text style={{ color: effectiveAllRoots ? t.txt3 : '#fff', fontSize: 22, fontWeight: '800' }}>{rootName(rootSemi)}</Text>
           <Ionicons name={dialOpen ? 'chevron-down' : 'chevron-up'} size={15} color={effectiveAllRoots ? t.txt3 : 'rgba(255,255,255,0.85)'} style={{ marginLeft: 4 }} />
         </TouchableOpacity>
-        {/* String Set — guitar, triad/drop families only. Cycles Any → each set; selecting one flips the
-            grid into MORPH mode (every quality on that set, grouped by inversion, in morph order). */}
+        {/* Morph axis — guitar only. Chord families cycle Any → each string set (shells: guide-tone lock);
+            arp families cycle Any → Box 1…5. Selecting one flips the grid into MORPH mode. */}
         {morphEligible && (() => {
-          const sets = STRING_SETS_BY_TYPE[effectiveCategory] || [];
+          const sets = cagedMorph
+            ? Array.from({ length: CAGED_MORPH_BOXES }, (_, i) => ({ key: String(i + 1), label: `Box ${i + 1}` }))
+            : (STRING_SETS_BY_TYPE[effectiveCategory] || []);
           const keys: (string | null)[] = [null, ...sets.map(s => s.key)];
           const curLabel = stringSet ? (sets.find(s => s.key === stringSet)?.label ?? stringSet) : 'Any';
           return (
@@ -834,7 +841,7 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); stopAudio?.(); const idx = keys.indexOf(stringSet); setStringSet(keys[(idx + 1) % keys.length]); }}
               style={[styles.dockIcon, { width: 66, borderColor: stringSet ? t.accent : t.border, backgroundColor: stringSet ? t.accent : t.bg2 }]}
             >
-              <Text style={{ fontSize: 8, fontWeight: '800', color: stringSet ? '#fff' : t.txt3 }}>STRINGS</Text>
+              <Text style={{ fontSize: 8, fontWeight: '800', color: stringSet ? '#fff' : t.txt3 }}>{cagedMorph ? 'BOX' : 'STRINGS'}</Text>
               <Text style={{ fontSize: 12, fontWeight: '700', marginTop: 1, color: stringSet ? '#fff' : t.txt1 }}>{curLabel}</Text>
             </TouchableOpacity>
           );
