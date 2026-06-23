@@ -53,13 +53,16 @@ const VISIBLE_SEMITONE_RANGE = 10; // How many semitones to show vertically
 const HEADROOM_SEMITONES = 0.9; // Bias the chart so the live pitch line never touches the top
 
 // Selectable Play-mode reference tones (ids match TONE_PRESETS in audioEngine.ts).
-const TUNER_TONES: { id: string; label: string }[] = [
-  { id: 'pure', label: 'Pure' },
-  { id: 'warm', label: 'Warm' },
-  { id: 'mellow', label: 'Mellow' },
-  { id: 'glass', label: 'Glass' },
-  { id: 'organ', label: 'Organ' },
+// Struck FM reference tones (ids match FM_PRESETS in audioEngine.ts). `ring` ≈ how long the note sounds
+// (ms) → used to clear the string highlight once it has decayed.
+const TUNER_TONES: { id: string; label: string; ring: number }[] = [
+  { id: 'epiano', label: 'E-Piano', ring: 2200 },
+  { id: 'bell', label: 'Bell', ring: 4500 },
+  { id: 'musicbox', label: 'Music Box', ring: 1700 },
+  { id: 'marimba', label: 'Marimba', ring: 700 },
+  { id: 'glass', label: 'Glass', ring: 3200 },
 ];
+const DEFAULT_TONE = 'epiano';
 
 function calculatePitch(frequency: number, refFreq: number) {
   const A4_INDEX = 69;
@@ -83,6 +86,9 @@ export default function TunerScreen() {
   const { theme, referenceFrequency, fontFamily, isPro, openPaywall, tunerTone, setTunerTone } = useSettingsStore();
   const svgFont = familyForWeight(fontFamily, '700');
   const t = THEMES[theme];
+  // Clamp a legacy/unknown stored value onto a real tone so a chip is always active.
+  const activeTone = TUNER_TONES.some(x => x.id === tunerTone) ? tunerTone : DEFAULT_TONE;
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // clears the string highlight after a note rings out
 
   // The mic-based pitch detector is implemented in the Android native module only;
   // the iOS native module is still a stub, so Listen mode would do nothing on iPhone.
@@ -258,24 +264,29 @@ export default function TunerScreen() {
 
   const toggleString = useCallback((stringIdx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (playingStringIdx === stringIdx) {
-      stopAudio(); setPlayingStringIdx(null);
-    } else {
-      stopAudio();
-      const s = tuningStrings[stringIdx];
-      // Smooth, continuous reference held until tapped off, in the user's chosen timbre. The engine
-      // applies a per-note loudness tilt so it stays pleasant and undistorted across strings.
-      setTimeout(() => { playTone(s.midi, 100, tunerTone); }, 30);
-      setPlayingStringIdx(stringIdx);
-    }
-  }, [tuningStrings, playTone, stopAudio, playingStringIdx, tunerTone]);
+    if (clearTimerRef.current) { clearTimeout(clearTimerRef.current); clearTimerRef.current = null; }
+    // Tap the sounding string again → cut its ring early.
+    if (playingStringIdx === stringIdx) { stopAudio(); setPlayingStringIdx(null); return; }
+    stopAudio();
+    const s = tuningStrings[stringIdx];
+    const ring = TUNER_TONES.find(x => x.id === activeTone)?.ring ?? 2000;
+    // Struck reference note in the chosen timbre; the engine applies a per-note loudness tilt so it
+    // stays even across strings. It rings out on its own, so clear the highlight once it has decayed.
+    setTimeout(() => { playTone(s.midi, 100, activeTone); }, 30);
+    setPlayingStringIdx(stringIdx);
+    clearTimerRef.current = setTimeout(() => {
+      setPlayingStringIdx(idx => (idx === stringIdx ? null : idx));
+      clearTimerRef.current = null;
+    }, ring + 250);
+  }, [tuningStrings, playTone, stopAudio, playingStringIdx, activeTone]);
 
-  // Switch the reference timbre; if a string is sounding, re-trigger it so the change is heard at once
-  // (PLAY_TONE crossfades, so it's seamless).
+  // Pick a timbre (from the tuning popup) and audition it at once: re-strike the sounding string, or a
+  // preview note (A) if nothing is playing.
   const pickTone = useCallback((id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setTunerTone(id);
-    if (playingStringIdx !== null) playTone(tuningStrings[playingStringIdx].midi, 100, id);
+    const midi = playingStringIdx !== null ? tuningStrings[playingStringIdx].midi : 57; // A3 → engine sounds A4
+    playTone(midi, 100, id);
   }, [setTunerTone, playingStringIdx, tuningStrings, playTone]);
 
   // Read live values out of refs (re-read every render-tick driven by the rAF loop).
@@ -315,7 +326,24 @@ export default function TunerScreen() {
       
       <PopUpModal visible={showTunings} onClose={() => setShowTunings(false)}>
         <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
-          <Text style={[styles.modalTitle, { color: t.txt1 }]}>Select Tuning</Text>
+          {/* Sound — pick the reference timbre; tapping auditions it immediately. */}
+          <Text style={[styles.modalTitle, { color: t.txt1 }]}>Sound</Text>
+          <View style={styles.toneRow}>
+            {TUNER_TONES.map(tone => {
+              const active = activeTone === tone.id;
+              return (
+                <TouchableOpacity
+                  key={tone.id}
+                  activeOpacity={0.7}
+                  onPress={() => pickTone(tone.id)}
+                  style={[styles.toneChip, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : t.bg2 }]}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: active ? '#fff' : t.txt2 }}>{tone.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={[styles.modalTitle, { color: t.txt1 }]}>Tuning</Text>
           <View style={{ borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
             {TUNING_KEYS.map((key, index) => {
               const selected = tuningKey === key;
@@ -471,22 +499,6 @@ export default function TunerScreen() {
 
         {mode === 'play' && (
           <View style={styles.playWrap}>
-            {/* Sound picker — choose the reference timbre. */}
-            <View style={styles.toneRow}>
-              {TUNER_TONES.map(tone => {
-                const active = tunerTone === tone.id;
-                return (
-                  <TouchableOpacity
-                    key={tone.id}
-                    activeOpacity={0.7}
-                    onPress={() => pickTone(tone.id)}
-                    style={[styles.toneChip, { borderColor: active ? t.accent : t.border, backgroundColor: active ? t.accent : t.bg2 }]}
-                  >
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: active ? '#fff' : t.txt2 }}>{tone.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
             <View style={styles.stringsColumn}>
               {tuningStrings.map((s, i) => {
                 const isPlaying = playingStringIdx === i;
@@ -571,7 +583,7 @@ const styles = StyleSheet.create({
   listenLayout: { width: '100%', overflow: 'hidden' },
   
   playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 24, justifyContent: 'center' },
-  toneRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 28 },
+  toneRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   toneChip: { paddingHorizontal: 14, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 stringsColumn: { gap: 0 },
   stringRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },

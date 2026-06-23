@@ -72,15 +72,17 @@ export const getAudioEngineHtml = (assets: any) => `
     dryBus.gain.value = MASTER_DRIVE;
     dryBus.connect(masterLimiter);
 
-    // Selectable tuner play-tones (PLAY_TONE tunerMode). Each is a recipe of harmonic SINE partials
-    // ([multiple, gain]) + a low-pass ceiling — all smooth (no buzz), all pitch-exact. The shared
-    // octave-up, equal-loudness tilt, attack swell, filter bloom and master reverb apply to every one.
-    const TONE_PRESETS = {
-      pure:   { partials: [[1, 1.0]],                              lp: 3500 }, // clean single sine
-      warm:   { partials: [[1, 1.0], [2, 0.45], [4, 0.09]],        lp: 3000 }, // round even-harmonic (default)
-      mellow: { partials: [[1, 1.0], [2, 0.25]],                   lp: 1900 }, // soft, dark, flute-like
-      glass:  { partials: [[1, 1.0], [2, 0.5], [4, 0.35], [6, 0.14]], lp: 4500 }, // bright, bell/glassy shimmer
-      organ:  { partials: [[1, 1.0], [2, 0.7], [3, 0.45], [4, 0.3]],  lp: 3500 }, // drawbar-ish (adds the 12th)
+    // Selectable tuner play-tones (PLAY_TONE tunerMode): STRUCK 2-operator FM voices — a modulator sine
+    // FMs a carrier sine, and the modulation index decays FASTER than the amplitude, so each note has a
+    // bright bloom on the attack that mellows into a pure ring (the e-piano/bell signature). The carrier
+    // is the exact pitch (no vibrato → still a precise reference). ratio = modulator:carrier frequency
+    // (non-integer = inharmonic / bell-like); index = peak FM depth; ampDecay/modDecay in seconds; lp = top.
+    const FM_PRESETS = {
+      epiano:   { ratio: 1.0,  index: 2.6, ampDecay: 2.2, modDecay: 0.45, lp: 4500 }, // Rhodes-ish electric piano
+      bell:     { ratio: 3.5,  index: 4.5, ampDecay: 4.5, modDecay: 1.8,  lp: 7000 }, // inharmonic bell, long ring
+      musicbox: { ratio: 3.0,  index: 2.2, ampDecay: 1.7, modDecay: 0.6,  lp: 8000 }, // bright, delicate
+      marimba:  { ratio: 4.0,  index: 1.8, ampDecay: 0.7, modDecay: 0.28, lp: 6000 }, // short, woody mallet
+      glass:    { ratio: 2.41, index: 3.5, ampDecay: 3.2, modDecay: 1.1,  lp: 9000 }, // shimmery inharmonic glass
     };
 
     const buffers = { piano: {}, guitar: {}, bass: {} };
@@ -450,10 +452,14 @@ export const getAudioEngineHtml = (assets: any) => `
 
           const masterGain = audioCtx.createGain();
           masterGain.gain.setValueAtTime(0, now);
-          masterGain.gain.linearRampToValueAtTime(vol, now + (tunerMode ? 0.12 : 0.08)); // soft breathy flute attack (tuner); overlaps the outgoing tone's release for a click-free crossfade
+          // Tuner notes are STRUCK (the per-note envelope shapes the strike+ring), so the master rises
+          // almost instantly; the hold pad keeps its soft swell. Both overlap the outgoing tone's 60 ms
+          // release for a click-free crossfade.
+          masterGain.gain.linearRampToValueAtTime(vol, now + (tunerMode ? 0.004 : 0.08));
           masterGain.connect(masterBus);
 
           const newOscillators = [];
+          let voiceStopAt = Infinity; // struck tuner voices auto-decay → finite stop; hold pad = Infinity
           midis.forEach(midi => {
             let m = midi;
             if (tunerMode) {
@@ -486,33 +492,45 @@ export const getAudioEngineHtml = (assets: any) => `
               level *= Math.max(0.35, Math.min(1.7, tilt));
             }
             if (tunerMode) {
-              // The chosen tuner timbre (default warm). All recipes are harmonic SINES — octave-consonant,
-              // no sawtooth/odd-buzz — and stay pitch-exact (it's a tuning reference, no vibrato). The
-              // cutoff eases open across the attack (bloom) so every note rounds IN gently rather than
-              // arriving fully bright; the per-preset ceiling sets the steady-state air.
-              const preset = TONE_PRESETS[data.tone] || TONE_PRESETS.warm;
-              const partials = preset.partials;
-              const totalGain = partials.reduce((s, p) => s + p[1], 0);
-              noteGain.gain.value = level / totalGain; // normalise the summed partials
-              noteGain.connect(masterGain);
+              // STRUCK 2-operator FM voice (e-piano / bell / music-box / marimba / glass). modulator → FMs
+              // the carrier's frequency; modGain (the FM depth) decays fast so the bright attack settles
+              // into a pure ring, while the amplitude rings out more slowly. Carrier = exact pitch.
+              const preset = FM_PRESETS[data.tone] || FM_PRESETS.epiano;
+              const t0 = now;
+              const ampDecay = preset.ampDecay;
+
               const lp = audioCtx.createBiquadFilter();
               lp.type = 'lowpass';
+              lp.frequency.value = preset.lp;
               lp.Q.value = 0.5;
               lp.connect(noteGain);
-              const openHz = preset.lp;
-              lp.frequency.setValueAtTime(Math.min(1700, openHz * 0.6), now);
-              lp.frequency.exponentialRampToValueAtTime(openHz, now + 0.22);
-              partials.forEach(p => {
-                const o = audioCtx.createOscillator();
-                o.type = 'sine';
-                o.frequency.value = freq * p[0];
-                const g = audioCtx.createGain();
-                g.gain.value = p[1];
-                o.connect(g);
-                g.connect(lp);
-                o.start(now);
-                newOscillators.push(o);
-              });
+              noteGain.connect(masterGain);
+
+              // Struck amplitude: near-instant attack, exponential ring-out to silence.
+              noteGain.gain.setValueAtTime(0.0001, t0);
+              noteGain.gain.exponentialRampToValueAtTime(level, t0 + 0.004);
+              noteGain.gain.exponentialRampToValueAtTime(Math.max(0.00001, level * 0.0008), t0 + ampDecay);
+
+              const carrier = audioCtx.createOscillator();
+              carrier.type = 'sine';
+              carrier.frequency.value = freq;
+              carrier.connect(lp);
+
+              const modulator = audioCtx.createOscillator();
+              modulator.type = 'sine';
+              modulator.frequency.value = freq * preset.ratio;
+              const modGain = audioCtx.createGain();
+              const modPeak = preset.index * freq * preset.ratio; // FM depth in Hz
+              modGain.gain.setValueAtTime(modPeak, t0);
+              modGain.gain.exponentialRampToValueAtTime(Math.max(1, modPeak * 0.02), t0 + preset.modDecay);
+              modulator.connect(modGain);
+              modGain.connect(carrier.frequency);
+
+              const stopT = t0 + ampDecay + 0.15;
+              carrier.start(t0); modulator.start(t0);
+              carrier.stop(stopT); modulator.stop(stopT);
+              newOscillators.push(carrier, modulator);
+              voiceStopAt = stopT;
             } else {
               noteGain.gain.value = level;
               noteGain.connect(masterGain);
@@ -527,7 +545,7 @@ export const getAudioEngineHtml = (assets: any) => `
 
           // Register as a tracked voice so future PLAY_TONEs and STOP_TONEs
           // can reach it even after it would otherwise become "orphaned".
-          toneVoices.push({ oscillators: newOscillators, masterGain, stopAt: Infinity });
+          toneVoices.push({ oscillators: newOscillators, masterGain, stopAt: voiceStopAt });
         }
         else if (data.type === 'STOP_TONE') {
           stopAllToneVoices(data.fadeMs || 200);

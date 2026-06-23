@@ -47,7 +47,7 @@ export interface SettingsState {
   sortMode: 'list' | 'voicings';
   pianoKeyWidth: number;
   referenceFrequency: number;
-  tunerTone: string; // selected tuner play-tone timbre (pure / warm / mellow / glass / organ)
+  tunerTone: string; // selected tuner play-tone timbre (epiano / bell / musicbox / marimba / glass)
   isSettingsOpen: boolean;
   isTutorialOpen: boolean;
   octaveNumbering: boolean;
@@ -125,7 +125,7 @@ export const useSettingsStore = create<SettingsState>()(
       sortMode: 'list',
       pianoKeyWidth: 24,
       referenceFrequency: 440,
-      tunerTone: 'warm',
+      tunerTone: 'epiano',
       isSettingsOpen: false,
       isTutorialOpen: false,
       octaveNumbering: false,
@@ -212,7 +212,7 @@ export const useSettingsStore = create<SettingsState>()(
         pianoZone: 4,
         colorMode: 'roles',
         referenceFrequency: 440,
-        tunerTone: 'warm',
+        tunerTone: 'epiano',
         mixChordVol: 70,
         mixBassVol: 100,
         mixClickVol: 21,

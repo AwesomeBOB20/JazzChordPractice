@@ -243,7 +243,7 @@ const HELP_SECTIONS: HelpSection[] = [
       ] },
       { h: 'Play', b: [
         [I('volume-high'), ' Tap a string to sound its pitch; tap again to stop.'],
-        'Sound picker — choose the reference tone: Pure, Warm, Mellow, Glass, or Organ.',
+        [I('options'), ' Open the tuning popup to pick the reference sound — E-Piano, Bell, Music Box, Marimba, or Glass.'],
       ] },
       { h: 'Setup', b: [
         [I('options'), ' Tunings: Standard, Drop D, ½ Step Down, Open G, DADGAD.'],
