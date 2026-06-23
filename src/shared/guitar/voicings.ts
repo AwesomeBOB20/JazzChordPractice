@@ -1771,6 +1771,12 @@ export const STRING_SETS_BY_TYPE: Record<string, { key: string; label: string }[
   triads: TRIAD_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop2: DROP2_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
   drop3: DROP3_STRING_GROUPS.map(g => ({ key: [...g.indices].sort((a, b) => a - b).join(','), label: g.stringNums.replace(/ /g, '-') })),
+  // Drop 2 & 4 lives on two skip-string sets only (2 consecutive + skip + 2 consecutive): 6-5-3-2 and
+  // 5-4-2-1. Keys are activeStringKey form (sorted string indices, 0 = low E) to match the morph filter.
+  drop2and4: [
+    { key: '0,1,3,4', label: '6-5-3-2' },
+    { key: '1,2,4,5', label: '5-4-2-1' },
+  ],
   // Shell locks are GUIDE-TONE anchored: each pins the 3rd + 7th to one fixed string pair (the top
   // two voices) and lets the root bounce onto a lower bass string. b01 (E & A) → guides on the D & G
   // strings, root on the 6th/5th (643/543); b12 (A & D) → guides on the G & B strings, root on the
