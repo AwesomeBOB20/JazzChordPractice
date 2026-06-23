@@ -342,9 +342,11 @@ export default function TunerScreen() {
               );
             })}
           </ScrollView>
-          {/* Tuning — vertical scroller (capped) so a long list can't push Close off-screen. */}
+          {/* Tuning — vertical scroller (capped) so a long list can't push Close off-screen. flexGrow:0
+              so the ScrollView HUGS its content (RN ScrollViews default to flexGrow:1 and would otherwise
+              stretch the whole popup to full height). */}
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Tuning</Text>
-          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.45 }} showsVerticalScrollIndicator={true}>
+          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.42, flexGrow: 0, flexShrink: 1 }} showsVerticalScrollIndicator={true}>
             <View style={{ borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
               {TUNING_KEYS.map((key, index) => {
                 const selected = tuningKey === key;
