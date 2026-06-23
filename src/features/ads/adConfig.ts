@@ -1,17 +1,32 @@
 import { Platform } from 'react-native';
 
-// Replace TEST_* with real AdMob IDs after registering the app at admob.google.com.
-// Real IDs format: ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX
-// Real app IDs go in app.json under react-native-google-mobile-ads.androidAppId / iosAppId.
-const TEST_ANDROID_BANNER      = 'ca-app-pub-3940256099942544/6300978111';
-const TEST_ANDROID_INTERSTITIAL = 'ca-app-pub-3940256099942544/1033173712';
-const TEST_IOS_BANNER          = 'ca-app-pub-3940256099942544/2934735716';
-const TEST_IOS_INTERSTITIAL    = 'ca-app-pub-3940256099942544/4411468910';
+// Google's official TEST ad units. These MUST be used during development — serving real ads to your
+// own device/test traffic violates AdMob policy and can get the account suspended. Safe to ship as a
+// fallback too (they just earn nothing).
+const TEST = {
+  android: { banner: 'ca-app-pub-3940256099942544/6300978111', interstitial: 'ca-app-pub-3940256099942544/1033173712' },
+  ios:     { banner: 'ca-app-pub-3940256099942544/2934735716', interstitial: 'ca-app-pub-3940256099942544/4411468910' },
+};
 
-// TODO: replace with real ad unit IDs from AdMob dashboard after app registration.
+// ⬇️  PASTE YOUR REAL AdMob ad-unit IDs HERE before a production release.
+// Get them at admob.google.com → your app → Ad units. Format: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX'.
+// Leave any blank ('') to keep using Google's test ad for that slot (safe — just no revenue).
+// NOTE: the app-level IDs (not these unit IDs) go in app.json under react-native-google-mobile-ads
+// → androidAppId / iosAppId.
+const REAL = {
+  android: { banner: '', interstitial: '' },
+  ios:     { banner: '', interstitial: '' },
+};
+
+const PLATFORM = Platform.OS === 'ios' ? 'ios' : 'android';
+// Development → always test ads (policy). Production → your real ID, falling back to the test ad for any
+// slot you haven't filled in yet, so a release can never crash or serve a broken/empty unit.
+const adUnit = (kind: 'banner' | 'interstitial'): string =>
+  __DEV__ ? TEST[PLATFORM][kind] : (REAL[PLATFORM][kind] || TEST[PLATFORM][kind]);
+
 export const AD_UNIT_IDS = {
-  banner:       Platform.OS === 'ios' ? TEST_IOS_BANNER       : TEST_ANDROID_BANNER,
-  interstitial: Platform.OS === 'ios' ? TEST_IOS_INTERSTITIAL : TEST_ANDROID_INTERSTITIAL,
+  banner: adUnit('banner'),
+  interstitial: adUnit('interstitial'),
 };
 
 // Interstitial frequency caps — "Balanced" profile. Tune these freely; they're the
