@@ -1023,7 +1023,8 @@ export default function ProgressionScreen() {
       <ScrollView ref={scrollRef} style={{ zIndex: 20, flex: 1, backgroundColor: t.bg2 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} removeClippedSubviews={true} bounces={false} overScrollMode="never">
         <View style={[styles.card, { backgroundColor: t.bg2, paddingTop: 0 }]}>
           
-          <View style={[styles.grid, { borderLeftWidth: 1, borderLeftColor: t.border }]}>
+          {/* No left border so the cells bleed flush to the screen's left edge (matches the open top). */}
+          <View style={styles.grid}>
             {displayCells.map((group, gIdx) => {
               // Auto-indent padding: an inert, non-interactive blank that pushes the next section
               // letter to column 1. No chord, no touch handlers — it can never be selected/played.
