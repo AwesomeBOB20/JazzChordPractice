@@ -325,12 +325,9 @@ export default function TunerScreen() {
       
       <PopUpModal visible={showTunings} onClose={() => setShowTunings(false)}>
         <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
-          {/* Sound + Tuning scroll together so a small screen can't push the Close button off; Close
-              stays pinned below the scroll area. */}
-          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.6 }} showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 4 }}>
-          {/* Sound — pick the reference timbre; tapping auditions it immediately. */}
+          {/* Sound — one-row horizontal scroller of timbres; tapping auditions it immediately. */}
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Sound</Text>
-          <View style={styles.toneRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.toneRow} contentContainerStyle={{ gap: 8, paddingRight: 4 }}>
             {TUNER_TONES.map(tone => {
               const active = activeTone === tone.id;
               return (
@@ -344,26 +341,28 @@ export default function TunerScreen() {
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
+          {/* Tuning — vertical scroller (capped) so a long list can't push Close off-screen. */}
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Tuning</Text>
-          <View style={{ borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
-            {TUNING_KEYS.map((key, index) => {
-              const selected = tuningKey === key;
-              const tu = TUNINGS[key];
-              // Only Standard is free; every alternate tuning is Pro.
-              const locked = key !== 'standard' && !isPro;
-              return (
-                <TouchableOpacity key={key} style={[ styles.tuningOverlayItem, selected && { backgroundColor: t.accent + '18' }, index !== TUNING_KEYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.border } ]}
-                  onPress={() => { if (locked) { setShowTunings(false); openPaywall('tuner'); return; } setTuningKey(key); setShowTunings(false); setPlayingStringIdx(null); stopAudio(); }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.tuningOverlayLabel, { color: selected ? t.accent : t.txt1 }]}>{tu.label}</Text>
-                    <Text style={[styles.tuningOverlayNotes, { color: t.txt3 }]}>{tu.strings.map(s => s.name.replace(/[0-9]/g, '')).join(' · ')}</Text>
-                  </View>
-                  {locked ? <Ionicons name="lock-closed" size={16} color={t.txt3} /> : (selected && <Ionicons name="checkmark" size={20} color={t.accent} />)}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.45 }} showsVerticalScrollIndicator={true}>
+            <View style={{ borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
+              {TUNING_KEYS.map((key, index) => {
+                const selected = tuningKey === key;
+                const tu = TUNINGS[key];
+                // Only Standard is free; every alternate tuning is Pro.
+                const locked = key !== 'standard' && !isPro;
+                return (
+                  <TouchableOpacity key={key} style={[ styles.tuningOverlayItem, selected && { backgroundColor: t.accent + '18' }, index !== TUNING_KEYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.border } ]}
+                    onPress={() => { if (locked) { setShowTunings(false); openPaywall('tuner'); return; } setTuningKey(key); setShowTunings(false); setPlayingStringIdx(null); stopAudio(); }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.tuningOverlayLabel, { color: selected ? t.accent : t.txt1 }]}>{tu.label}</Text>
+                      <Text style={[styles.tuningOverlayNotes, { color: t.txt3 }]}>{tu.strings.map(s => s.name.replace(/[0-9]/g, '')).join(' · ')}</Text>
+                    </View>
+                    {locked ? <Ionicons name="lock-closed" size={16} color={t.txt3} /> : (selected && <Ionicons name="checkmark" size={20} color={t.accent} />)}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </ScrollView>
           <View style={styles.modalBtnRow}>
             <TouchableOpacity style={styles.modalBtn} onPress={() => setShowTunings(false)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Close</Text></TouchableOpacity>
@@ -586,7 +585,8 @@ const styles = StyleSheet.create({
   listenLayout: { width: '100%', overflow: 'hidden' },
   
   playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 24, justifyContent: 'center' },
-  toneRow: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  // Horizontal sound scroller: flexGrow:0 so it hugs the chip height instead of stretching vertically.
+  toneRow: { flexGrow: 0, marginBottom: 20 },
   toneChip: { paddingHorizontal: 14, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 stringsColumn: { gap: 0 },
   stringRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },
