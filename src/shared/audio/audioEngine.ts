@@ -75,14 +75,16 @@ export const getAudioEngineHtml = (assets: any) => `
     // Selectable tuner play-tones (PLAY_TONE tunerMode): SUSTAINED 2-operator FM voices — a modulator sine
     // FMs a carrier sine at a FLAT depth, so the timbre holds steady and the note sustains at a CONSTANT
     // volume until tapped off (no decay/ring-out). Carrier = exact pitch (no vibrato → precise reference).
-    // ratio = modulator:carrier frequency (non-integer = inharmonic / bell-like); index = (flat) FM depth;
-    // lp = low-pass ceiling. Indices are kept moderate so a held tone stays musical, not buzzy.
+    // ratio = modulator:carrier frequency; index = (flat) FM depth; lp = low-pass ceiling. For MELLOW
+    // held tones the keys are: HARMONIC (integer) ratios so partials stay consonant, SMALL indices so
+    // there's little brightness/buzz, and a LOW cutoff to roll off the top. (Inharmonic ratios + high
+    // indices held = the harsh metallic drone we're avoiding.)
     const FM_PRESETS = {
-      epiano:   { ratio: 1.0,  index: 1.0, lp: 4000 }, // warm Rhodes-ish
-      bell:     { ratio: 3.5,  index: 1.6, lp: 6000 }, // metallic / inharmonic
-      musicbox: { ratio: 3.0,  index: 1.2, lp: 7000 }, // bright, glassy
-      marimba:  { ratio: 4.0,  index: 0.9, lp: 5000 }, // hollow, woody
-      glass:    { ratio: 2.41, index: 1.4, lp: 7000 }, // shimmery inharmonic
+      sine:   { ratio: 1.0, index: 0.0,  lp: 2600 }, // pure round sine — the mellowest
+      warm:   { ratio: 1.0, index: 0.55, lp: 2400 }, // soft added harmonics, full but dark
+      hollow: { ratio: 2.0, index: 0.40, lp: 2600 }, // gentle clarinet-ish hollow
+      reed:   { ratio: 3.0, index: 0.32, lp: 2200 }, // soft reed, a touch more body
+      velvet: { ratio: 1.0, index: 0.28, lp: 1800 }, // very dark, smooth, damped
     };
 
     const buffers = { piano: {}, guitar: {}, bass: {} };
@@ -493,7 +495,7 @@ export const getAudioEngineHtml = (assets: any) => `
               // SUSTAINED 2-operator FM voice (e-piano / bell / music-box / marimba / glass): a modulator
               // sine FMs the carrier's frequency at a FLAT depth, so the timbre holds steady and the note
               // sustains at constant volume until stopped — no decay. Carrier = exact pitch (no vibrato).
-              const preset = FM_PRESETS[data.tone] || FM_PRESETS.epiano;
+              const preset = FM_PRESETS[data.tone] || FM_PRESETS.warm;
 
               const lp = audioCtx.createBiquadFilter();
               lp.type = 'lowpass';

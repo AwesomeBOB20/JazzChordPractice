@@ -53,16 +53,16 @@ const VISIBLE_SEMITONE_RANGE = 10; // How many semitones to show vertically
 const HEADROOM_SEMITONES = 0.9; // Bias the chart so the live pitch line never touches the top
 
 // Selectable Play-mode reference tones (ids match TONE_PRESETS in audioEngine.ts).
-// Sustained FM reference tones (ids match FM_PRESETS in audioEngine.ts). Each holds at a flat volume
-// until tapped off.
+// Sustained, mellow FM reference tones (ids match FM_PRESETS in audioEngine.ts). Each holds at a flat
+// volume until tapped off.
 const TUNER_TONES: { id: string; label: string }[] = [
-  { id: 'epiano', label: 'E-Piano' },
-  { id: 'bell', label: 'Bell' },
-  { id: 'musicbox', label: 'Music Box' },
-  { id: 'marimba', label: 'Marimba' },
-  { id: 'glass', label: 'Glass' },
+  { id: 'sine', label: 'Sine' },
+  { id: 'warm', label: 'Warm' },
+  { id: 'hollow', label: 'Hollow' },
+  { id: 'reed', label: 'Reed' },
+  { id: 'velvet', label: 'Velvet' },
 ];
-const DEFAULT_TONE = 'epiano';
+const DEFAULT_TONE = 'warm';
 
 function calculatePitch(frequency: number, refFreq: number) {
   const A4_INDEX = 69;
