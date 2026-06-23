@@ -420,7 +420,6 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
       : buildMorphSections(effectiveCategory, rootSemi, stringSet!, effectiveAllRoots)),
     [morphActive, cagedMorph, effectiveCategory, rootSemi, stringSet, effectiveAllRoots, octave, selectedScaleId]
   );
-  const isQualityMorph = morphActive && !cagedMorph;
   // The inversion groups are collapsible accordion rows (like the browse view). They start CLOSED —
   // nothing opens until the user taps a row.
   const [morphExpanded, setMorphExpanded] = React.useState<Set<string>>(new Set());
@@ -508,12 +507,16 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
   const activeGroup = groupedSections[fIdx];
   // Items shown for this root (empties hidden so header counts match what's rendered).
   const visibleItems = (activeGroup?.items ?? []).filter(i => itemCounts[i.key] > 0);
-  // Chord-family morph: the family tabs (Triads / 7th Chords / …) split the qualities, so a string set
-  // doesn't dump every quality in one pile. Derived from the built cells, in CHORD_CATEGORIES order, so
-  // only families actually present (for this voicing type + string set) get a tab. (Caged morph already
-  // groups by family as sections, so it keeps the browse family bar.)
+  // Morph family tabs — ALWAYS derived from the BUILT sections so the tabs match exactly what's shown,
+  // and selecting one filters to that family. Two shapes:
+  //   • chord-family morph: families = each cell's CHORD_CATEGORIES family (sections are inversions);
+  //     selecting one keeps only that family's cells in each inversion.
+  //   • caged-box morph: each SECTION already IS a browse family (Major Modes, Pentatonic…); the tab
+  //     just picks which family's box to show. Deriving from the built sections (not the box-agnostic
+  //     browse groups) is what keeps the right scales under the right tab for THIS box.
   const morphFamilies = React.useMemo(() => {
-    if (!isQualityMorph) return [] as { label: string; count: number }[];
+    if (!morphActive) return [] as { label: string; count: number }[];
+    if (cagedMorph) return morphSections.map(s => ({ label: s.inversionLabel, count: s.cells.length }));
     const byFam = new Map<string, Set<string>>();
     for (const sec of morphSections) for (const c of sec.cells as any[]) {
       const fam = c.family || 'Other';
@@ -522,22 +525,24 @@ export default function ChordDictionary({ t, preview, onPreviewEnd }: Props) {
     const out = (CHORD_CATEGORIES as any[]).filter(cc => byFam.has(cc.label)).map(cc => ({ label: cc.label, count: byFam.get(cc.label)!.size }));
     byFam.forEach((set, label) => { if (!(CHORD_CATEGORIES as any[]).some(cc => cc.label === label)) out.push({ label, count: set.size }); });
     return out;
-  }, [isQualityMorph, morphSections]);
+  }, [morphActive, cagedMorph, morphSections]);
   const morphFIdx = morphFamilies.length ? Math.min(familyIdx, morphFamilies.length - 1) : 0;
   const selectedMorphFamily = morphFamilies[morphFIdx]?.label;
-  // Apply the family filter to the inversion sections; empty inversions (e.g. triads have no 3rd) drop out.
   const displayedMorphSections = React.useMemo(() => {
-    if (!isQualityMorph || !selectedMorphFamily) return morphSections;
+    if (!morphActive || !selectedMorphFamily) return morphSections;
+    // Caged: keep the one section whose family matches the tab. Chord: filter each inversion's cells to
+    // the family (empty inversions — e.g. triads have no 3rd — drop out).
+    if (cagedMorph) return morphSections.filter(s => s.inversionLabel === selectedMorphFamily);
     return morphSections
       .map(sec => ({ ...sec, cells: (sec.cells as any[]).filter(c => (c.family || 'Other') === selectedMorphFamily) }))
       .filter(sec => sec.cells.length > 0);
-  }, [isQualityMorph, selectedMorphFamily, morphSections]);
-  // Family tab bar: browse uses the category's groups; the chord-family morph uses the quality families
-  // present in the built cells. Both feed setFamilyIdx by index, so the active highlight stays in sync.
-  const familyTabs = isQualityMorph
+  }, [morphActive, cagedMorph, selectedMorphFamily, morphSections]);
+  // Family tab bar: browse uses the category's groups; either morph uses the built-section families.
+  // Both feed setFamilyIdx by index, so the active highlight stays in sync.
+  const familyTabs = morphActive
     ? morphFamilies.map((f, i) => ({ label: f.label, count: f.count, idx: i }))
     : groupedSections.map((g, gi) => ({ label: g.label, count: familyAvailItems[gi], idx: gi })).filter(tab => tab.count > 0);
-  const activeFamIdx = isQualityMorph ? morphFIdx : fIdx;
+  const activeFamIdx = morphActive ? morphFIdx : fIdx;
 
   // ── Pro preview: a free user tapping the (normal-looking) Dictionary lands here in PREVIEW mode.
   // PlayScreen wraps this in pointerEvents:none (non-interactive). We OPEN the sections so the screen
