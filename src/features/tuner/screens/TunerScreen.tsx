@@ -45,6 +45,7 @@ const GAP_BREAK_MS = 220;
 
 // UI Constants
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
 const GRAPH_WIDTH = SCREEN_WIDTH;
 const NOTE_SCALE_WIDTH = 44;
 const GRAPH_AREA_WIDTH = GRAPH_WIDTH - NOTE_SCALE_WIDTH;
@@ -324,6 +325,9 @@ export default function TunerScreen() {
       
       <PopUpModal visible={showTunings} onClose={() => setShowTunings(false)}>
         <View style={[styles.modalBox, { backgroundColor: t.bg2, borderColor: t.border }]}>
+          {/* Sound + Tuning scroll together so a small screen can't push the Close button off; Close
+              stays pinned below the scroll area. */}
+          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.6 }} showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 4 }}>
           {/* Sound — pick the reference timbre; tapping auditions it immediately. */}
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Sound</Text>
           <View style={styles.toneRow}>
@@ -360,6 +364,7 @@ export default function TunerScreen() {
               );
             })}
           </View>
+          </ScrollView>
           <View style={styles.modalBtnRow}>
             <TouchableOpacity style={styles.modalBtn} onPress={() => setShowTunings(false)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Close</Text></TouchableOpacity>
           </View>
