@@ -26,16 +26,6 @@ const SLIDES: Array<{
     ],
   },
   {
-    icon: 'apps-outline',
-    title: 'Getting Around',
-    bullets: [
-      { icon: 'compass-outline', text: 'Explore: look up and learn any chord' },
-      { icon: 'musical-notes-outline', text: 'Song: line up chords and play them back' },
-      { icon: 'puzzle-outline', lib: 'mci', text: 'Quiz: test yourself and train your ear' },
-      { icon: 'guitar-pick-outline', lib: 'mci', text: 'Tuner: get your instrument in tune' },
-    ],
-  },
-  {
     icon: 'piano',
     lib: 'mci',
     title: 'Piano or Guitar',
@@ -52,18 +42,8 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'swap-horizontal-outline', text: 'Use the ‹ › arrows to pick any chord' },
       { icon: 'albums-outline', text: 'Tabs below show different ways to play it' },
-      { icon: 'finger-print-outline', text: 'Side arrows step through each finger position' },
       { icon: 'volume-medium-outline', text: 'Tap a dot or key to hear that one note' },
-    ],
-  },
-  {
-    icon: 'book-outline',
-    title: 'The Dictionary',
-    bullets: [
-      { icon: 'grid-outline', text: 'A reference book of every chord and shape' },
-      { icon: 'toggle-outline', text: 'Switch it on with the toggle at the top of Explore' },
-      { icon: 'chevron-down-outline', text: 'Tap a row to open up its diagrams' },
-      { icon: 'volume-medium-outline', text: 'Tap any diagram to hear how it sounds' },
+      { icon: 'book-outline', text: 'Flip on Dictionary to browse every chord, scale & shape' },
     ],
   },
   {
@@ -99,21 +79,11 @@ const SLIDES: Array<{
     ],
   },
   {
-    icon: 'settings-outline',
-    title: 'Settings',
-    bullets: [
-      { icon: 'settings-outline', text: 'Tap the gear in the top-right corner' },
-      { icon: 'color-palette-outline', text: 'Pick a color theme — light, dark, and more' },
-      { icon: 'text-outline', text: 'Show note names right on the diagrams' },
-      { icon: 'volume-medium-outline', text: 'Adjust the sound and volume' },
-    ],
-  },
-  {
     icon: 'help-circle-outline',
     title: 'Need More Help?',
     bullets: [
-      { icon: 'document-text-outline', text: 'Every feature is explained in full inside' },
-      { icon: 'settings-outline', text: 'Open Settings, then Help & Tutorial' },
+      { icon: 'settings-outline', text: 'Settings (top-right gear): themes, note labels, sound' },
+      { icon: 'document-text-outline', text: 'Every feature is explained in full under Help & Tutorial' },
       { icon: 'play-circle-outline', text: 'You can replay this intro any time' },
       { icon: 'happy-outline', text: 'That\'s it — have fun exploring!' },
     ],
