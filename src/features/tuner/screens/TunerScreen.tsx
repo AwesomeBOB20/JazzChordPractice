@@ -346,7 +346,7 @@ export default function TunerScreen() {
               so the ScrollView HUGS its content (RN ScrollViews default to flexGrow:1 and would otherwise
               stretch the whole popup to full height). */}
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Tuning</Text>
-          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.42, flexGrow: 0, flexShrink: 1 }} showsVerticalScrollIndicator={true}>
+          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.3, flexGrow: 0, flexShrink: 1 }} showsVerticalScrollIndicator={true}>
             <View style={{ borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
               {TUNING_KEYS.map((key, index) => {
                 const selected = tuningKey === key;
@@ -576,11 +576,11 @@ const styles = StyleSheet.create({
   actionBtnTxt: { fontWeight: '700', fontSize: 16 },
   tunerActionBtn: { width: 64, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   
-  modalBox: { width: '100%', padding: 20, borderRadius: 16, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
-  modalTitle: { fontSize: 24, fontWeight: '700', letterSpacing: 0.5, marginBottom: 16 },
-  modalBtnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 },
-  modalBtn: { paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 },
-  tuningOverlayItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16 },
+  modalBox: { width: '100%', padding: 16, borderRadius: 16, borderWidth: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 10 },
+  modalTitle: { fontSize: 16, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8 },
+  modalBtnRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
+  modalBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
+  tuningOverlayItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16 },
   tuningOverlayLabel: { fontSize: 16, fontWeight: '700' },
   tuningOverlayNotes: { fontSize: 12, fontWeight: '500', marginTop: 2 },
   
@@ -588,7 +588,7 @@ const styles = StyleSheet.create({
   
   playWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 24, justifyContent: 'center' },
   // Horizontal sound scroller: flexGrow:0 so it hugs the chip height instead of stretching vertically.
-  toneRow: { flexGrow: 0, marginBottom: 20 },
+  toneRow: { flexGrow: 0, marginBottom: 14 },
   toneChip: { paddingHorizontal: 14, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 stringsColumn: { gap: 0 },
   stringRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },
