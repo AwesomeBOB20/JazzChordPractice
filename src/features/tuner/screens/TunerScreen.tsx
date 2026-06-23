@@ -13,6 +13,7 @@ import { familyForWeight } from '@shared/fonts/fonts';
 import { useAudio } from '@shared/audio/AudioContext';
 import { startListening, stopListening, addPitchListener } from '../../../../modules/native-tuner';
 import { Audio } from 'expo-av';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PopUpModal } from '@shared/ui/SharedModals';
 import { AdBanner } from '@features/ads/AdBanner';
 import { useInterstitial } from '@features/ads/useInterstitial';
@@ -98,6 +99,10 @@ export default function TunerScreen() {
   const [mode, setMode] = useState<'listen' | 'play'>(micAvailable ? 'listen' : 'play');
   const [tuningKey, setTuningKey] = useState('standard');
   const [showTunings, setShowTunings] = useState(false);
+  // Tuning-list scroll position → drives the top/bottom fade overlays (only shown where content overflows).
+  const [tuningScroll, setTuningScroll] = useState({ y: 0, viewH: 0, contentH: 0 });
+  const tuningAtTop = tuningScroll.y <= 4;
+  const tuningCanScrollDown = tuningScroll.contentH - tuningScroll.viewH - tuningScroll.y > 4;
   const tuning = TUNINGS[tuningKey];
 
   const tuningStrings = tuning.strings.map(s => ({ ...s, hz: referenceFrequency * Math.pow(2, (s.midi - 69) / 12) }));
@@ -346,8 +351,16 @@ export default function TunerScreen() {
               so the ScrollView HUGS its content (RN ScrollViews default to flexGrow:1 and would otherwise
               stretch the whole popup to full height). */}
           <Text style={[styles.modalTitle, { color: t.txt1 }]}>Tuning</Text>
-          <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.3, flexGrow: 0, flexShrink: 1 }} showsVerticalScrollIndicator={true}>
-            <View style={{ borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
+          {/* position:relative so the fade overlays sit over the scroll edges (same look as elsewhere). */}
+          <View style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: t.border }}>
+            <ScrollView
+              style={{ maxHeight: SCREEN_HEIGHT * 0.3, flexGrow: 0, flexShrink: 1 }}
+              showsVerticalScrollIndicator={true}
+              scrollEventThrottle={16}
+              onLayout={(e) => setTuningScroll(s => ({ ...s, viewH: e.nativeEvent.layout.height }))}
+              onContentSizeChange={(_w, h) => setTuningScroll(s => ({ ...s, contentH: h }))}
+              onScroll={(e) => setTuningScroll(s => ({ ...s, y: e.nativeEvent.contentOffset.y }))}
+            >
               {TUNING_KEYS.map((key, index) => {
                 const selected = tuningKey === key;
                 const tu = TUNINGS[key];
@@ -364,8 +377,11 @@ export default function TunerScreen() {
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          </ScrollView>
+            </ScrollView>
+            {/* Fade the clipped items at the edges — top when scrolled down, bottom when more below. */}
+            {!tuningAtTop && <LinearGradient colors={[t.bg2, 'transparent']} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 22, zIndex: 10 }} pointerEvents="none" />}
+            {tuningCanScrollDown && <LinearGradient colors={['transparent', t.bg2]} style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 32, zIndex: 10 }} pointerEvents="none" />}
+          </View>
           <View style={styles.modalBtnRow}>
             <TouchableOpacity style={styles.modalBtn} onPress={() => setShowTunings(false)}><Text style={{ color: t.txt3, fontSize: 16, fontWeight: '600' }}>Close</Text></TouchableOpacity>
           </View>
