@@ -2,14 +2,15 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// WEB ONLY: stub react-native-google-mobile-ads. It's a native-only module whose internals import
-// `react-native/Libraries/Utilities/codegenNativeCommands`, which the web bundler can't resolve, so
-// it fails the whole web build. At runtime adsModule.ts already no-ops ads on web (adsReady=false),
-// so resolving the package to an empty module on web is harmless — and it lets `expo start --web`
-// bundle for previewing/verifying UI. Native (iOS/Android) resolution is untouched.
+// WEB ONLY: stub native-only modules that the web bundler can't resolve (they import native codegen
+// internals and would fail the whole web build). react-native-google-mobile-ads → ads no-op on web
+// (adsReady=false); react-native-purchases → has no web support, and purchases.ts no-ops on web. Stubbing
+// them to an empty module on web is harmless and lets `expo start --web` bundle for preview/verify.
+// Native (iOS/Android) resolution is untouched.
+const WEB_STUBBED = ['react-native-google-mobile-ads', 'react-native-purchases'];
 const defaultResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (platform === 'web' && moduleName === 'react-native-google-mobile-ads') {
+  if (platform === 'web' && WEB_STUBBED.includes(moduleName)) {
     return { type: 'empty' };
   }
   return defaultResolveRequest
