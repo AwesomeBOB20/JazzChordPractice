@@ -278,10 +278,17 @@ function VoicingExplorer({
   const overlayActive = isPro && scaleOverlay;
   const { recordAction: recordChordChange } = useInterstitial({ everyN: INTERSTITIAL_CHORD_CHANGES });
   // Count every chord change (randomize or manual root/quality nav) toward the Explore interstitial.
-  // Skip the initial mount so arriving on the screen doesn't count as a change.
+  // Skip the initial mount so arriving on the screen doesn't count as a change. CRITICAL: also skip
+  // when this screen ISN'T focused — it stays mounted in the background, and progression playback
+  // (and the quiz) write the SAME chord store on every measure. Without this focus gate the
+  // backgrounded Explore ad fired mid-song = the "ad pops up during progression playback" bug.
+  const exploreFocused = useIsFocused();
+  const exploreFocusedRef = useRef(exploreFocused);
+  exploreFocusedRef.current = exploreFocused;
   const chordChangeMounted = useRef(false);
   React.useEffect(() => {
     if (!chordChangeMounted.current) { chordChangeMounted.current = true; return; }
+    if (!exploreFocusedRef.current) return; // background chord-store writes (progression/quiz) don't count
     recordChordChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootSemi, chordType]);

@@ -1337,7 +1337,15 @@ export default function ProgressionScreen() {
 
       <ProgressionPlayerDock
         playingIdx={playingIdx} isPlayingSystem={isPlayingSystem} isLooping={isLooping} toggleLooping={toggleLooping}
-        handlePlayProgression={() => { setSelectedCell(null); handlePlayProgression(); }} stopPlayback={() => stopPlayback()}
+        handlePlayProgression={() => { setSelectedCell(null); handlePlayProgression(); }}
+        stopPlayback={() => {
+          // User pressed Stop on a playing song = a "finish". Stop FIRST, then count it toward the
+          // interstitial (so a looping song the user listens to then stops can show an ad — never
+          // mid-play). Only the explicit Stop button counts; internal stops (blur/clear/load) don't.
+          const wasPlaying = isPlayingSystem;
+          stopPlayback();
+          if (wasPlaying) recordPlaythrough();
+        }}
         onOpenSave={() => {
           // Saving progressions is a Pro feature.
           if (!isPro) { openPaywall('saved-songs'); return; }

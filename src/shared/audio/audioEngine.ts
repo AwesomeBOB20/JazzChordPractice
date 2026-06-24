@@ -181,16 +181,19 @@ export const getAudioEngineHtml = (assets: any) => `
 
         if (data.type === 'STOP_ALL') {
           const now = audioCtx.currentTime;
-          const fadeSecs = 0.015; // 15ms quick de-click fade
+          const fadeSecs = 0.02; // 20ms de-click fade to TRUE zero
           activeSources.forEach(entry => {
             try {
+              // Linear ramp to EXACT zero before stop(). setTargetAtTime is asymptotic and never
+              // reaches 0, so the hard stop() cut a ~0.5-2% residual tail → the click/pop.
               entry.gain.gain.cancelScheduledValues(now);
-              entry.gain.gain.setTargetAtTime(0, now, fadeSecs / 3);
-              entry.source.stop(now + fadeSecs + 0.01);
+              entry.gain.gain.setValueAtTime(Math.max(0.00001, entry.gain.gain.value), now);
+              entry.gain.gain.linearRampToValueAtTime(0, now + fadeSecs);
+              entry.source.stop(now + fadeSecs + 0.02);
             } catch(e) {}
           });
           activeSources = [];
-          activeMetronomes.forEach(m => { try { m.gain.gain.cancelScheduledValues(now); m.gain.gain.setValueAtTime(0, now); m.source.stop(now); } catch(e) {} });
+          activeMetronomes.forEach(m => { try { m.gain.gain.cancelScheduledValues(now); m.gain.gain.setValueAtTime(Math.max(0.00001, m.gain.gain.value), now); m.gain.gain.linearRampToValueAtTime(0, now + 0.006); m.source.stop(now + 0.02); } catch(e) {} });
           activeMetronomes = [];
           nextMeasureTime = 0;
           stopAllToneVoices(40);
@@ -201,14 +204,15 @@ export const getAudioEngineHtml = (assets: any) => `
           const now = audioCtx.currentTime;
           activeSources.forEach(entry => {
             try {
+              // Linear ramp to TRUE zero before stop() (setTargetAtTime never reaches 0 → click).
               entry.gain.gain.cancelScheduledValues(now);
-              const timeConstant = fadeSecs / 3;
-              entry.gain.gain.setTargetAtTime(0, now, timeConstant);
-              entry.source.stop(now + fadeSecs + 0.05);
+              entry.gain.gain.setValueAtTime(Math.max(0.00001, entry.gain.gain.value), now);
+              entry.gain.gain.linearRampToValueAtTime(0, now + fadeSecs);
+              entry.source.stop(now + fadeSecs + 0.03);
             } catch(e) {}
           });
           activeSources = [];
-          activeMetronomes.forEach(m => { try { m.gain.gain.cancelScheduledValues(now); m.gain.gain.setValueAtTime(0, now); m.source.stop(now); } catch(e) {} });
+          activeMetronomes.forEach(m => { try { m.gain.gain.cancelScheduledValues(now); m.gain.gain.setValueAtTime(Math.max(0.00001, m.gain.gain.value), now); m.gain.gain.linearRampToValueAtTime(0, now + 0.006); m.source.stop(now + 0.02); } catch(e) {} });
           activeMetronomes = [];
           nextMeasureTime = 0;
         }
@@ -218,10 +222,11 @@ export const getAudioEngineHtml = (assets: any) => `
           const now = audioCtx.currentTime;
           activeSources.forEach(entry => {
             try {
+              // Linear ramp to TRUE zero before stop() (setTargetAtTime never reaches 0 → click).
               entry.gain.gain.cancelScheduledValues(now);
-              const timeConstant = fadeSecs / 3;
-              entry.gain.gain.setTargetAtTime(0, now, timeConstant);
-              entry.source.stop(now + fadeSecs + 0.05);
+              entry.gain.gain.setValueAtTime(Math.max(0.00001, entry.gain.gain.value), now);
+              entry.gain.gain.linearRampToValueAtTime(0, now + fadeSecs);
+              entry.source.stop(now + fadeSecs + 0.03);
             } catch(e) {}
           });
           activeSources = [];
@@ -370,11 +375,18 @@ export const getAudioEngineHtml = (assets: any) => `
                     && existing.midi === ev.midi
                     && existing.scheduledStop <= thisNoteStart + crossfadeSec) {
                   try {
+                    // Smooth exponential approach, THEN a guaranteed linear ramp to TRUE zero before
+                    // stop(). setTargetAtTime alone is asymptotic (never reaches 0), so the hard stop()
+                    // chopped a small residual = a click on rapid same-note re-triggers (arp loops,
+                    // repeated notes). setTarget gives the soft decay; the final linearRamp pins it to
+                    // exact zero so stop() always cuts silence. (Using setTarget for the body avoids the
+                    // anchor-jump that an explicit setValueAtTime can cause when fadeAt is in the future.)
                     const fadeAt = Math.max(now, existing.scheduledStart);
                     const fadeSecs = 0.02;
                     existing.gain.gain.cancelScheduledValues(fadeAt);
                     existing.gain.gain.setTargetAtTime(0, fadeAt, fadeSecs / 3);
-                    existing.source.stop(fadeAt + fadeSecs + 0.01);
+                    existing.gain.gain.linearRampToValueAtTime(0, fadeAt + fadeSecs + 0.01);
+                    existing.source.stop(fadeAt + fadeSecs + 0.03);
                   } catch(e) {}
                 }
               });

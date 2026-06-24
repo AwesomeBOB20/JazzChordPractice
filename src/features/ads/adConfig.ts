@@ -14,8 +14,8 @@ const TEST = {
 // NOTE: the app-level IDs (not these unit IDs) go in app.json under react-native-google-mobile-ads
 // → androidAppId / iosAppId.
 const REAL = {
-  android: { banner: '', interstitial: '' },
-  ios:     { banner: '', interstitial: '' },
+  android: { banner: 'ca-app-pub-1991085020774137/3888601089', interstitial: 'ca-app-pub-1991085020774137/2830670286' },
+  ios:     { banner: '', interstitial: '' }, // iOS units come later (needs an Apple dev account); blank → test ad fallback
 };
 
 const PLATFORM = Platform.OS === 'ios' ? 'ios' : 'android';

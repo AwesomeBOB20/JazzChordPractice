@@ -84,7 +84,7 @@ function findClosestString(midi: number, cents: number, strings: { name: string;
 
 export default function TunerScreen() {
   const insets = useSafeAreaInsets();
-  const { playTone, stopAudio } = useAudio();
+  const { playTone, stopAudio, stopTone } = useAudio();
   const { theme, referenceFrequency, fontFamily, isPro, openPaywall, tunerTone, setTunerTone } = useSettingsStore();
   const svgFont = familyForWeight(fontFamily, '700');
   const t = THEMES[theme];
@@ -271,13 +271,14 @@ export default function TunerScreen() {
   const toggleString = useCallback((stringIdx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
-    // Sustained, flat reference held until tapped off; tap the sounding string again to stop it.
-    if (playingStringIdx === stringIdx) { stopAudio(); setPlayingStringIdx(null); return; }
-    stopAudio();
-    const s = tuningStrings[stringIdx];
-    setTimeout(() => { playTone(s.midi, 100, activeTone); }, 30);
+    // Tap the sounding string again to stop it — gentle tone fade, never a STOP_ALL hard cut.
+    if (playingStringIdx === stringIdx) { stopTone(); setPlayingStringIdx(null); return; }
+    // Switch strings: play directly. PLAY_TONE crossfades the previous tone out over its own
+    // 60ms window while the new one swells in — one clean handoff. The old stopAudio()+30ms
+    // delay fired a STOP_ALL hard-cut then re-triggered, which is what popped on every tap.
+    playTone(tuningStrings[stringIdx].midi, 100, activeTone);
     setPlayingStringIdx(stringIdx);
-  }, [tuningStrings, playTone, stopAudio, playingStringIdx, activeTone]);
+  }, [tuningStrings, playTone, stopTone, playingStringIdx, activeTone]);
 
   // Pick a timbre (from the tuning popup) and audition it: if a string is held, swap it to the new tone
   // (keeps holding); otherwise sound a short preview (on A) that auto-stops so it doesn't drone.
@@ -289,7 +290,7 @@ export default function TunerScreen() {
       playTone(tuningStrings[playingStringIdx].midi, 100, id);
     } else {
       playTone(57, 100, id); // A3 → engine sounds A4
-      previewTimerRef.current = setTimeout(() => { stopAudio(); previewTimerRef.current = null; }, 1700);
+      previewTimerRef.current = setTimeout(() => { stopAudio(); previewTimerRef.current = null; }, 850);
     }
   }, [setTunerTone, playingStringIdx, tuningStrings, playTone, stopAudio]);
 

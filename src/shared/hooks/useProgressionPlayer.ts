@@ -340,16 +340,21 @@ export function useProgressionPlayer(selectedCell: number | null, diagramVoicing
         (seqIdx, chordIdx) => {
           // This callback is fired by an audio-clock-synchronised setTimeout inside
           // SoundfontPlayer — accurate to within a few ms regardless of JS load.
-          // A wrap from the last sequence position back to 0 = one completed loop play-through.
-          if (seqIdx === 0 && lastSeqIdxRef.current === sequence.length - 1) {
-            onPlaythroughCompleteRef.current?.();
-          }
+          // NOTE: loop wraps are deliberately NOT counted as ad-eligible play-throughs.
+          // An interstitial firing at a loop boundary (a) interrupted a song mid-play and
+          // (b) desynced the highlight from the audio — the ad freezes the Web Audio clock
+          // but NOT the JS wall-clock the highlight is scheduled on, so they drift apart by
+          // the ad's duration. Ads now fire ONLY when a song actually finishes and playback
+          // has stopped (the onEnd path below), so nothing is ever interrupted mid-play.
           lastSeqIdxRef.current = seqIdx;
           setPlayingIdx(chordIdx);
           const chord = useProgressionStore.getState().progression[chordIdx];
           if (chord) useChordStore.setState({ rootSemi: chord.rootSemi, chordType: chord.chordType });
         },
-        () => { onPlaythroughCompleteRef.current?.(); stopPlayback(true); },
+        // Song finished (non-looping end). Stop playback FIRST, then allow the interstitial —
+        // so the ad only ever appears once audio + highlight have fully stopped (no interruption,
+        // no desync). A looping song never reaches here, so it never shows an ad until loop is off.
+        () => { stopPlayback(true); onPlaythroughCompleteRef.current?.(); },
         isLoopingRef.current,
       );
     }, Math.max(0, countOffDurationMs - 100)));

@@ -12,7 +12,7 @@
 // here no-ops on web (the package is also metro-stubbed for web).
 
 import { Platform } from 'react-native';
-import Purchases, { LOG_LEVEL, PurchasesPackage } from 'react-native-purchases';
+import Purchases, { LOG_LEVEL, PurchasesPackage, PACKAGE_TYPE, PRODUCT_CATEGORY } from 'react-native-purchases';
 import { useSettingsStore } from '@features/settings/store/settingsStore';
 
 export interface PurchaseResult {
@@ -40,6 +40,11 @@ export async function initPurchases(): Promise<void> {
   if (ready || IS_WEB) return;
   const apiKey = Platform.OS === 'ios' ? RC_API_KEY_IOS : RC_API_KEY_ANDROID;
   if (!apiKey) return;
+  // The RevenueCat Test Store key (test_…) ONLY functions in DEBUG builds. In a RELEASE build it pops a
+  // "wrong API key" alert and the SDK bails — which looked like the app crashing on the preview build.
+  // So in a release build, don't configure while the key is still a test key: the app runs normally with
+  // Pro simply locked. Swapping in the real goog_/appl_ key for production makes this guard a no-op.
+  if (apiKey.startsWith('test_') && !__DEV__) return;
   try {
     if (__DEV__) Purchases.setLogLevel(LOG_LEVEL.DEBUG);
     Purchases.configure({ apiKey });
@@ -55,8 +60,14 @@ export async function initPurchases(): Promise<void> {
 let cachedPkg: PurchasesPackage | null = null;
 async function currentPackage(): Promise<PurchasesPackage | null> {
   if (cachedPkg) return cachedPkg;
-  const offerings = await Purchases.getOfferings();
-  cachedPkg = offerings.current?.availablePackages[0] ?? null; // the one-time "Lifetime" unlock
+  const pkgs = (await Purchases.getOfferings()).current?.availablePackages ?? [];
+  // Kordal is a ONE-TIME unlock. Prefer the Lifetime package; fall back to any non-subscription
+  // product, then the first available — so a misordered offering (or stray Monthly/Yearly packages)
+  // can never make the paywall show a subscription price like "$99.99/yr".
+  cachedPkg =
+    pkgs.find(p => p.packageType === PACKAGE_TYPE.LIFETIME) ??
+    pkgs.find(p => p.product.productCategory === PRODUCT_CATEGORY.NON_SUBSCRIPTION) ??
+    pkgs[0] ?? null;
   return cachedPkg;
 }
 

@@ -29,6 +29,7 @@ import BpmModal from '@shared/ui/BpmModal';
 import SlidingToggle from '@shared/ui/SlidingToggle';
 import PaywallModal from '@features/pro/PaywallModal';
 import { initPurchases } from '@features/pro/purchases';
+import { initAds } from '@features/ads/initAds';
 import { TutorialModal } from '@shared/ui/TutorialModal';
 
 const TUTORIAL_KEY = '@jcp_tutorial_v1';
@@ -350,6 +351,8 @@ export default function App() {
     });
     // Configure the purchase layer once at startup (no-op until RevenueCat is wired).
     initPurchases();
+    // Gather EU ad consent (Google UMP) then initialize AdMob. No-op on web / ads-less builds.
+    initAds();
   }, []);
 
   if (!fontsLoaded) {

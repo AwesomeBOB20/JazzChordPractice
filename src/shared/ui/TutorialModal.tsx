@@ -21,7 +21,6 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'eye-outline', text: 'See exactly where to put your fingers for any chord' },
       { icon: 'volume-medium-outline', text: 'Hear how every chord and note sounds' },
-      { icon: 'musical-notes-outline', text: 'Play along with songs you build yourself' },
       { icon: 'school-outline', text: 'No music background needed — we keep it simple' },
     ],
   },
@@ -33,7 +32,6 @@ const SLIDES: Array<{
       { icon: 'guitar-acoustic', lib: 'mci', text: 'Tap the top-left switch to pick your instrument' },
       { icon: 'hand-left-outline', text: 'Diagrams show right where to press' },
       { icon: 'color-palette-outline', text: 'Colored dots tell each note apart' },
-      { icon: 'eye-outline', text: 'See the same chord on both instruments' },
     ],
   },
   {
@@ -42,7 +40,6 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'swap-horizontal-outline', text: 'Use the ‹ › arrows to pick any chord' },
       { icon: 'albums-outline', text: 'Tabs below show different ways to play it' },
-      { icon: 'volume-medium-outline', text: 'Tap a dot or key to hear that one note' },
       { icon: 'book-outline', text: 'Flip on Dictionary to browse every chord, scale & shape' },
     ],
   },
@@ -52,7 +49,6 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'add-circle-outline', text: 'Add chords one by one to build a sequence' },
       { icon: 'play-circle-outline', text: 'Press play to hear them in order' },
-      { icon: 'metronome', lib: 'mci', text: 'Slow it down or speed it up to any pace' },
       { icon: 'repeat-outline', text: 'Loop it and play along to practice' },
     ],
   },
@@ -63,7 +59,6 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'eye-outline', text: 'See a chord shape and guess its name' },
       { icon: 'ear-outline', text: 'Or just listen and name it by ear' },
-      { icon: 'trophy-outline', text: 'Build up a score and a winning streak' },
       { icon: 'options-outline', text: 'Choose which chords you want to practice' },
     ],
   },
@@ -75,7 +70,6 @@ const SLIDES: Array<{
       { icon: 'mic-outline', text: 'Play a note and your phone listens in' },
       { icon: 'analytics-outline', text: 'It tells you if you\'re too high or too low' },
       { icon: 'volume-medium-outline', text: 'Or play a clean note and tune by ear' },
-      { icon: 'checkmark-circle-outline', text: 'Works for guitar, piano, and more' },
     ],
   },
   {
@@ -84,7 +78,6 @@ const SLIDES: Array<{
     bullets: [
       { icon: 'settings-outline', text: 'Settings (top-right gear): themes, note labels, sound' },
       { icon: 'document-text-outline', text: 'Every feature is explained in full under Help & Tutorial' },
-      { icon: 'play-circle-outline', text: 'You can replay this intro any time' },
       { icon: 'happy-outline', text: 'That\'s it — have fun exploring!' },
     ],
   },
