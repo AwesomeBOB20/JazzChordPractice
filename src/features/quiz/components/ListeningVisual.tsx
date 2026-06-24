@@ -27,16 +27,20 @@ function ivName(semi: number): string {
   return semi > 12 ? `${base}+` : base;
 }
 
-// Role/formula → plain diatonic degree: R, 2, 3, 4, 5, 6, 7 (accidentals dropped,
-// extensions folded back: 9→2, 11→4, 13→6).
+// Role/formula → scale-degree label WITH its accidental rendered as a proper ♭/♯ glyph,
+// so the anatomy actually distinguishes a ♭3/♭7 (min7) from a 3/7 (maj7). Examples:
+// "b3"→"♭3", "#5"→"♯5", "b7"→"♭7", "#9"→"♯9", "b13"→"♭13", "1"/"root"→"R". Extensions are
+// kept as 9/11/13 (NOT folded to 2/4/6) so each label matches the note's true position in
+// the ascending stack (a 9/11/13 sits above the octave).
 function degreeLabel(s: string): string {
   if (!s) return '';
-  if (/root/i.test(s) || s === 'R' || s === '1') return 'R';
+  if (/root/i.test(s) || s === 'R') return 'R';
   const m = s.match(/\d+/);
   if (!m) return '';
-  let num = parseInt(m[0], 10);
-  if (num > 7) num = ((num - 1) % 7) + 1;
-  return String(num);
+  const num = parseInt(m[0], 10);
+  if (num === 1) return 'R';
+  const acc = /[#♯]/.test(s) ? '♯' : /[b♭]/.test(s) ? '♭' : '';
+  return acc + String(num);
 }
 
 const ANATOMY_HEIGHT = 210;
